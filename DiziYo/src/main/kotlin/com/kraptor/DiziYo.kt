@@ -12,7 +12,7 @@ import org.json.JSONObject
 import java.net.URI
 
 class DiziYo : MainAPI() {
-    override var mainUrl              = "https://www.diziyo.nl"
+    override var mainUrl              = "https://www.diziyo.so"
     override var name                 = "DiziYo"
     override val hasMainPage          = true
     override var lang                 = "tr"
