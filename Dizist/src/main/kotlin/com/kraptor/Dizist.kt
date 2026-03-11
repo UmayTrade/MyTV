@@ -19,7 +19,7 @@ import org.jsoup.Jsoup
 import java.net.URLDecoder
 
 class Dizist : MainAPI() {
-    override var mainUrl = "https://dizist.club"
+    override var mainUrl = "https://dizist.live"
     override var name = "Dizist"
     override val hasMainPage = true
     override var lang = "tr"
