@@ -1,401 +1,317 @@
 [
-    {
-        "iconUrl": "https://www.google.com/s2/favicons?domain=https://dizipal683.com&sz=%size%",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 24013,
-        "status": 1,
-        "language": "tr",
-        "authors": [
-            "kraptor"
-        ],
-        "tvTypes": [
-            "Live"
-        ],
-        "version": 6,
-        "internalName": "DiziPal",
-        "description": "DiziPal ile canl\u0131 seyirin doruklar\u0131.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziPal.cs3",
-        "name": "DiziPal"
-    },
-    {
-        "iconUrl": "https://www.google.com/s2/favicons?domain=www.4kfilmizlesene.org&sz=%size%",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 9787,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Live"
-        ],
-        "version": 5,
-        "internalName": "4KFilmIzleme",
-        "description": "En yeni ve sorunsuz \u26a1  Full HD Film izle keyfi her yerde sizinle ! 4K ve 1080p online film izleme fark\u0131yla 4KFilmizlesene&amp;#039;nin Tad\u0131n\u0131 \u00c7\u0131kart.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/4KFilmIzleme.cs3",
-        "name": "4KFilmIzleme"
-    },
-        {
-        "iconUrl": "https://www.google.com/s2/favicons?domain=dizimag.net&sz=%size%",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 9787,
-        "status": 1,
-        "language": "tr",
-        "authors": [
-            "Umay"
-        ],
-        "tvTypes": [
-            "Live"
-        ],
-        "version": 5,
-        "internalName": "DiziMag",
-        "description": "En son \u00e7\u0131kan yabanc\u0131 dizi ve filmleri DiziMag fark\u0131yla full hd 1080p kalitede izle. Dizimag Geni\u015f ve g\u00fcncel ar\u015fiviyle dizi ve filmlerin tad\u0131n\u0131 \u00e7\u0131kart\u0131n.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziMag.cs3",
-        "name": "DiziMag"
-    },
-        {
-        "iconUrl": "https://www.google.com/s2/favicons?domain=belgeselx.com&sz=%size%",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 9787,
-        "status": 1,
-        "language": "tr",
-        "authors": [
-            "Umay"
-        ],
-        "tvTypes": [
-            "Live"
-        ],
-        "version": 5,
-        "internalName": "BelgeselX",
-        "description": "En yeni belgeseller, t\u00fcrk\u00e7e altyaz\u0131l\u0131 yada dublaj olarak 1080p kalitesinde HD belgesel izle.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/BelgeselX.cs3",
-        "name": "BelgeselX"
-    },
-        {
-        "iconUrl": "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEh3vCp6N1K4bECoYRQD-cisJF2_6V_Hk01ZhDmoPR2JuM8O5qr4MqrPO1munM9cRlleBBSK6odYhLtDBWv4E3vhPhynlmS5hVVtJZShHoGA5REQ8_3v8SIlccTEqzVQu2UJyNYQdJNrKIfWy66RQeT0D-CcmFCbHPz5023H6p2v5fv4NVloZ5Rqo_yGrIY/s320/iNat-Box-App.png",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 9787,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "Umay"
-        ],
-        "tvTypes": [
-            "Live"
-        ],
-        "version": 5,
-        "internalName": "Rectv",
-        "description": "Rectv cloudstream eklentisidir. Sevdi\u011finiz yay\u0131n platformlar\u0131n\u0131 ve canl\u0131 ma\u00e7lar\u0131 burada bulabilirsiniz..",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/RecTV.cs3",
-        "name": "Rectv"
-    },
-    {
-        "iconUrl": "https://www.google.com/s2/favicons?domain=https://dizipal683.com&sz=%size%",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 9724,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Movie"
-        ],
-        "version": 1,
-        "internalName": "DiziPalOrijinal",
-        "description": "en yeni dizileri g\u00fcvenli ve h\u0131zl\u0131 \u015fekilde sunar.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziPalOrijinal.cs3",
-        "name": "DiziPalOrijinal"
-    },
-    {
-        "iconUrl": "https://www.tlctv.com.tr/favicon.ico",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 9787,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Live"
-        ],
-        "version": 5,
-        "internalName": "TLC",
-        "description": "TLC TV dizi ve programlar\u0131n\u0131 takip etmek i\u00e7in ziyaret edin. TLC TV dizi ve programlar\u0131n\u0131 tek par\u00e7a ve hd kalitesiyle izleyin.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/TLC.cs3",
-        "name": "TLC"
-    },
-    {
-        "iconUrl": "https://www.dmax.com.tr/favicon.ico",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 9724,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Movie"
-        ],
-        "version": 1,
-        "internalName": "DMax",
-        "description": "DMAX dizi ve programlar\u0131n\u0131 takip etmek i\u00e7in ziyaret edin. DMAX dizi ve programlar\u0131n\u0131 tek par\u00e7a ve hd kalitesiyle izleyin.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DMax.cs3",
-        "name": "DMax"
-    },
-        {
-        "iconUrl": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://animecix.net&size=16",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 9787,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Live"
-        ],
-        "version": 5,
-        "internalName": "AnimeciX",
-        "description": "AnimeciX, animeleri keşfedebileceğiniz ve animeler hakkında her şeyi öğrenebileceğiniz bir paylaşım platformudur..",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/AnimeciX.cs3",
-        "name": "AnimeciX"
-    },
-    {
-        "iconUrl": "https://www.google.com/s2/favicons?sz=64&domain=cizgimax.online",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 9724,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Movie"
-        ],
-        "version": 1,
-        "internalName": "CizgiMax",
-        "description": "ÇizgiMax ile Çizgi Film izlemek artık daha kolay, donmadan full hd ve reklamsız bir sitedir, içerisinde 700 den fazla çizgi film olan, Bu site bu işi profesyonelce yapıyor..",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/CizgiMax.cs3",
-        "name": "CizgiMax"
-    },
-    {
-        "iconUrl": "https://www.ddizi.im/images/logo.png",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 9787,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Live"
-        ],
-        "version": 5,
-        "internalName": "DDizi",
-        "description": "Ddizi, dizi izle, dizi seyret, yerli dizi izle, canlı dizi, türk dizi izle, dizi izle full, diziizle, eski diziler.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DDizi.cs3",
-        "name": "DDizi"
-    },
-    {
-        "iconUrl": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://www.dizibox.de&size=16",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 9724,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Movie"
-        ],
-        "version": 1,
-        "internalName": "DiziBox",
-        "description": "Yabancı Dizi izle, Tüm yabancı dizilerin yeni ve eski sezonlarını full hd izleyebileceğiniz elit site.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziBox.cs3",
-        "name": "DiziBox"
-    },
-    {
-        "iconUrl": "https://www.google.com/s2/favicons?domain=www.dizimom.tv&sz=%size%",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 10566,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Movie"
-        ],
-        "version": 1,
-        "internalName": "DiziMom",
-        "description": "Binlerce yerli yabanc\u0131 dizi ar\u015fivi, t\u00fcm sezonlar, kesintisiz b\u00f6l\u00fcmler. Sadece dizi izle, Dizimom heryerde seninle!.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziMom.cs3",
-        "name": "DiziMom"
-    },
-        {
-        "iconUrl": "https://www.google.com/s2/favicons?domain=https://www.sinewix.com/&sz=%size%",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 10566,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Movie"
-        ],
-        "version": 1,
-        "internalName": "SineWix",
-        "description": "SineWix | Film - Dizi - Anime \u0130zleme Uygulamas\u0131.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/SineWix.cs3",
-        "name": "SineWix"
-    },
-            {
-        "iconUrl": "https://www.google.com/s2/favicons?domain=www.fullreplays.com&sz=%size%",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 10566,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Movie"
-        ],
-        "version": 1,
-        "internalName": "SezonlukDizi",
-        "description": "Watch latest football full match replay of Premier League, Champions League, LaLiga, Serie A, Bundesliga, Ligue 1, Europa League, and more...",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/SezonlukDizi.cs3",
-        "name": "SezonlukDizi"
-    },
-    {
-        "iconUrl": "https://www.google.com/s2/favicons?domain=selcukflix.com&sz=%size%",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 10566,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Movie"
-        ],
-        "version": 1,
-        "internalName": "SelcukFlix",
-        "description": "Selcukflix'te her t\u00fcrden en yeni ve en pop\u00fcler dizi ve filmleri izlemenin keyfini \u00e7\u0131kar\u0131n. Aksiyondan romanti\u011fe, bilim kurgudan dramaya, geni\u015f k\u00fct\u00fcphanemizde herkes i\u00e7in bir \u015fey var.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/SelcukFlix.cs3",
-        "name": "SelcukFlix"
-    },
-     {
-        "iconUrl": "https://www.google.com/s2/favicons?sz=64&domain=dizigom1.co",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 10566,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Movie"
-        ],
-        "version": 1,
-        "internalName": "DiziGom",
-        "description": "Türkçe altyazılı yabancı dizi izle, Tüm yabancı, kore, netflix dizilerin yeni ve eski sezonlarını orijinal dilinde dizigom1 alt yazılı film izleyebilir, sadece türkçe altyazılı en iyi yabancı diziler ve filmler hakkında yorum yapabilirsiniz..",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziGom.cs3",
-        "name": "DiziGom"
-    },
-            {
-        "iconUrl": "https://i.imgur.com/zQYsL6Z.png",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 10566,
-        "status": 1,
-        "language": "en",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Movie"
-        ],
-        "version": 1,
-        "internalName": "DiziYo",
-        "description": "Diziyo ile Yabancı Dizi, Film, Anime, Çizgi-Film izle..",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziYo.cs3",
-        "name": "DiziYo"
-    },
-    {
-        "iconUrl": "https://www.google.com/s2/favicons?sz=64&domain=www.diziyou.co",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 10566,
-        "status": 1,
-        "language": "tr",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Movie"
-        ],
-        "version": 1,
-        "internalName": "DiziYou",
-        "description": "Diziyou en kaliteli Türkçe dublaj ve altyazılı yabancı dizi izleme sitesidir. Güncel ve efsanevi dizileri 1080p Full HD kalitede izlemek için hemen tıkla!.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziYou.cs3",
-        "name": "DiziYou"
-    },
-      {
-        "iconUrl": "https://www.google.com/s2/favicons?sz=64&domain=www.diziyou.co",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 10566,
-        "status": 1,
-        "language": "tr",
-        "authors": [
-            "kerimmkirac"
-        ],
-        "tvTypes": [
-            "Movie"
-        ],
-        "version": 1,
-        "internalName": "Dizist",
-        "description": "Dizist en kaliteli Türkçe dublaj ve altyazılı yabancı dizi izleme sitesidir. Güncel ve efsanevi dizileri 1080p Full HD kalitede izlemek için hemen tıkla!.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/Dizist.cs3",
-        "name": "Dizist"
-    },
-    {
-        "iconUrl": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://streamed.pk/&size=128",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
-        "fileSize": 31481,
-        "status": 1,
-        "language": "un",
-        "authors": [
-            "kraptor"
-        ],
-        "tvTypes": [
-            "Live"
-        ],
-        "version": 6,
-        "internalName": "Streamed",
-        "description": "Streamed ile Canl\u0131 Spor Yay\u0131nlar\u0131n\u0131 \u0130zleyebilirsiniz.",
-        "url": "https://raw.githubusercontent.com/Kraptor123/Cs-Karma/builds/Streamed.cs3",
-        "name": "Streamed"
-    }
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=dizipal683.com&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 24013,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kraptor"],
+    "tvTypes": ["Live"],
+    "version": 6,
+    "internalName": "DiziPal",
+    "description": "DiziPal ile canlı seyirin dorukları.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziPal.cs3",
+    "name": "DiziPal"
+  },
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=www.4kfilmizlesene.org&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 9787,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Movie"],
+    "version": 5,
+    "internalName": "4KFilmIzleme",
+    "description": "En yeni ve sorunsuz Full HD film izle keyfi. 4K ve 1080p online film izleme deneyiminin tadını çıkarın.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/4KFilmIzleme.cs3",
+    "name": "4KFilmIzleme"
+  },
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=dizimag.net&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 9787,
+    "status": 1,
+    "language": "tr",
+    "authors": ["Umay"],
+    "tvTypes": ["Movie"],
+    "version": 5,
+    "internalName": "DiziMag",
+    "description": "En son çıkan yabancı dizi ve filmleri DiziMag farkıyla Full HD 1080p kalitede izleyin.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziMag.cs3",
+    "name": "DiziMag"
+  },
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=belgeselx.com&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 9787,
+    "status": 1,
+    "language": "tr",
+    "authors": ["Umay"],
+    "tvTypes": ["Movie"],
+    "version": 5,
+    "internalName": "BelgeselX",
+    "description": "En yeni belgeselleri Türkçe altyazılı veya dublajlı olarak HD kalitesinde izleyin.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/BelgeselX.cs3",
+    "name": "BelgeselX"
+  },
+  {
+    "iconUrl": "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEh3vCp6N1K4bECoYRQD-cisJF2_6V_Hk01ZhDmoPR2JuM8O5qr4MqrPO1munM9cRlleBBSK6odYhLtDBWv4E3vhPhynlmS5hVVtJZShHoGA5REQ8_3v8SIlccTEqzVQu2UJyNYQdJNrKIfWy66RQeT0D-CcmFCbHPz5023H6p2v5fv4NVloZ5Rqo_yGrIY/s320/iNat-Box-App.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 9787,
+    "status": 1,
+    "language": "tr",
+    "authors": ["Umay"],
+    "tvTypes": ["Live"],
+    "version": 5,
+    "internalName": "Rectv",
+    "description": "RecTV Cloudstream eklentisidir. Sevdiğiniz yayın platformlarını ve canlı maçları burada bulabilirsiniz.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/RecTV.cs3",
+    "name": "RecTV"
+  },
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=dizipal683.com&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 9724,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Movie"],
+    "version": 1,
+    "internalName": "DiziPalOrijinal",
+    "description": "En yeni dizileri güvenli ve hızlı şekilde sunar.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziPalOrijinal.cs3",
+    "name": "DiziPalOrijinal"
+  },
+  {
+    "iconUrl": "https://www.tlctv.com.tr/favicon.ico",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 9787,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Live"],
+    "version": 5,
+    "internalName": "TLC",
+    "description": "TLC TV dizi ve programlarını takip edin. TLC TV içeriklerini HD kalitesinde izleyin.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/TLC.cs3",
+    "name": "TLC"
+  },
+  {
+    "iconUrl": "https://www.dmax.com.tr/favicon.ico",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 9724,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Live"],
+    "version": 1,
+    "internalName": "DMax",
+    "description": "DMAX dizi ve programlarını takip edin. DMAX içeriklerini HD kalitesinde izleyin.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DMax.cs3",
+    "name": "DMax"
+  },
+  {
+    "iconUrl": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://animecix.net&size=16",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 9787,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Movie"],
+    "version": 5,
+    "internalName": "AnimeciX",
+    "description": "AnimeciX ile animeleri keşfedin ve anime dünyası hakkında bilgi edinin.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/AnimeciX.cs3",
+    "name": "AnimeciX"
+  },
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=cizgimax.online&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 9724,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Movie"],
+    "version": 1,
+    "internalName": "CizgiMax",
+    "description": "ÇizgiMax ile çizgi filmleri HD kalitesinde izleyin.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/CizgiMax.cs3",
+    "name": "CizgiMax"
+  },
+  {
+    "iconUrl": "https://www.ddizi.im/images/logo.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 9787,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Movie"],
+    "version": 5,
+    "internalName": "DDizi",
+    "description": "Yerli ve yabancı dizileri, eski dizileri ve güncel içerikleri keşfedin.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DDizi.cs3",
+    "name": "DDizi"
+  },
+  {
+    "iconUrl": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://www.dizibox.de&size=16",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 9724,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Movie"],
+    "version": 1,
+    "internalName": "DiziBox",
+    "description": "Yabancı dizilerin yeni ve eski sezonlarını Full HD kalitesinde izleyin.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziBox.cs3",
+    "name": "DiziBox"
+  },
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=www.dizimom.tv&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 10566,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Movie"],
+    "version": 1,
+    "internalName": "DiziMom",
+    "description": "Yerli ve yabancı diziler, tüm sezonlar ve kesintisiz bölümler.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziMom.cs3",
+    "name": "DiziMom"
+  },
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=www.sinewix.com&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 10566,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Movie"],
+    "version": 1,
+    "internalName": "SineWix",
+    "description": "Film, dizi ve anime içeriklerini keşfedin.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/SineWix.cs3",
+    "name": "SineWix"
+  },
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=www.fullreplays.com&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 10566,
+    "status": 1,
+    "language": "en",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Movie"],
+    "version": 1,
+    "internalName": "SezonlukDizi",
+    "description": "Watch football full match replays from major leagues and competitions.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/SezonlukDizi.cs3",
+    "name": "SezonlukDizi"
+  },
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=selcukflix.com&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 10566,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Movie"],
+    "version": 1,
+    "internalName": "SelcukFlix",
+    "description": "Aksiyon, romantik, bilim kurgu ve dram dahil farklı türlerde dizi ve filmleri keşfedin.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/SelcukFlix.cs3",
+    "name": "SelcukFlix"
+  },
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=dizigom1.co&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 10566,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Movie"],
+    "version": 1,
+    "internalName": "DiziGom",
+    "description": "Yabancı, Kore ve popüler dizileri Türkçe altyazılı olarak keşfedin.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziGom.cs3",
+    "name": "DiziGom"
+  },
+  {
+    "iconUrl": "https://i.imgur.com/zQYsL6Z.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 10566,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Movie"],
+    "version": 1,
+    "internalName": "DiziYo",
+    "description": "Yabancı dizi, film, anime ve çizgi film içeriklerini keşfedin.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziYo.cs3",
+    "name": "DiziYo"
+  },
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=www.diziyou.co&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 10566,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Movie"],
+    "version": 1,
+    "internalName": "DiziYou",
+    "description": "Türkçe dublaj ve altyazılı yabancı dizi ve filmleri Full HD kalitesinde izleyin.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/DiziYou.cs3",
+    "name": "DiziYou"
+  },
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=www.diziyou.co&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 10566,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kerimmkirac"],
+    "tvTypes": ["Movie"],
+    "version": 1,
+    "internalName": "Dizist",
+    "description": "Türkçe dublaj ve altyazılı yabancı dizi ve filmleri Full HD kalitesinde izleyin.",
+    "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/Dizist.cs3",
+    "name": "Dizist"
+  },
+  {
+    "iconUrl": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://streamed.pk/&size=128",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+    "fileSize": 31481,
+    "status": 1,
+    "language": "tr",
+    "authors": ["kraptor"],
+    "tvTypes": ["Live"],
+    "version": 6,
+    "internalName": "Streamed",
+    "description": "Canlı spor yayınlarını keşfedin.",
+    "url": "https://raw.githubusercontent.com/Kraptor123/Cs-Karma/builds/Streamed.cs3",
+    "name": "Streamed"
+  }
 ]
