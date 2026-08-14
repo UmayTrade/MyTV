@@ -4,6 +4,6 @@
   "description": "Az birazdan sonra burada.",
   "manifestVersion": 1,
   "pluginLists": [
-    "https://raw.githubusercontent.com/UmayTrade/MyTV/refs/heads/master/plugins.json"
+    "https://raw.githubusercontent.com/UmayTrade/Mytv/refs/heads/main/plugins.json"
   ]
 }
