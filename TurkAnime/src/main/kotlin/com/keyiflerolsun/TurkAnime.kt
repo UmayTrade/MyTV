@@ -7,7 +7,7 @@ import org.jsoup.nodes.Element
 import org.jsoup.nodes.Document
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import kotlinx.coroutines.delay
+import org.json.JSONObject
 
 class TurkAnime : MainAPI() {
     override var mainUrl              = "https://www.turkanime.tv"
@@ -16,10 +16,6 @@ class TurkAnime : MainAPI() {
     override var lang                 = "tr"
     override val hasQuickSearch       = true
     override val supportedTypes       = setOf(TvType.Anime)
-
-    // API Endpoint'leri
-    private val API_BASE = "${mainUrl}/api"
-    private val VIDEO_API = "${mainUrl}/sources"
 
     override val mainPage = mainPageOf(
         "${mainUrl}/anime-turu/1/Aksiyon" to "Aksiyon",
@@ -144,7 +140,7 @@ class TurkAnime : MainAPI() {
     private suspend fun getEpisodes(document: Document): List<Episode> {
         val episodes = mutableListOf<Episode>()
         
-        // 1. Yöntem: AJAX endpoint'inden bölümleri al
+        // 1. AJAX endpoint'inden bölümleri al
         val bolumlerUrl = document.selectFirst("a[data-url*='bolumler'], div#bolumler a[data-url]")?.attr("data-url")
         
         if (bolumlerUrl != null) {
@@ -166,10 +162,8 @@ class TurkAnime : MainAPI() {
                 )
                 
                 val responseDoc = response.document
-                Log.d("TurkAnime", "Episode response length: ${responseDoc.html().length}")
                 
                 val episodeElements = responseDoc.select("li a[href*='/video/'], div.bolum-item a[href*='/video/'], tr a[href*='/video/']")
-                Log.d("TurkAnime", "Found ${episodeElements.size} episode elements")
                 
                 for (element in episodeElements) {
                     val href = fixUrlNull(element.attr("href")) ?: continue
@@ -196,10 +190,8 @@ class TurkAnime : MainAPI() {
             }
         }
 
-        // 2. Yöntem: Sayfadaki bölüm linklerini al
+        // 2. Sayfadaki bölüm linklerini al
         val episodeLinks = document.select("a[href*='/video/']")
-        Log.d("TurkAnime", "Found ${episodeLinks.size} episode links in page")
-        
         for (link in episodeLinks) {
             val href = fixUrlNull(link.attr("href")) ?: continue
             val name = link.text().trim().ifEmpty { "Bölüm" }
@@ -223,80 +215,77 @@ class TurkAnime : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit, 
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("TurkAnime", "=== Loading links for: $data ===")
+        Log.d("TurkAnime", "=== loadLinks: $data ===")
         
         try {
-            val document = app.get(data).document
-            val pageHtml = document.html()
-            Log.d("TurkAnime", "Page length: ${pageHtml.length}")
+            // Sayfayı yükle
+            val document = app.get(data, cookies = mapOf("yasOnay" to "1")).document
             
-            // 1. Video elementini kontrol et
-            val videoElement = document.selectFirst("video")
-            if (videoElement != null) {
-                Log.d("TurkAnime", "Video element found")
-                
-                // video source'lar
-                val sources = videoElement.select("source")
-                for (source in sources) {
-                    val src = source.attr("src")
-                    if (src.isNotEmpty()) {
-                        Log.d("TurkAnime", "Video source: $src")
-                        if (src.contains(".m3u8") || src.contains("m3u8")) {
-                            createExtractorLink(src, data, "Video", callback)
-                            return true
-                        }
-                    }
-                }
-                
-                // video'nun kendi src'si
-                val src = videoElement.attr("src")
-                if (src.isNotEmpty()) {
-                    Log.d("TurkAnime", "Video src: $src")
-                    if (src.contains(".m3u8") || src.contains("m3u8")) {
-                        createExtractorLink(src, data, "Video", callback)
-                        return true
-                    }
-                }
-            }
-
-            // 2. ArtPlayer kontrolü (en yaygın kullanılan)
+            // 1. ArtPlayer kontrolü (site artplayer kullanıyor)
             val artPlayer = document.selectFirst("div.artplayer-app")
             if (artPlayer != null) {
                 Log.d("TurkAnime", "ArtPlayer found")
                 
-                // data-url
+                // data-url'den link al
                 val dataUrl = artPlayer.attr("data-url")
                 if (dataUrl.isNotEmpty()) {
                     Log.d("TurkAnime", "ArtPlayer data-url: $dataUrl")
-                    if (dataUrl.contains(".m3u8") || dataUrl.contains("m3u8")) {
+                    if (dataUrl.contains("m3u8") || dataUrl.contains(".mp4")) {
                         createExtractorLink(dataUrl, data, "ArtPlayer", callback)
                         return true
                     }
                 }
                 
-                // data-video
+                // data-video'dan link al
                 val dataVideo = artPlayer.attr("data-video")
                 if (dataVideo.isNotEmpty()) {
                     Log.d("TurkAnime", "ArtPlayer data-video: $dataVideo")
-                    if (dataVideo.contains(".m3u8") || dataVideo.contains("m3u8")) {
+                    if (dataVideo.contains("m3u8") || dataVideo.contains(".mp4")) {
                         createExtractorLink(dataVideo, data, "ArtPlayer", callback)
                         return true
                     }
                 }
-            }
-
-            // 3. Diğer player'lar
-            val players = document.select("div#player, div.video-player, div.player-container, div#video-player")
-            for (player in players) {
-                val dataUrl = player.attr("data-url")
-                if (dataUrl.isNotEmpty() && (dataUrl.contains(".m3u8") || dataUrl.contains("m3u8"))) {
-                    Log.d("TurkAnime", "Player data-url: $dataUrl")
-                    createExtractorLink(dataUrl, data, "Player", callback)
-                    return true
+                
+                // id'den link bul
+                val playerId = artPlayer.id()
+                if (playerId.isNotEmpty()) {
+                    Log.d("TurkAnime", "ArtPlayer id: $playerId")
+                    // ArtPlayer'ın video linkini script'ten bul
+                    val scripts = document.select("script")
+                    for (script in scripts) {
+                        val scriptData = script.data()
+                        if (scriptData.contains(playerId) && (scriptData.contains("m3u8") || scriptData.contains(".mp4"))) {
+                            val urlMatch = Regex("""(https?://[^\s'\"]+\.m3u8[^\s'\"]*)""").find(scriptData)
+                            if (urlMatch != null) {
+                                val foundUrl = urlMatch.groupValues[1]
+                                Log.d("TurkAnime", "Found URL in script: $foundUrl")
+                                createExtractorLink(foundUrl, data, "Script", callback)
+                                return true
+                            }
+                        }
+                    }
                 }
             }
 
-            // 4. iframe'leri kontrol et
+            // 2. Video elementini kontrol et
+            val videoElement = document.selectFirst("video")
+            if (videoElement != null) {
+                Log.d("TurkAnime", "Video element found")
+                
+                val sources = videoElement.select("source")
+                for (source in sources) {
+                    val src = source.attr("src")
+                    if (src.isNotEmpty()) {
+                        Log.d("TurkAnime", "Video source: $src")
+                        if (src.contains("m3u8") || src.contains(".mp4")) {
+                            createExtractorLink(src, data, "Video", callback)
+                            return true
+                        }
+                    }
+                }
+            }
+
+            // 3. iframe'leri kontrol et
             val iframes = document.select("iframe")
             Log.d("TurkAnime", "Found ${iframes.size} iframes")
             
@@ -306,42 +295,39 @@ class TurkAnime : MainAPI() {
                     Log.d("TurkAnime", "Processing iframe: $src")
                     
                     try {
-                        // iframe içeriğini yükle
                         val iframeDoc = app.get(src, cookies = mapOf("yasOnay" to "1")).document
-                        val iframeHtml = iframeDoc.html()
-                        Log.d("TurkAnime", "Iframe page length: ${iframeHtml.length}")
-                        
-                        // iframe içinde video source
-                        val iframeVideo = iframeDoc.selectFirst("video source")
-                        if (iframeVideo != null) {
-                            val videoUrl = iframeVideo.attr("src")
-                            if (videoUrl.isNotEmpty() && (videoUrl.contains(".m3u8") || videoUrl.contains("m3u8"))) {
-                                Log.d("TurkAnime", "Iframe video source: $videoUrl")
-                                createExtractorLink(videoUrl, src, "iframe", callback)
-                                return true
-                            }
-                        }
                         
                         // iframe içinde ArtPlayer
                         val iframeArtPlayer = iframeDoc.selectFirst("div.artplayer-app")
                         if (iframeArtPlayer != null) {
                             val dataUrl = iframeArtPlayer.attr("data-url")
-                            if (dataUrl.isNotEmpty() && (dataUrl.contains(".m3u8") || dataUrl.contains("m3u8"))) {
+                            if (dataUrl.isNotEmpty() && (dataUrl.contains("m3u8") || dataUrl.contains(".mp4"))) {
                                 Log.d("TurkAnime", "Iframe ArtPlayer: $dataUrl")
                                 createExtractorLink(dataUrl, src, "iframe", callback)
                                 return true
                             }
                         }
                         
-                        // iframe içindeki script'lerden video URL'ini bul
-                        val scripts = iframeDoc.select("script")
-                        for (script in scripts) {
+                        // iframe içinde video
+                        val iframeVideo = iframeDoc.selectFirst("video source")
+                        if (iframeVideo != null) {
+                            val videoUrl = iframeVideo.attr("src")
+                            if (videoUrl.isNotEmpty() && (videoUrl.contains("m3u8") || videoUrl.contains(".mp4"))) {
+                                Log.d("TurkAnime", "Iframe video: $videoUrl")
+                                createExtractorLink(videoUrl, src, "iframe", callback)
+                                return true
+                            }
+                        }
+                        
+                        // iframe içindeki script'ler
+                        val iframeScripts = iframeDoc.select("script")
+                        for (script in iframeScripts) {
                             val scriptData = script.data()
                             if (scriptData.contains("m3u8") || scriptData.contains(".mp4")) {
                                 val urlMatch = Regex("""(https?://[^\s'\"]+\.m3u8[^\s'\"]*)""").find(scriptData)
                                 if (urlMatch != null) {
                                     val foundUrl = urlMatch.groupValues[1]
-                                    Log.d("TurkAnime", "Found URL in script: $foundUrl")
+                                    Log.d("TurkAnime", "Found URL in iframe script: $foundUrl")
                                     createExtractorLink(foundUrl, src, "Script", callback)
                                     return true
                                 }
@@ -353,24 +339,9 @@ class TurkAnime : MainAPI() {
                 }
             }
 
-            // 5. Script'lerden M3U8 linklerini ara
-            val scripts = document.select("script")
-            for (script in scripts) {
-                val scriptData = script.data()
-                if (scriptData.contains("m3u8") || scriptData.contains(".mp4")) {
-                    val urlMatch = Regex("""(https?://[^\s'\"]+\.m3u8[^\s'\"]*)""").find(scriptData)
-                    if (urlMatch != null) {
-                        val foundUrl = urlMatch.groupValues[1]
-                        Log.d("TurkAnime", "Found URL in page script: $foundUrl")
-                        createExtractorLink(foundUrl, data, "Script", callback)
-                        return true
-                    }
-                }
-            }
-
-            // 6. AJAX butonlarından dene
-            val buttons = document.select("button[onclick*='IndexIcerik'], button[data-url], button[onclick*='video'], button.video-source")
-            Log.d("TurkAnime", "Found ${buttons.size} video buttons")
+            // 4. Butonlardan dene (AJAX ile video getiren butonlar)
+            val buttons = document.select("button[onclick*='IndexIcerik'], button[data-url], button[onclick*='video']")
+            Log.d("TurkAnime", "Found ${buttons.size} buttons")
             
             for (button in buttons) {
                 val onclick = button.attr("onclick")
@@ -397,36 +368,74 @@ class TurkAnime : MainAPI() {
                         val responseText = response.text
                         Log.d("TurkAnime", "Response length: ${responseText.length}")
                         
-                        // JSON'dan URL bul
-                        val jsonUrlMatch = Regex("""(https?://[^\s'\"]+\.m3u8[^\s'\"]*)""").find(responseText)
-                        if (jsonUrlMatch != null) {
-                            val foundUrl = jsonUrlMatch.groupValues[1]
-                            Log.d("TurkAnime", "Found URL in response: $foundUrl")
-                            createExtractorLink(foundUrl, fullLink, button.text().trim(), callback)
-                            return true
-                        }
-                        
-                        // HTML response
-                        val responseDoc = response.document
-                        
-                        val respVideo = responseDoc.selectFirst("video source")
-                        if (respVideo != null) {
-                            val videoUrl = respVideo.attr("src")
-                            if (videoUrl.isNotEmpty() && (videoUrl.contains(".m3u8") || videoUrl.contains("m3u8"))) {
-                                Log.d("TurkAnime", "Button response video: $videoUrl")
-                                createExtractorLink(videoUrl, fullLink, button.text().trim(), callback)
-                                return true
+                        // JSON yanıtı kontrol et
+                        try {
+                            val json = JSONObject(responseText)
+                            if (json.has("video")) {
+                                val videoUrl = json.getString("video")
+                                if (videoUrl.isNotEmpty() && (videoUrl.contains("m3u8") || videoUrl.contains(".mp4"))) {
+                                    Log.d("TurkAnime", "JSON video: $videoUrl")
+                                    createExtractorLink(videoUrl, fullLink, button.text().trim(), callback)
+                                    return true
+                                }
                             }
-                        }
-                        
-                        val respDataUrl = responseDoc.selectFirst("div.artplayer-app, div#player")?.attr("data-url")
-                        if (respDataUrl != null && respDataUrl.isNotEmpty() && (respDataUrl.contains(".m3u8") || respDataUrl.contains("m3u8"))) {
-                            Log.d("TurkAnime", "Button response data-url: $respDataUrl")
-                            createExtractorLink(respDataUrl, fullLink, button.text().trim(), callback)
-                            return true
+                            if (json.has("url")) {
+                                val videoUrl = json.getString("url")
+                                if (videoUrl.isNotEmpty() && (videoUrl.contains("m3u8") || videoUrl.contains(".mp4"))) {
+                                    Log.d("TurkAnime", "JSON url: $videoUrl")
+                                    createExtractorLink(videoUrl, fullLink, button.text().trim(), callback)
+                                    return true
+                                }
+                            }
+                            if (json.has("source")) {
+                                val videoUrl = json.getString("source")
+                                if (videoUrl.isNotEmpty() && (videoUrl.contains("m3u8") || videoUrl.contains(".mp4"))) {
+                                    Log.d("TurkAnime", "JSON source: $videoUrl")
+                                    createExtractorLink(videoUrl, fullLink, button.text().trim(), callback)
+                                    return true
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // JSON değil, HTML
+                            val responseDoc = response.document
+                            
+                            val respVideo = responseDoc.selectFirst("video source")
+                            if (respVideo != null) {
+                                val videoUrl = respVideo.attr("src")
+                                if (videoUrl.isNotEmpty() && (videoUrl.contains("m3u8") || videoUrl.contains(".mp4"))) {
+                                    Log.d("TurkAnime", "Button response video: $videoUrl")
+                                    createExtractorLink(videoUrl, fullLink, button.text().trim(), callback)
+                                    return true
+                                }
+                            }
+                            
+                            val respArtPlayer = responseDoc.selectFirst("div.artplayer-app")
+                            if (respArtPlayer != null) {
+                                val dataUrl = respArtPlayer.attr("data-url")
+                                if (dataUrl.isNotEmpty() && (dataUrl.contains("m3u8") || dataUrl.contains(".mp4"))) {
+                                    Log.d("TurkAnime", "Button response ArtPlayer: $dataUrl")
+                                    createExtractorLink(dataUrl, fullLink, button.text().trim(), callback)
+                                    return true
+                                }
+                            }
                         }
                     } catch (e: Exception) {
                         Log.e("TurkAnime", "Button request error: ${e.message}")
+                    }
+                }
+            }
+
+            // 5. Script'lerden M3U8 linklerini ara
+            val scripts = document.select("script")
+            for (script in scripts) {
+                val scriptData = script.data()
+                if (scriptData.contains("m3u8") || scriptData.contains(".mp4")) {
+                    val urlMatch = Regex("""(https?://[^\s'\"]+\.m3u8[^\s'\"]*)""").find(scriptData)
+                    if (urlMatch != null) {
+                        val foundUrl = urlMatch.groupValues[1]
+                        Log.d("TurkAnime", "Found URL in script: $foundUrl")
+                        createExtractorLink(foundUrl, data, "Script", callback)
+                        return true
                     }
                 }
             }
@@ -448,11 +457,10 @@ class TurkAnime : MainAPI() {
         name: String, 
         callback: (ExtractorLink) -> Unit
     ) {
-        Log.d("TurkAnime", "Creating extractor link: $url")
-        
-        // URL'i temizle
         var cleanUrl = url.trim()
         cleanUrl = cleanUrl.replace(Regex("""[\n\r\t]"""), "")
+        
+        Log.d("TurkAnime", "Creating link: $cleanUrl")
         
         val link = newExtractorLink(
             source = this.name,
