@@ -65,7 +65,6 @@ class TurkAnime : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
-        // Alternatif seçici - hem panel hem card yapısını dene
         val home = document.select("div#orta-icerik div.panel, div#orta-icerik div.card").mapNotNull { 
             it.toMainPageResult() 
         }
@@ -74,7 +73,6 @@ class TurkAnime : MainAPI() {
     }
 
     private fun Element.toMainPageResult(): SearchResponse? {
-        // Farklı seçici alternatifleri dene
         var titleEl = this.selectFirst("div.panel-title a, div.card-title a, h3 a, h4 a")
         if (titleEl == null) {
             titleEl = this.selectFirst("a[title]")
@@ -83,7 +81,6 @@ class TurkAnime : MainAPI() {
         val title = titleEl?.text()?.trim() ?: return null
         val href = fixUrlNull(titleEl?.attr("href")) ?: return null
         
-        // Poster için farklı seçenekler
         var posterUrl = this.selectFirst("img")?.attr("data-src")
         if (posterUrl.isNullOrEmpty()) {
             posterUrl = this.selectFirst("img")?.attr("src")
@@ -110,7 +107,6 @@ class TurkAnime : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
-        // Başlık için farklı seçenekler
         var title = document.selectFirst("div#detayPaylas div.panel-title, h1.title, div.title h1")?.text()?.trim()
         if (title.isNullOrEmpty()) {
             title = document.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
@@ -128,7 +124,6 @@ class TurkAnime : MainAPI() {
         val year = document.selectFirst("div#detayPaylas a[href*='yil/']")?.attr("href")?.substringAfter("yil/")?.toIntOrNull()
         val tags = document.select("div#detayPaylas a[href*='anime-turu'], div.tags a, div.genre a").map { it.text() }
 
-        // Bölümleri al
         val bolumlerUrl = fixUrlNull(
             document.selectFirst("a[data-url*='ajax/bolumler'], div#bolumler a[data-url]")?.attr("data-url")
                 ?: document.selectFirst("a[onclick*='bolumler']")?.attr("onclick")?.substringAfter("'")?.substringBefore("'")
@@ -161,9 +156,8 @@ class TurkAnime : MainAPI() {
                     this.season = 1
                     this.episode = epEpisode
                 }
-            }?.sortedBy { it.episode }
+            }?.sortedBy { it.episode } ?: emptyList()  // NULL kontrolü eklendi
         } else {
-            // Alternatif: sayfadaki tüm video linklerini topla
             document.select("a[href*='/video/']").mapNotNull { 
                 val href = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
                 val epName = it.text().trim().ifEmpty { "Bölüm" }
@@ -188,16 +182,18 @@ class TurkAnime : MainAPI() {
     }
 
     private suspend fun getAesKey(): String {
-        // Ana sayfadan güncel AES anahtarını al
-        val mainDoc = app.get(mainUrl).document
-        val scriptContent = mainDoc.select("script:containsData(aesKey)").firstOrNull()?.data()
-        if (scriptContent != null) {
-            val keyMatch = Regex("""aesKey\s*=\s*['"]([^'"]+)['"]""").find(scriptContent)
-            if (keyMatch != null) {
-                return keyMatch.groupValues[1]
+        try {
+            val mainDoc = app.get(mainUrl).document
+            val scriptContent = mainDoc.select("script:containsData(aesKey)").firstOrNull()?.data()
+            if (scriptContent != null) {
+                val keyMatch = Regex("""aesKey\s*=\s*['"]([^'"]+)['"]""").find(scriptContent)
+                if (keyMatch != null) {
+                    return keyMatch.groupValues[1]
+                }
             }
+        } catch (e: Exception) {
+            Log.e("TurkAnime", "AES key fetch error: ${e.message}")
         }
-        // Fallback - mevcut anahtar
         return "710^8A@3@>T2}#zN5xK?kR7KNKb@-A!LzYL5~M1qU0UfdWsZoBm4UUat%}ueUv6E--*hDPPbH7K2bp9^3o41hw,khL:}Kx8080@M"
     }
 
@@ -209,7 +205,6 @@ class TurkAnime : MainAPI() {
             }
             if (aesData.isEmpty()) return null
             
-            // URL decode işlemi
             aesData = java.net.URLDecoder.decode(aesData, "UTF-8")
             aesData = String(Base64.decode(aesData, Base64.DEFAULT))
 
@@ -233,28 +228,26 @@ class TurkAnime : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ) {
         try {
-            // Ana video linkini dene
             val mainVideo = iframe2AesLink(iframe)
             if (mainVideo != null) {
                 Log.d("TurkAnime", "Main video: $mainVideo")
                 
-                // Doğrudan M3U8 ise
                 if (mainVideo.endsWith(".m3u8")) {
                     callback(
-                        ExtractorLink(
-                            source = this.name,
+                        newExtractorLink(
                             name = "$name - Video",
+                            source = this.name,
                             url = mainVideo,
-                            referer = mainUrl,
-                            quality = Qualities.Unknown.value,
-                            isM3u8 = true,
-                            headers = mapOf("Referer" to mainUrl)
-                        )
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.referer = mainUrl
+                            this.quality = Qualities.Unknown.value
+                            this.headers = mapOf("Referer" to mainUrl)
+                        }
                     )
                     return
                 }
                 
-                // M3U8 linkini API'den al
                 val mainKey = mainVideo.split("/").lastOrNull()
                 if (mainKey != null) {
                     try {
@@ -274,18 +267,19 @@ class TurkAnime : MainAPI() {
                         
                         if (m3uLink != null) {
                             callback(
-                                ExtractorLink(
-                                    source = this.name,
+                                newExtractorLink(
                                     name = "$name - Source",
+                                    source = this.name,
                                     url = m3uLink,
-                                    referer = mainVideo,
-                                    quality = Qualities.Unknown.value,
-                                    isM3u8 = true,
-                                    headers = mapOf(
+                                    type = ExtractorLinkType.M3U8
+                                ) {
+                                    this.referer = mainVideo
+                                    this.quality = Qualities.Unknown.value
+                                    this.headers = mapOf(
                                         "Referer" to mainVideo,
                                         "Origin" to mainUrl
                                     )
-                                )
+                                }
                             )
                             return
                         }
@@ -295,7 +289,6 @@ class TurkAnime : MainAPI() {
                 }
             }
 
-            // Butonlardan video dene
             val buttons = document.select("button[onclick*='ajax/videosec'], button[onclick*='IndexIcerik']")
             for (button in buttons) {
                 val onclickAttr = button.attr("onclick")
@@ -308,27 +301,26 @@ class TurkAnime : MainAPI() {
                 
                 val subDoc = app.get(butonLink, headers = mapOf("X-Requested-With" to "XMLHttpRequest")).document
                 
-                // data-url kontrolü
                 val dataUrl = subDoc.selectFirst("div.artplayer-app, div#player, div.video-player")?.attr("data-url")
                 if (dataUrl != null && dataUrl.endsWith(".m3u8")) {
                     callback(
-                        ExtractorLink(
-                            source = this.name,
+                        newExtractorLink(
                             name = "$name - ${button.text().trim()}",
+                            source = this.name,
                             url = dataUrl,
-                            referer = butonLink,
-                            quality = Qualities.Unknown.value,
-                            isM3u8 = true,
-                            headers = mapOf(
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.referer = butonLink
+                            this.quality = Qualities.Unknown.value
+                            this.headers = mapOf(
                                 "Referer" to butonLink,
                                 "Origin" to mainUrl
                             )
-                        )
+                        }
                     )
                     continue
                 }
 
-                // iframe'den dene
                 val subFrame = fixUrlNull(subDoc.selectFirst("iframe")?.attr("src")) 
                     ?: subDoc.selectFirst("video source")?.attr("src")
                     ?: continue
@@ -337,18 +329,19 @@ class TurkAnime : MainAPI() {
                     val videoLink = iframe2AesLink(subFrame)
                     if (videoLink != null) {
                         callback(
-                            ExtractorLink(
-                                source = this.name,
+                            newExtractorLink(
                                 name = "$name - ${button.text().trim()}",
+                                source = this.name,
                                 url = videoLink,
-                                referer = subFrame,
-                                quality = Qualities.Unknown.value,
-                                isM3u8 = true,
-                                headers = mapOf(
+                                type = ExtractorLinkType.M3U8
+                            ) {
+                                this.referer = subFrame
+                                this.quality = Qualities.Unknown.value
+                                this.headers = mapOf(
                                     "Referer" to subFrame,
                                     "Origin" to mainUrl
                                 )
-                            )
+                            }
                         )
                     }
                 }
@@ -369,42 +362,41 @@ class TurkAnime : MainAPI() {
         try {
             val document = app.get(data).document
 
-            // Önce video elementlerini kontrol et
             val videoSource = document.selectFirst("video source")?.attr("src")
             if (videoSource != null && videoSource.endsWith(".m3u8")) {
                 callback(
-                    ExtractorLink(
-                        source = this.name,
+                    newExtractorLink(
                         name = "$name - Video",
+                        source = this.name,
                         url = videoSource,
-                        referer = data,
-                        quality = Qualities.Unknown.value,
-                        isM3u8 = true,
-                        headers = mapOf("Referer" to data)
-                    )
+                        type = ExtractorLinkType.M3U8
+                    ) {
+                        this.referer = data
+                        this.quality = Qualities.Unknown.value
+                        this.headers = mapOf("Referer" to data)
+                    }
                 )
                 return true
             }
 
-            // iframe'leri kontrol et
             val iframeElement = document.selectFirst("iframe")
             val iframe = fixUrlNull(iframeElement?.attr("src"))
                 ?: document.selectFirst("div.artplayer-app")?.attr("data-url")
                 ?: document.selectFirst("div#player")?.attr("data-url")
 
             if (iframe != null && !iframe.contains("a-ads.com")) {
-                // Doğrudan M3U8 ise
                 if (iframe.endsWith(".m3u8")) {
                     callback(
-                        ExtractorLink(
-                            source = this.name,
+                        newExtractorLink(
                             name = "$name - M3U8",
+                            source = this.name,
                             url = iframe,
-                            referer = data,
-                            quality = Qualities.Unknown.value,
-                            isM3u8 = true,
-                            headers = mapOf("Referer" to data)
-                        )
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.referer = data
+                            this.quality = Qualities.Unknown.value
+                            this.headers = mapOf("Referer" to data)
+                        }
                     )
                     return true
                 }
@@ -413,7 +405,6 @@ class TurkAnime : MainAPI() {
                 return true
             }
 
-            // Butonlardan dene
             val buttons = document.select("button[onclick*='IndexIcerik'], button[data-url], button.video-source")
             if (buttons.isNotEmpty()) {
                 for (button in buttons) {
@@ -430,27 +421,26 @@ class TurkAnime : MainAPI() {
                     val subResponse = app.get(subLink, headers = mapOf("X-Requested-With" to "XMLHttpRequest"))
                     val subDoc = subResponse.document
 
-                    // Önce data-url kontrolü
                     val dataUrl = subDoc.selectFirst("div.artplayer-app, div#player, div.video-player")?.attr("data-url")
                     if (dataUrl != null && dataUrl.endsWith(".m3u8")) {
                         callback(
-                            ExtractorLink(
-                                source = this.name,
+                            newExtractorLink(
                                 name = "$name - ${button.text().trim()}",
+                                source = this.name,
                                 url = dataUrl,
-                                referer = subLink,
-                                quality = Qualities.Unknown.value,
-                                isM3u8 = true,
-                                headers = mapOf(
+                                type = ExtractorLinkType.M3U8
+                            ) {
+                                this.referer = subLink
+                                this.quality = Qualities.Unknown.value
+                                this.headers = mapOf(
                                     "Referer" to subLink,
                                     "Origin" to mainUrl
                                 )
-                            )
+                            }
                         )
                         continue
                     }
 
-                    // iframe'den dene
                     val subFrame = fixUrlNull(subDoc.selectFirst("iframe")?.attr("src")) 
                         ?: subDoc.selectFirst("video source")?.attr("src")
                         ?: continue
@@ -460,21 +450,21 @@ class TurkAnime : MainAPI() {
                 return true
             }
 
-            // Son çare: sayfadaki tüm linkleri tara
             val allLinks = document.select("a[href*='.m3u8'], a[href*='/video/']")
             for (link in allLinks) {
                 val href = fixUrlNull(link.attr("href")) ?: continue
                 if (href.endsWith(".m3u8")) {
                     callback(
-                        ExtractorLink(
-                            source = this.name,
+                        newExtractorLink(
                             name = "$name - Link",
+                            source = this.name,
                             url = href,
-                            referer = data,
-                            quality = Qualities.Unknown.value,
-                            isM3u8 = true,
-                            headers = mapOf("Referer" to data)
-                        )
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.referer = data
+                            this.quality = Qualities.Unknown.value
+                            this.headers = mapOf("Referer" to data)
+                        }
                     )
                 }
             }
