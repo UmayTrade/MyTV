@@ -198,7 +198,7 @@ class TRanimaci : MainAPI() {
                             source = this.name,
                             name = "${this.name} - Script",
                             url = videoUrl,
-                            type = if (videoUrl.endsWith(".m3u8")) ExtractorLinkType.HLS else ExtractorLinkType.VIDEO
+                            type = if (videoUrl.endsWith(".m3u8")) ExtractorLinkType.VIDEO else ExtractorLinkType.VIDEO
                         ) {
                             this.referer = mainUrl
                         }
@@ -234,7 +234,7 @@ class TRanimaci : MainAPI() {
                             source = this.name,
                             name = "${this.name} - Direct",
                             url = videoUrl,
-                            type = if (videoUrl.endsWith(".m3u8")) ExtractorLinkType.HLS else ExtractorLinkType.VIDEO
+                            type = ExtractorLinkType.VIDEO
                         ) {
                             this.referer = mainUrl
                         }
@@ -339,7 +339,7 @@ class TRanimaci : MainAPI() {
                                     source = this.name,
                                     name = "${this.name} - Player",
                                     url = videoUrl,
-                                    type = if (videoUrl.endsWith(".m3u8")) ExtractorLinkType.HLS else ExtractorLinkType.VIDEO
+                                    type = ExtractorLinkType.VIDEO
                                 ) {
                                     this.referer = mainUrl
                                 }
