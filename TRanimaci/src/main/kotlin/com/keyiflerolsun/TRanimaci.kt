@@ -1,704 +1,119 @@
+// ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
+
 package com.keyiflerolsun
 
 import android.util.Log
+import org.jsoup.nodes.Element
+import org.jsoup.nodes.Document
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import org.json.JSONArray
+import org.json.*
 import org.jsoup.Jsoup
-import org.jsoup.nodes.Element
 
 class TRanimaci : MainAPI() {
-
-    companion object {
-        private const val TAG = "TRanimaci"
-
-        private const val SITE_REFERER =
-            "https://tranimaci.com/"
-
-        private const val VIDEO_API =
-            "https://api.animeuzayi.com"
-
-        private val HEADERS = mapOf(
-            "User-Agent" to
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-                    "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                    "Chrome/139.0.0.0 Safari/537.36",
-
-            "Accept" to
-                    "text/html,application/xhtml+xml,application/xml;q=0.9," +
-                    "image/avif,image/webp,*/*;q=0.8",
-
-            "Accept-Language" to
-                    "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
-        )
-    }
-
-    override var mainUrl = "https://tranimaci.com"
-
-    override var name = "TrAnimeci"
-
-    override val hasMainPage = true
-
-    override var lang = "tr"
-
-    override val hasQuickSearch = false
-
-    override val supportedTypes = setOf(TvType.Anime)
+    override var mainUrl              = "https://tranimaci.com"
+    override var name                 = "TrAnimeci"
+    override val hasMainPage          = true
+    override var lang                 = "tr"
+    override val hasQuickSearch       = false
+    override val supportedTypes       = setOf(TvType.Anime)
 
     override var sequentialMainPage = true
-
-    override var sequentialMainPageDelay = 500L
-
+    override var sequentialMainPageDelay       = 500L
     override var sequentialMainPageScrollDelay = 500L
 
-
-    // ============================================================
-    // MAIN PAGE
-    // ============================================================
-
     override val mainPage = mainPageOf(
-        "$mainUrl/category/action" to "Aksiyon",
-        "$mainUrl/category/cars" to "Arabalar",
-        "$mainUrl/category/supernatural" to "Doğaüstü",
-        "$mainUrl/category/drama" to "Dram",
-        "$mainUrl/category/ecchi" to "Ecchi",
-        "$mainUrl/category/fantasy" to "Fantastik",
-        "$mainUrl/category/mystery" to "Gizem",
-        "$mainUrl/category/comedy" to "Komedi",
-        "$mainUrl/category/horror" to "Korku",
-        "$mainUrl/category/adventure" to "Macera",
-        "$mainUrl/category/mecha" to "Mecha",
-        "$mainUrl/category/music" to "Müzik",
-        "$mainUrl/category/romance" to "Romantik",
-        "$mainUrl/category/sports" to "Spor"
+        "${mainUrl}/kategoriler/action"                                    to "Aksiyon",
+        "${mainUrl}/kategoriler/cars"                                      to "Arabalar",
+        "${mainUrl}/kategoriler/supernatural"                              to "Doğaüstü",
+        "${mainUrl}/kategoriler/drama"                                     to "Dram",
+        "${mainUrl}/kategoriler/ecchi"                                     to "Ecchi",
+        "${mainUrl}/kategoriler/fantasy"                                   to "Fantastik",
+        "${mainUrl}/kategoriler/mystery"                                   to "Gizem",
+        "${mainUrl}/kategoriler/comedy"                                    to "Komedi",
+        "${mainUrl}/kategoriler/horror"                                    to "Korku",
+        "${mainUrl}/kategoriler/adventure"                                 to "Macera",
+        "${mainUrl}/kategoriler/mecha"                                     to "Mecha",
+        "${mainUrl}/kategoriler/music"                                     to "Müzik",
+        "${mainUrl}/kategoriler/romance"                                   to "Romantik",
+        "${mainUrl}/kategoriler/sports"                                    to "Spor",
     )
 
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val document = app.get(request.data).document
+        val home = document.select("a.group.block").mapNotNull { it.toMainPageResult() }
 
-    override suspend fun getMainPage(
-        page: Int,
-        request: MainPageRequest
-    ): HomePageResponse {
+        return newHomePageResponse(request.name, home)
+    }
 
-        val url = if (page <= 1) {
-            request.data
-        } else {
-            if (request.data.endsWith("/")) {
-                "${request.data}page/$page/"
-            } else {
-                "${request.data}/page/$page/"
-            }
-        }
+    private fun Element.toMainPageResult(): SearchResponse? {
+        val title = this.selectFirst("h3")?.text()?.trim() ?: return null
+        val href = fixUrlNull(this.attr("href")) ?: return null
+        val posterUrl = fixUrlNull(this.selectFirst("div.relative img")?.attr("src"))
 
-        Log.d(TAG, "MAIN PAGE: $url")
-
-        return try {
-
-            val document = app.get(
-                url,
-                headers = HEADERS
-            ).document
-
-            val results =
-                extractAnimeCards(document)
-
-            Log.d(
-                TAG,
-                "MAIN PAGE RESULT: ${results.size}"
-            )
-
-            newHomePageResponse(
-                request.name,
-                results
-            )
-
-        } catch (e: Exception) {
-
-            Log.e(
-                TAG,
-                "MAIN PAGE ERROR: ${e.message}"
-            )
-
-            newHomePageResponse(
-                request.name,
-                emptyList()
-            )
+        return newAnimeSearchResponse(title, href, TvType.Anime) { 
+            this.posterUrl = posterUrl
         }
     }
 
-
-    // ============================================================
-    // SEARCH
-    // ============================================================
-
-    override suspend fun search(
-        query: String
-    ): List<SearchResponse> {
-
-        val encodedQuery =
-            query.trim().replace(" ", "+")
-
-        val searchUrls = listOf(
-            "$mainUrl/search?name=$encodedQuery",
-            "$mainUrl/?s=$encodedQuery"
-        )
-
-        for (searchUrl in searchUrls) {
-
-            try {
-
-                Log.d(
-                    TAG,
-                    "SEARCH: $searchUrl"
-                )
-
-                val document = app.get(
-                    searchUrl,
-                    headers = HEADERS
-                ).document
-
-                val results =
-                    extractAnimeCards(document)
-
-                if (results.isNotEmpty()) {
-
-                    Log.d(
-                        TAG,
-                        "SEARCH RESULT: ${results.size}"
-                    )
-
-                    return results
-                }
-
-            } catch (e: Exception) {
-
-                Log.e(
-                    TAG,
-                    "SEARCH ERROR: ${e.message}"
-                )
-            }
-        }
-
-        return emptyList()
+    override suspend fun search(query: String): List<SearchResponse> {
+        val document = app.get("${mainUrl}/arama?q=${query}").document
+        return document.select("a.group.block").mapNotNull { it.toMainPageResult() }
     }
 
+    override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
-    override suspend fun quickSearch(
-        query: String
-    ): List<SearchResponse> =
-        search(query)
+    override suspend fun load(url: String): LoadResponse? {
+        val document = app.get(url).document
 
+        val title = document.selectFirst("h1")?.text()?.trim() ?: return null
+        val poster = fixUrlNull(document.selectFirst("div.relative img")?.attr("src"))
+        val description = document.selectFirst("p.text-sm.text-foreground/80.leading-relaxed")?.text()?.trim()
+        
+        val tags = document.select("div.flex.flex-wrap.gap-1.5 span").map { it.text() }
 
-    // ============================================================
-    // LOAD
-    // ============================================================
+        val episodeses = mutableListOf<Episode>()
 
-    override suspend fun load(
-        url: String
-    ): LoadResponse? {
+        // Yeni site yapısında bölümler farklı şekilde gösteriliyor
+        // Önce "Tüm Bölümler" butonunu bulalım
+        val episodeLinks = document.select("a[href*='/video/']")
+        for (link in episodeLinks) {
+            val epHref = fixUrlNull(link.attr("href")) ?: continue
+            val epName = link.selectFirst("span")?.text()?.trim() ?: continue
+            
+            val epEpisode = Regex("""(\d+)\. Bölüm""").find(epName)
+                ?.groupValues?.get(1)?.toIntOrNull()
+                ?: epName.replace("Bölüm", "").trim().toIntOrNull()
 
-        Log.d(
-            TAG,
-            "LOAD: $url"
-        )
-
-        return try {
-
-            val document = app.get(
-                url,
-                headers = HEADERS
-            ).document
-
-            // ----------------------------------------------------
-            // TITLE
-            // ----------------------------------------------------
-
-            val title =
-                firstText(
-                    document,
-                    "h1",
-                    "h1.entry-title",
-                    ".anime-title",
-                    ".entry-title",
-                    ".post-title",
-                    ".title"
-                ) ?: return null
-
-
-            // ----------------------------------------------------
-            // POSTER
-            // ----------------------------------------------------
-
-            val poster =
-                extractPoster(document)
-
-
-            // ----------------------------------------------------
-            // DESCRIPTION
-            // ----------------------------------------------------
-
-            val description =
-                firstText(
-                    document,
-                    "div.anime-description",
-                    ".anime-description",
-                    ".description",
-                    ".summary",
-                    ".synopsis",
-                    ".desc",
-                    ".entry-content"
-                )
-
-
-            // ----------------------------------------------------
-            // TAGS
-            // ----------------------------------------------------
-
-            val tags =
-                extractTags(document)
-
-
-            // ----------------------------------------------------
-            // EPISODES
-            // ----------------------------------------------------
-
-            val episodes =
-                extractEpisodes(document)
-
-
-            Log.d(
-                TAG,
-                "TITLE: $title"
-            )
-
-            Log.d(
-                TAG,
-                "POSTER: $poster"
-            )
-
-            Log.d(
-                TAG,
-                "EPISODES: ${episodes.size}"
-            )
-
-
-            // IMPORTANT:
-            // Senin orijinal çalışan dosyandaki API
-            // kullanım şekli korunmuştur.
-
-            newTvSeriesLoadResponse(
-                title,
-                url,
-                TvType.TvSeries,
-                episodes
-            ) {
-
-                this.posterUrl = poster
-
-                this.plot = description
-
-                this.tags = tags
+            val newEpisode = newEpisode(epHref) {
+                this.name = epName
+                this.episode = epEpisode
             }
+            episodeses.add(newEpisode)
+        }
 
-        } catch (e: Exception) {
+        // Eğer hiç bölüm bulunamadıysa, tüm video linklerini dene
+        if (episodeses.isEmpty()) {
+            // Alternatif bölüm listesi
+            val allVideoLinks = document.select("a[href*='/video/']")
+            for (link in allVideoLinks) {
+                val epHref = fixUrlNull(link.attr("href")) ?: continue
+                val epName = link.text()?.trim() ?: "Bölüm ${episodeses.size + 1}"
+                
+                val newEpisode = newEpisode(epHref) {
+                    this.name = epName
+                    this.episode = episodeses.size + 1
+                }
+                episodeses.add(newEpisode)
+            }
+        }
 
-            Log.e(
-                TAG,
-                "LOAD ERROR: ${e.message}"
-            )
-
-            null
+        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeses) {
+            this.posterUrl = poster
+            this.plot = description
+            this.tags = tags
         }
     }
-
-
-    // ============================================================
-    // ANIME CARD
-    // ============================================================
-
-    private fun extractAnimeCards(
-        document: org.jsoup.nodes.Document
-    ): List<SearchResponse> {
-
-        val results =
-            mutableListOf<SearchResponse>()
-
-        val usedUrls =
-            mutableSetOf<String>()
-
-        val selectors = listOf(
-            "article.bs div.bsx",
-            "article.bs",
-            "div.bsx",
-            ".bsx",
-            ".bs",
-            ".anime-card",
-            ".anime-item"
-        )
-
-        var cards =
-            emptyList<Element>()
-
-        for (selector in selectors) {
-
-            val found =
-                document.select(selector)
-
-            if (found.isNotEmpty()) {
-
-                cards = found
-
-                Log.d(
-                    TAG,
-                    "CARD SELECTOR: $selector -> ${found.size}"
-                )
-
-                break
-            }
-        }
-
-
-        for (card in cards) {
-
-            val link =
-                card.selectFirst("a[href]")
-                    ?: continue
-
-
-            val href =
-                link.absUrl("href").ifBlank {
-
-                    fixUrlNull(
-                        link.attr("href")
-                    ) ?: ""
-                }
-
-
-            if (href.isBlank())
-                continue
-
-
-            if (!usedUrls.add(href))
-                continue
-
-
-            val title =
-                firstText(
-                    card,
-                    ".tt",
-                    ".title",
-                    ".anime-title",
-                    ".entry-title",
-                    ".name",
-                    "h2",
-                    "h3",
-                    "h4"
-                )
-                    ?: link.attr("title")
-                        .trim()
-                        .ifBlank {
-                            link.text().trim()
-                        }
-
-
-            if (title.isBlank())
-                continue
-
-
-            val poster =
-                extractPoster(card)
-
-
-            results.add(
-                newAnimeSearchResponse(
-                    title,
-                    href,
-                    TvType.Anime
-                ) {
-
-                    this.posterUrl =
-                        poster
-                }
-            )
-        }
-
-
-        return results
-    }
-
-
-    // ============================================================
-    // POSTER
-    // ============================================================
-
-    private fun extractPoster(
-        element: Element
-    ): String? {
-
-        val selectors = listOf(
-            "div.limit img",
-            ".limit img",
-            ".poster img",
-            "div.thumb img",
-            ".thumb img",
-            ".anime-poster img",
-            "img"
-        )
-
-
-        for (selector in selectors) {
-
-            val image =
-                element.selectFirst(selector)
-                    ?: continue
-
-
-            val sources = listOf(
-                image.attr("src"),
-                image.attr("data-src"),
-                image.attr("data-lazy-src"),
-                image.attr("data-original"),
-                image.attr("data-image"),
-                image.attr("data-lazy")
-            )
-
-
-            for (source in sources) {
-
-                if (source.isBlank())
-                    continue
-
-
-                val url =
-                    fixUrlNull(source)
-
-
-                if (!url.isNullOrBlank()) {
-
-                    return url
-                }
-            }
-
-
-            // srcset
-
-            val srcset =
-                image.attr("srcset")
-
-
-            if (srcset.isNotBlank()) {
-
-                val first =
-                    srcset
-                        .split(",")
-                        .firstOrNull()
-                        ?.trim()
-                        ?.split(" ")
-                        ?.firstOrNull()
-
-
-                val url =
-                    fixUrlNull(first)
-
-
-                if (!url.isNullOrBlank()) {
-
-                    return url
-                }
-            }
-        }
-
-
-        return null
-    }
-
-
-    // ============================================================
-    // EPISODES
-    // ============================================================
-
-    private fun extractEpisodes(
-        document: org.jsoup.nodes.Document
-    ): MutableList<Episode> {
-
-        val episodes =
-            mutableListOf<Episode>()
-
-        val usedUrls =
-            mutableSetOf<String>()
-
-        val selectors = listOf(
-            "div.eplister ul li a",
-            ".eplister a",
-            ".episode-list a",
-            ".episodes a",
-            ".episodelist a",
-            "ul.episodes li a",
-            "ul.episode-list li a",
-            ".ep-item a"
-        )
-
-
-        val elements =
-            mutableListOf<Element>()
-
-
-        for (selector in selectors) {
-
-            document.select(selector).forEach {
-
-                if (!elements.contains(it)) {
-                    elements.add(it)
-                }
-            }
-        }
-
-
-        for (element in elements) {
-
-            val href =
-                element.absUrl("href").ifBlank {
-
-                    fixUrlNull(
-                        element.attr("href")
-                    ) ?: ""
-                }
-
-
-            if (href.isBlank())
-                continue
-
-
-            if (!usedUrls.add(href))
-                continue
-
-
-            val episodeTitle =
-                firstText(
-                    element,
-                    ".epl-title",
-                    ".episode-title",
-                    ".ep-title",
-                    ".title",
-                    "span"
-                )
-                    ?: element.text().trim()
-
-
-            if (episodeTitle.isBlank())
-                continue
-
-
-            val episodeNumber =
-                extractEpisodeNumber(
-                    episodeTitle,
-                    href
-                )
-
-
-            val newEp =
-                newEpisode(href) {
-
-                    this.name =
-                        cleanEpisodeTitle(
-                            episodeTitle
-                        )
-
-                    if (episodeNumber != null) {
-
-                        this.episode =
-                            episodeNumber
-                    }
-                }
-
-
-            episodes.add(newEp)
-        }
-
-
-        // --------------------------------------------------------
-        // FALLBACK
-        // --------------------------------------------------------
-
-        if (episodes.isEmpty()) {
-
-            Log.d(
-                TAG,
-                "NORMAL EPISODE SELECTOR EMPTY - FALLBACK"
-            )
-
-
-            document.select("a[href]")
-                .forEach { element ->
-
-                    val href =
-                        element.absUrl("href")
-
-
-                    if (href.isBlank())
-                        return@forEach
-
-
-                    val text =
-                        element.text().trim()
-
-
-                    if (
-                        text.matches(
-                            Regex(
-                                """.*(bölüm|bolum|episode|ep\.?)\s*[-:]?\s*\d+.*""",
-                                RegexOption.IGNORE_CASE
-                            )
-                        )
-                    ) {
-
-                        if (
-                            !usedUrls.add(href)
-                        ) {
-                            return@forEach
-                        }
-
-
-                        val number =
-                            extractEpisodeNumber(
-                                text,
-                                href
-                            )
-
-
-                        val newEp =
-                            newEpisode(href) {
-
-                                this.name =
-                                    cleanEpisodeTitle(
-                                        text
-                                    )
-
-                                if (number != null) {
-
-                                    this.episode =
-                                        number
-                                }
-                            }
-
-
-                        episodes.add(newEp)
-                    }
-                }
-        }
-
-
-        episodes.sortBy {
-            it.episode ?: Int.MAX_VALUE
-        }
-
-
-        return episodes
-    }
-
-
-    // ============================================================
-    // LOAD LINKS
-    // ============================================================
 
     override suspend fun loadLinks(
         data: String,
@@ -706,620 +121,238 @@ class TRanimaci : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        Log.d("TRanimaci", "=== loadLinks BAŞLADI ===")
+        Log.d("TRanimaci", "URL: $data")
+        
+        try {
+            val document = app.get(data).document
+            Log.d("TRanimaci", "Sayfa yüklendi, title: ${document.title()}")
 
-        Log.d(
-            TAG,
-            "LOAD LINKS: $data"
-        )
-
-
-        val document =
-            try {
-
-                app.get(
-                    data,
-                    headers = HEADERS + mapOf(
-                        "Referer" to SITE_REFERER
-                    )
-                ).document
-
-            } catch (e: Exception) {
-
-                Log.e(
-                    TAG,
-                    "EPISODE PAGE ERROR: ${e.message}"
-                )
-
-                return false
-            }
-
-
-        var found =
-            false
-
-
-        // ========================================================
-        // VIDEO_SOURCE
-        // ========================================================
-
-        for (script in document.select("script")) {
-
-            val html =
-                script.html()
-
-
-            if (
-                !html.contains(
-                    "video_source"
-                )
-            ) {
-                continue
-            }
-
-
-            try {
-
-                val match =
-                    Regex(
-                        """video_source\s*=\s*[`'"](\[[\s\S]*?])[`'"]"""
-                    ).find(html)
-
-
-                val raw =
-                    match
-                        ?.groups
-                        ?.get(1)
-                        ?.value
-                        ?: continue
-
-
-                val array =
-                    JSONArray(raw)
-
-
-                for (i in 0 until array.length()) {
-
-                    val source =
-                        array.optJSONObject(i)
-                            ?: continue
-
-
-                    val apiUrl =
-                        source.optString("url")
-
-
-                    if (apiUrl.isBlank())
-                        continue
-
-
-                    Log.d(
-                        TAG,
-                        "VIDEO API: $apiUrl"
-                    )
-
-
-                    if (
-                        extractAnimeUzayi(
-                            apiUrl,
-                            callback
-                        )
-                    ) {
-
-                        found = true
-                    }
+            // 1. YÖNTEM: videostraeam1.can.re linklerini bul
+            val videoLinks = document.select("source[src*='videostraeam1.can.re'], video[src*='videostraeam1.can.re']")
+            for (video in videoLinks) {
+                var videoUrl = video.attr("src")
+                if (videoUrl.isEmpty()) {
+                    videoUrl = video.attr("data-src")
                 }
-
-            } catch (e: Exception) {
-
-                Log.e(
-                    TAG,
-                    "VIDEO_SOURCE ERROR: ${e.message}"
-                )
-            }
-        }
-
-
-        // ========================================================
-        // DIRECT VIDEO
-        // ========================================================
-
-        document
-            .select("video source, video[src]")
-            .forEach { element ->
-
-                val src =
-                    if (
-                        element.hasAttr("src")
-                    ) {
-                        element.attr("src")
-                    } else {
-                        element.absUrl("src")
-                    }
-
-
-                val videoUrl =
-                    fixUrlNull(src)
-
-
-                if (
-                    videoUrl.isNullOrBlank()
-                ) {
-                    return@forEach
-                }
-
-
-                callback.invoke(
-                    newExtractorLink(
-                        source = this.name,
-                        name = "${this.name} Direct",
-                        url = videoUrl,
-                        type = ExtractorLinkType.VIDEO
-                    ) {
-
-                        this.referer = data
-
-                        this.quality =
-                            Qualities.Unknown.value
-                    }
-                )
-
-
-                found = true
-            }
-
-
-        // ========================================================
-        // IFRAME
-        // ========================================================
-
-        document
-            .select("iframe[src]")
-            .forEach { iframe ->
-
-                val iframeUrl =
-                    iframe.absUrl("src")
-
-
-                if (
-                    iframeUrl.isBlank()
-                ) {
-                    return@forEach
-                }
-
-
-                Log.d(
-                    TAG,
-                    "IFRAME: $iframeUrl"
-                )
-
-
-                if (
-                    iframeUrl.contains(
-                        "animeuzayi",
-                        ignoreCase = true
+                if (videoUrl.isNotEmpty()) {
+                    Log.d("TRanimaci", "Video source bulundu: $videoUrl")
+                    callback.invoke(
+                        newExtractorLink(
+                            source = this.name,
+                            name = "${this.name} - Video",
+                            url = videoUrl,
+                            type = ExtractorLinkType.VIDEO
+                        ) {
+                            this.referer = mainUrl
+                        }
                     )
-                ) {
-
-                    if (
-                        extractAnimeUzayi(
-                            iframeUrl,
-                            callback
-                        )
-                    ) {
-
-                        found = true
-                    }
+                    return true
                 }
             }
 
-
-        // ========================================================
-        // SCRIPT ICINDE MP4
-        // ========================================================
-
-        for (script in document.select("script")) {
-
-            val html =
-                script.html()
-
-
-            val matches =
-                Regex(
-                    """https?://[^\s"'`\\]+?\.(?:mp4|m3u8)(?:\?[^\s"'`\\]*)?""",
-                    RegexOption.IGNORE_CASE
-                ).findAll(html)
-
-
-            for (match in matches) {
-
-                val videoUrl =
-                    match.value
-                        .replace(
-                            "\\/",
-                            "/"
-                        )
-
-
-                callback.invoke(
-                    newExtractorLink(
-                        source = this.name,
-                        name = "${this.name} Direct",
-                        url = videoUrl,
-                        type = ExtractorLinkType.VIDEO
-                    ) {
-
-                        this.referer = data
-
-                        this.quality =
-                            Qualities.Unknown.value
-                    }
-                )
-
-
-                found = true
-            }
-        }
-
-
-        Log.d(
-            TAG,
-            "LOAD LINKS RESULT: $found"
-        )
-
-
-        return found
-    }
-
-
-    // ============================================================
-    // ANIMEUZAYI VIDEO PARSER
-    // ============================================================
-
-    private suspend fun extractAnimeUzayi(
-        apiUrl: String,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-
-        return try {
-
-            val response =
-                app.get(
-                    apiUrl,
-                    headers = HEADERS + mapOf(
-                        "Referer" to SITE_REFERER
-                    )
-                )
-
-
-            val html =
-                response.text
-
-
-            val document =
-                Jsoup.parse(html)
-
-
-            var found =
-                false
-
-
-            // ----------------------------------------------------
-            // const sources = [...]
-            // ----------------------------------------------------
-
-            for (script in document.select("script")) {
-
-                val scriptHtml =
-                    script.html()
-
-
-                if (
-                    !scriptHtml.contains(
-                        "sources"
-                    )
-                ) {
-                    continue
-                }
-
-
-                val match =
-                    Regex(
-                        """(?:const|let|var)\s+sources\s*=\s*(\[[\s\S]*?])\s*;?"""
-                    ).find(scriptHtml)
-
-
-                val raw =
-                    match
-                        ?.groups
-                        ?.get(1)
-                        ?.value
-                        ?: continue
-
-
-                try {
-
-                    val sources =
-                        JSONArray(raw)
-
-
-                    for (i in 0 until sources.length()) {
-
-                        val source =
-                            sources.optJSONObject(i)
-                                ?: continue
-
-
-                        val src =
-                            source.optString("src")
-
-
-                        if (src.isBlank())
-                            continue
-
-
-                        val videoUrl =
-                            when {
-
-                                src.startsWith(
-                                    "http://"
-                                ) ||
-                                src.startsWith(
-                                    "https://"
-                                ) -> src
-
-                                src.startsWith("/") ->
-                                    VIDEO_API + src
-
-                                else ->
-                                    "$VIDEO_API/$src"
-                            }
-
-
-                        val quality =
-                            source.optInt(
-                                "size",
-                                Qualities.Unknown.value
+            // 2. YÖNTEM: iframe içindeki videoları bul
+            val iframes = document.select("iframe[src*='videostraeam1'], iframe[src*='embed']")
+            for (iframe in iframes) {
+                val iframeSrc = iframe.attr("src")
+                if (iframeSrc.isNotEmpty()) {
+                    Log.d("TRanimaci", "iframe bulundu: $iframeSrc")
+                    val iframeDoc = app.get(iframeSrc).document
+                    
+                    // iframe içinde video source ara
+                    val innerVideo = iframeDoc.select("source[src], video[src]").first()
+                    if (innerVideo != null) {
+                        var videoUrl = innerVideo.attr("src")
+                        if (videoUrl.isEmpty()) {
+                            videoUrl = innerVideo.attr("data-src")
+                        }
+                        if (videoUrl.isNotEmpty()) {
+                            callback.invoke(
+                                newExtractorLink(
+                                    source = this.name,
+                                    name = "${this.name} - iframe",
+                                    url = videoUrl,
+                                    type = ExtractorLinkType.VIDEO
+                                ) {
+                                    this.referer = mainUrl
+                                }
                             )
-
-
-                        callback.invoke(
-                            newExtractorLink(
-                                source = this.name,
-                                name = "${this.name} - ${quality}p",
-                                url = videoUrl,
-                                type = ExtractorLinkType.VIDEO
-                            ) {
-
-                                this.referer =
-                                    "$VIDEO_API/"
-
-                                this.quality =
-                                    quality
-                            }
-                        )
-
-
-                        found = true
+                            return true
+                        }
                     }
+                }
+            }
 
-                } catch (e: Exception) {
-
-                    Log.e(
-                        TAG,
-                        "SOURCES JSON ERROR: ${e.message}"
+            // 3. YÖNTEM: script içinde video linkleri
+            val scripts = document.select("script")
+            for (script in scripts) {
+                val scriptHtml = script.html()
+                
+                // video linklerini ara
+                val videoUrlMatch = Regex("""(https?://[^\s"'<>]+\.(?:mp4|m3u8))""").find(scriptHtml)
+                if (videoUrlMatch != null) {
+                    val videoUrl = videoUrlMatch.groupValues[1]
+                    Log.d("TRanimaci", "Script içinde video URL bulundu: $videoUrl")
+                    callback.invoke(
+                        newExtractorLink(
+                            source = this.name,
+                            name = "${this.name} - Script",
+                            url = videoUrl,
+                            type = if (videoUrl.endsWith(".m3u8")) ExtractorLinkType.HLS else ExtractorLinkType.VIDEO
+                        ) {
+                            this.referer = mainUrl
+                        }
                     )
-                }
-            }
-
-
-            // ----------------------------------------------------
-            // FALLBACK MP4 / M3U8
-            // ----------------------------------------------------
-
-            val directUrls =
-                Regex(
-                    """(?:https?:)?//[^\s"'`\\]+?\.(?:mp4|m3u8)(?:\?[^\s"'`\\]*)?""",
-                    RegexOption.IGNORE_CASE
-                ).findAll(html)
-
-
-            for (match in directUrls) {
-
-                var videoUrl =
-                    match.value
-                        .replace(
-                            "\\/",
-                            "/"
-                        )
-
-
-                if (
-                    videoUrl.startsWith("//")
-                ) {
-
-                    videoUrl =
-                        "https:$videoUrl"
+                    return true
                 }
 
-
-                callback.invoke(
-                    newExtractorLink(
-                        source = this.name,
-                        name = "${this.name} Direct",
-                        url = videoUrl,
-                        type = ExtractorLinkType.VIDEO
-                    ) {
-
-                        this.referer =
-                            "$VIDEO_API/"
-
-                        this.quality =
-                            Qualities.Unknown.value
+                // video_source veya player_config ara
+                if (scriptHtml.contains("video_source") || scriptHtml.contains("player_config") || scriptHtml.contains("sources")) {
+                    Log.d("TRanimaci", "Video konfigürasyonu içeren script bulundu")
+                    val success = parseVideoConfig(scriptHtml, callback)
+                    if (success) {
+                        return true
                     }
-                )
-
-
-                found = true
+                }
             }
 
+            // 4. YÖNTEM: HTML içinde MP4 linkleri
+            val htmlContent = document.html()
+            val mp4Patterns = listOf(
+                Regex("""(https?://cdn\d*\.videostraeam\d*\.can\.re/[^\s"'<>]+\.mp4)"""),
+                Regex("""(https?://[^\s"'<>]+\.mp4)"""),
+                Regex("""(https?://[^\s"'<>]+\.m3u8)""")
+            )
+            
+            for (pattern in mp4Patterns) {
+                val match = pattern.find(htmlContent)
+                if (match != null) {
+                    val videoUrl = match.groupValues[1]
+                    Log.d("TRanimaci", "HTML içinde video URL bulundu: $videoUrl")
+                    callback.invoke(
+                        newExtractorLink(
+                            source = this.name,
+                            name = "${this.name} - Direct",
+                            url = videoUrl,
+                            type = if (videoUrl.endsWith(".m3u8")) ExtractorLinkType.HLS else ExtractorLinkType.VIDEO
+                        ) {
+                            this.referer = mainUrl
+                        }
+                    )
+                    return true
+                }
+            }
 
-            found
+            Log.e("TRanimaci", "Hiçbir link bulunamadı!")
+            return false
 
         } catch (e: Exception) {
-
-            Log.e(
-                TAG,
-                "ANIMEUZAYI ERROR: ${e.message}"
-            )
-
-            false
+            Log.e("TRanimaci", "loadLinks HATASI: ${e.message}", e)
+            return false
         }
     }
 
-
-    // ============================================================
-    // TAGS
-    // ============================================================
-
-    private fun extractTags(
-        document: org.jsoup.nodes.Document
-    ): List<String> {
-
-        val tags =
-            mutableListOf<String>()
-
-
-        val selectors = listOf(
-            "div#genxed a[href*='/category']",
-            ".genres a",
-            ".genre a",
-            ".tags a",
-            ".anime-genres a"
-        )
-
-
-        for (selector in selectors) {
-
-            document
-                .select(selector)
-                .forEach {
-
-                    val text =
-                        it.text().trim()
-
-
-                    if (
-                        text.isNotBlank() &&
-                        !tags.contains(text)
-                    ) {
-
-                        tags.add(text)
+    private suspend fun parseVideoConfig(scriptHtml: String, callback: (ExtractorLink) -> Unit): Boolean {
+        try {
+            // video_source array'i bul
+            val videoSourceMatch = Regex("""video_source\s*=\s*`(\[[\s\S]*?])`""", RegexOption.DOT_MATCHES_ALL)
+                .find(scriptHtml)
+            
+            if (videoSourceMatch != null) {
+                val videoSourceJson = videoSourceMatch.groupValues[1]
+                Log.d("TRanimaci", "videoSourceJson bulundu")
+                
+                val videoSourceArray = JSONArray(videoSourceJson)
+                for (i in 0 until videoSourceArray.length()) {
+                    try {
+                        val source = videoSourceArray.getJSONObject(i)
+                        val apiUrl = source.getString("url")
+                        Log.d("TRanimaci", "API URL: $apiUrl")
+                        
+                        val response = app.get(apiUrl)
+                        val apiHtml = response.text
+                        
+                        // sources array'ini bul
+                        val sourcesMatch = Regex("""(?:const|var|let)\s+sources\s*=\s*(\[[\s\S]*?])\s*;""")
+                            .find(apiHtml)
+                        
+                        if (sourcesMatch != null) {
+                            val sourcesArrayRaw = sourcesMatch.groupValues[1]
+                            val mp4Array = JSONArray(sourcesArrayRaw)
+                            
+                            for (j in 0 until mp4Array.length()) {
+                                try {
+                                    val mp4 = mp4Array.getJSONObject(j)
+                                    var videoUrl = mp4.getString("src")
+                                    
+                                    if (!videoUrl.startsWith("http")) {
+                                        if (videoUrl.startsWith("//")) {
+                                            videoUrl = "https:" + videoUrl
+                                        } else {
+                                            videoUrl = "https://api.animeuzayi.com" + videoUrl
+                                        }
+                                    }
+                                    
+                                    val quality = mp4.optInt("size", 0)
+                                    Log.d("TRanimaci", "Video URL: $videoUrl")
+                                    
+                                    callback.invoke(
+                                        newExtractorLink(
+                                            source = this.name,
+                                            name = "${this.name} - ${if (quality > 0) "${quality}p" else "SD"}",
+                                            url = videoUrl,
+                                            type = ExtractorLinkType.VIDEO
+                                        ) {
+                                            this.referer = "https://api.animeuzayi.com/"
+                                            this.quality = quality
+                                        }
+                                    )
+                                    return true
+                                } catch (e: Exception) {
+                                    Log.e("TRanimaci", "MP4 parse hatası: ${e.message}")
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("TRanimaci", "API ${i} hatası: ${e.message}")
                     }
                 }
-
-
-            if (tags.isNotEmpty())
-                break
-        }
-
-
-        return tags
-    }
-
-
-    // ============================================================
-    // TEXT HELPER
-    // ============================================================
-
-    private fun firstText(
-        element: Element,
-        vararg selectors: String
-    ): String? {
-
-        for (selector in selectors) {
-
-            val text =
-                element
-                    .selectFirst(selector)
-                    ?.text()
-                    ?.trim()
-
-
-            if (!text.isNullOrBlank()) {
-
-                return text
             }
+
+            // player_config dene
+            val configMatch = Regex("""(?:player_config|playerConfig)\s*=\s*({[\s\S]*?});""")
+                .find(scriptHtml)
+            
+            if (configMatch != null) {
+                val configJson = configMatch.groupValues[1]
+                val config = JSONObject(configJson)
+                
+                val sources = config.optJSONArray("sources")
+                if (sources != null) {
+                    for (i in 0 until sources.length()) {
+                        val source = sources.getJSONObject(i)
+                        var videoUrl = source.getString("src")
+                        
+                        if (videoUrl.isNotEmpty()) {
+                            callback.invoke(
+                                newExtractorLink(
+                                    source = this.name,
+                                    name = "${this.name} - Player",
+                                    url = videoUrl,
+                                    type = if (videoUrl.endsWith(".m3u8")) ExtractorLinkType.HLS else ExtractorLinkType.VIDEO
+                                ) {
+                                    this.referer = mainUrl
+                                }
+                            )
+                            return true
+                        }
+                    }
+                }
+            }
+
+        } catch (e: Exception) {
+            Log.e("TRanimaci", "parseVideoConfig hatası: ${e.message}")
         }
-
-
-        return null
-    }
-
-
-    // ============================================================
-    // EPISODE NUMBER
-    // ============================================================
-
-    private fun extractEpisodeNumber(
-        title: String,
-        href: String
-    ): Int? {
-
-        val patterns =
-            listOf(
-
-                Regex(
-                    """(?:bölüm|bolum|episode|ep\.?)\s*[-:]?\s*(\d+)""",
-                    RegexOption.IGNORE_CASE
-                ),
-
-                Regex(
-                    """episode[-_/]?(\d+)""",
-                    RegexOption.IGNORE_CASE
-                ),
-
-                Regex(
-                    """/(\d+)(?:/)?$"""
-                ),
-
-                Regex(
-                    """[-_\s](\d+)(?:/)?$"""
-                )
-            )
-
-
-        for (pattern in patterns) {
-
-            val match =
-                pattern.find(title)
-                    ?: pattern.find(href)
-                    ?: continue
-
-
-            return match
-                .groupValues
-                .getOrNull(1)
-                ?.toIntOrNull()
-        }
-
-
-        return null
-    }
-
-
-    // ============================================================
-    // CLEAN EPISODE TITLE
-    // ============================================================
-
-    private fun cleanEpisodeTitle(
-        title: String
-    ): String {
-
-        return title
-            .replace(
-                Regex("""\s+"""),
-                " "
-            )
-            .trim()
+        return false
     }
 }
