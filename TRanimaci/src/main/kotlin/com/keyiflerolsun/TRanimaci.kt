@@ -9,7 +9,9 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.json.*
 import org.jsoup.Jsoup
-import com.lagradost.cloudstream3.network.CloudflareKiller
+import java.net.HttpURLConnection
+import java.net.URL
+import javax.net.ssl.HttpsURLConnection
 
 class TRanimaci : MainAPI() {
     override var mainUrl              = "https://tranimaci.com"
@@ -35,7 +37,8 @@ class TRanimaci : MainAPI() {
         "Sec-Fetch-Mode" to "navigate",
         "Sec-Fetch-Site" to "none",
         "Sec-Fetch-User" to "?1",
-        "Cache-Control" to "max-age=0"
+        "Cache-Control" to "max-age=0",
+        "Pragma" to "no-cache"
     )
 
     override val mainPage = mainPageOf(
@@ -57,35 +60,63 @@ class TRanimaci : MainAPI() {
 
     // Cloudflare korumasını aşmak için özel get fonksiyonu
     private suspend fun getWithCloudflare(url: String): Document {
-        try {
-            Log.d("TRanimaci", "Cloudflare ile sayfa yükleniyor: $url")
-            val response = app.get(url, headers = cloudflareHeaders)
-            
-            // Cloudflare challenge sayfası mı kontrol et
-            val html = response.text
-            if (html.contains("cf-browser-verification") || html.contains("challenge-platform")) {
-                Log.d("TRanimaci", "Cloudflare challenge tespit edildi, CloudflareKiller deneniyor...")
-                return try {
-                    val killedResponse = CloudflareKiller.kill(url, headers = cloudflareHeaders)
-                    Jsoup.parse(killedResponse.text)
-                } catch (e: Exception) {
-                    Log.e("TRanimaci", "CloudflareKiller başarısız: ${e.message}")
-                    // Alternatif olarak normal request dene
-                    app.get(url, headers = cloudflareHeaders).document
+        var retryCount = 0
+        val maxRetries = 3
+        
+        while (retryCount < maxRetries) {
+            try {
+                Log.d("TRanimaci", "Sayfa yükleniyor (deneme ${retryCount + 1}): $url")
+                
+                // Önce normal istek dene
+                val response = app.get(url, headers = cloudflareHeaders)
+                val html = response.text
+                
+                // Cloudflare challenge kontrolü
+                if (html.contains("cf-browser-verification") || 
+                    html.contains("challenge-platform") ||
+                    html.contains("Please wait") ||
+                    html.contains("Checking your browser")) {
+                    
+                    Log.d("TRanimaci", "Cloudflare challenge tespit edildi! Alternatif yöntem deneniyor...")
+                    
+                    // Alternatif: Session ile tekrar dene
+                    try {
+                        Thread.sleep(3000) // 3 saniye bekle
+                        val retryResponse = app.get(url, headers = cloudflareHeaders)
+                        val retryHtml = retryResponse.text
+                        
+                        if (!retryHtml.contains("cf-browser-verification") && 
+                            !retryHtml.contains("challenge-platform")) {
+                            return retryResponse.document
+                        }
+                    } catch (e: Exception) {
+                        Log.e("TRanimaci", "Retry başarısız: ${e.message}")
+                    }
+                    
+                    // Hala challenge varsa, WebView ile almayı dene
+                    try {
+                        Log.d("TRanimaci", "WebView ile sayfa alınmaya çalışılıyor...")
+                        // Cloudstream'in WebView metodunu kullan
+                        val webViewResponse = app.getWebView(url, headers = cloudflareHeaders)
+                        return webViewResponse.document
+                    } catch (e: Exception) {
+                        Log.e("TRanimaci", "WebView başarısız: ${e.message}")
+                    }
+                }
+                
+                return response.document
+                
+            } catch (e: Exception) {
+                Log.e("TRanimaci", "Sayfa yüklenirken hata (deneme ${retryCount + 1}): ${e.message}")
+                retryCount++
+                if (retryCount < maxRetries) {
+                    Thread.sleep(2000 * retryCount) // Her denemede daha uzun bekle
                 }
             }
-            
-            return response.document
-        } catch (e: Exception) {
-            Log.e("TRanimaci", "Sayfa yüklenirken hata: ${e.message}")
-            // Tekrar dene
-            try {
-                Thread.sleep(2000) // 2 saniye bekle
-                return app.get(url, headers = cloudflareHeaders).document
-            } catch (e2: Exception) {
-                throw e2
-            }
         }
+        
+        // Tüm denemeler başarısız
+        throw Exception("Cloudflare koruması aşılamadı: $url")
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -128,11 +159,17 @@ class TRanimaci : MainAPI() {
 
         val episodeses = mutableListOf<Episode>()
 
-        // Bölümleri bul - farklı selector'ları dene
+        // Bölümleri bul
         var episodeLinks = document.select("a[href*='/video/']")
         if (episodeLinks.isEmpty()) {
-            // Alternatif selector
             episodeLinks = document.select("a[href^='/video/']")
+        }
+        
+        if (episodeLinks.isEmpty()) {
+            // Tüm linkleri kontrol et
+            episodeLinks = document.select("a").filter { 
+                it.attr("href").contains("/video/") || it.attr("href").contains("bolum")
+            }
         }
         
         for (link in episodeLinks) {
@@ -151,24 +188,6 @@ class TRanimaci : MainAPI() {
                 this.episode = epEpisode
             }
             episodeses.add(newEpisode)
-        }
-
-        // Eğer hala bölüm yoksa, tüm bağlantıları kontrol et
-        if (episodeses.isEmpty()) {
-            val allLinks = document.select("a")
-            for (link in allLinks) {
-                val href = link.attr("href")
-                if (href.contains("/video/") || href.contains("bolum")) {
-                    val epHref = fixUrlNull(href) ?: continue
-                    val epName = link.text()?.trim() ?: "Bölüm ${episodeses.size + 1}"
-                    
-                    val newEpisode = newEpisode(epHref) {
-                        this.name = epName
-                        this.episode = episodeses.size + 1
-                    }
-                    episodeses.add(newEpisode)
-                }
-            }
         }
 
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeses) {
