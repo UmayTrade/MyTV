@@ -10,6 +10,7 @@ import com.lagradost.cloudstream3.utils.*
 import org.json.*
 import org.jsoup.Jsoup
 import java.net.URLEncoder
+import kotlinx.coroutines.delay  // delay için import eklendi
 
 class TRanimaci : MainAPI() {
     override var mainUrl              = "https://tranimaci.com"
