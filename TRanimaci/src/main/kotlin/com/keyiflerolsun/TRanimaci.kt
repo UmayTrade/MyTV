@@ -4,10 +4,12 @@ package com.keyiflerolsun
 
 import android.util.Log
 import org.jsoup.nodes.Element
+import org.jsoup.nodes.Document
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import org.json.JSONArray
+import org.json.*
 import org.jsoup.Jsoup
+import java.net.URLEncoder
 
 class TRanimaci : MainAPI() {
     override var mainUrl              = "https://tranimaci.com"
@@ -18,72 +20,70 @@ class TRanimaci : MainAPI() {
     override val supportedTypes       = setOf(TvType.Anime)
 
     override var sequentialMainPage = true
-    override var sequentialMainPageDelay       = 500L
-    override var sequentialMainPageScrollDelay = 500L
+    override var sequentialMainPageDelay       = 1000L  // Cloudflare için daha yavaş
+    override var sequentialMainPageScrollDelay = 1000L
 
-    private val headers = mapOf(
+    // Cloudflare için özel headerlar
+    private val cloudflareHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer" to "https://tranimaci.com/"
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
+        "Accept-Encoding" to "gzip, deflate, br",
+        "Connection" to "keep-alive",
+        "Upgrade-Insecure-Requests" to "1",
+        "Sec-Fetch-Dest" to "document",
+        "Sec-Fetch-Mode" to "navigate",
+        "Sec-Fetch-Site" to "none",
+        "Sec-Fetch-User" to "?1",
+        "Cache-Control" to "max-age=0"
     )
 
     override val mainPage = mainPageOf(
-        "${mainUrl}/category/action"         to "Aksiyon",
-        "${mainUrl}/category/cars"           to "Arabalar",
-        "${mainUrl}/category/supernatural"   to "Doğaüstü",
-        "${mainUrl}/category/drama"          to "Dram",
-        "${mainUrl}/category/ecchi"          to "Ecchi",
-        "${mainUrl}/category/fantasy"        to "Fantastik",
-        "${mainUrl}/category/mystery"        to "Gizem",
-        "${mainUrl}/category/comedy"         to "Komedi",
-        "${mainUrl}/category/horror"         to "Korku",
-        "${mainUrl}/category/adventure"      to "Macera",
-        "${mainUrl}/category/mecha"          to "Mecha",
-        "${mainUrl}/category/music"          to "Müzik",
-        "${mainUrl}/category/romance"        to "Romantik",
-        "${mainUrl}/category/sports"         to "Spor"
+        "${mainUrl}/category/action"                                   to "Aksiyon",
+        "${mainUrl}/category/cars"                                     to "Arabalar",
+        "${mainUrl}/category/supernatural"                             to "Doğaüstü",
+        "${mainUrl}/category/drama"                                    to "Dram",
+        "${mainUrl}/category/ecchi"                                    to "Ecchi",
+        "${mainUrl}/category/fantasy"                                  to "Fantastik",
+        "${mainUrl}/category/mystery"                                  to "Gizem",
+        "${mainUrl}/category/comedy"                                   to "Komedi",
+        "${mainUrl}/category/horror"                                   to "Korku",
+        "${mainUrl}/category/adventure"                                to "Macera",
+        "${mainUrl}/category/mecha"                                    to "Mecha",
+        "${mainUrl}/category/music"                                    to "Müzik",
+        "${mainUrl}/category/romance"                                  to "Romantik",
+        "${mainUrl}/category/sports"                                   to "Spor",
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(request.data, headers = headers).document
+        val document = app.get(request.data, headers = cloudflareHeaders).document
         val home     = document.select("article.bs div.bsx").mapNotNull { it.toMainPageResult() }
 
         return newHomePageResponse(request.name, home)
     }
 
     private fun Element.toMainPageResult(): SearchResponse? {
-        val aTag      = this.selectFirst("a") ?: return null
-        val title     = aTag.text()?.trim() ?: return null
-        val href      = fixUrlNull(aTag.attr("href")) ?: return null
+        val title     = this.selectFirst("a")?.text() ?: return null
+        val href      = fixUrlNull(this.selectFirst("a")?.attr("href")) ?: return null
+        val posterUrl = fixUrlNull(this.selectFirst("div.limit img")?.attr("src"))
 
-        val imgTag    = this.selectFirst("div.limit img") ?: return null
-        val posterUrl = fixUrlNull(
-            imgTag.attr("data-src").takeIf { it.isNotBlank() }
-                ?: imgTag.attr("src").takeIf { it.isNotBlank() }
-                ?: imgTag.attr("data-lazy-src").takeIf { it.isNotBlank() }
-        )
-
-        return newAnimeSearchResponse(title, href, TvType.Anime) {
-            this.posterUrl = posterUrl
-        }
+        return newAnimeSearchResponse(title, href, TvType.Anime) { this.posterUrl = posterUrl }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("${mainUrl}/search?name=${query}", headers = headers).document
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        val document = app.get("${mainUrl}/search?name=${encodedQuery}", headers = cloudflareHeaders).document
+
         return document.select("article.bs div.bsx").mapNotNull { it.toMainPageResult() }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
     override suspend fun load(url: String): LoadResponse? {
-        val document = app.get(url, headers = headers).document
+        val document = app.get(url, headers = cloudflareHeaders).document
 
         val title       = document.selectFirst("h1")?.text()?.trim() ?: return null
-
-        val poster      = fixUrlNull(
-            document.selectFirst("div.thumb img")?.attr("data-src")?.takeIf { it.isNotBlank() }
-                ?: document.selectFirst("div.thumb img")?.attr("src")
-        )
-
+        val poster      = fixUrlNull(document.selectFirst("div.thumb img")?.attr("src"))
         val description = document.selectFirst("div.anime-description")?.text()?.trim()
         val tags        = document.select("div#genxed a[href*='/category']").map { it.text() }
 
@@ -92,8 +92,8 @@ class TRanimaci : MainAPI() {
         for (bolum in document.select("div.eplister ul li a")) {
             val epHref = fixUrlNull(bolum.attr("href")) ?: continue
             val epName = bolum.selectFirst(".epl-title")?.text()?.trim() ?: continue
-            val epEpisode = epName.replace(Regex("""[^\d]"""), "").trim().toIntOrNull()
-
+            val epEpisode = epName.replace("Bölüm", "").trim().toIntOrNull()
+    
             val newEpisode = newEpisode(epHref) {
                 this.name = epName
                 this.episode = epEpisode
@@ -101,11 +101,10 @@ class TRanimaci : MainAPI() {
             episodeses.add(newEpisode)
         }
 
-        return newAnimeLoadResponse(title, url, TvType.Anime) {
+        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeses) {
             this.posterUrl = poster
             this.plot = description
             this.tags = tags
-            addEpisodes(episodeses)
         }
     }
 
@@ -116,103 +115,82 @@ class TRanimaci : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         Log.d("ANI", "data » $data")
-        val document = app.get(data, headers = headers).document
+        
+        // Cloudflare korumasını aşmak için özel headerlar
+        val videoHeaders = mapOf(
+            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
+            "Referer" to "https://tranimaci.com/",
+            "Origin" to "https://tranimaci.com"
+        )
+        
+        val document = app.get(data, headers = cloudflareHeaders + videoHeaders).document
 
+        // 1. video_source içeren <script> etiketi
         val scriptContent = document.select("script").firstOrNull {
             it.html().contains("video_source")
-        }?.html() ?: run {
-            Log.d("ANI", "video_source script bulunamadı")
-            return false
-        }
+        }?.html() ?: return false
 
-        val videoSourceJson = try {
-            Regex("""video_source\s*=\s*`(\[.*?])`""", RegexOption.DOT_MATCHES_ALL)
-                .find(scriptContent)?.groups?.get(1)?.value
-                ?: Regex("""video_source\s*=\s*"(\[.*?])"""", RegexOption.DOT_MATCHES_ALL)
-                    .find(scriptContent)?.groups?.get(1)?.value
-                ?: Regex("""video_source\s*=\s*'(\[.*?])'""", RegexOption.DOT_MATCHES_ALL)
-                    .find(scriptContent)?.groups?.get(1)?.value
-        } catch (e: Exception) {
-            Log.d("ANI", "video_source parse hatası: ${e.message}")
-            return false
-        } ?: run {
-            Log.d("ANI", "video_source JSON bulunamadı")
-            return false
-        }
+        // 2. video_source içindeki JSON array'i çek
+        val videoSourceJson = Regex("""video_source\s*=\s*`(\[.*?])`""", RegexOption.DOT_MATCHES_ALL)
+            .find(scriptContent)
+            ?.groups?.get(1)
+            ?.value
+            ?: return false
 
-        val videoSourceArray = try {
-            JSONArray(videoSourceJson)
-        } catch (e: Exception) {
-            Log.d("ANI", "video_source JSONArray hatası: ${e.message}")
-            return false
-        }
+        val videoSourceArray = JSONArray(videoSourceJson)
 
+        // 3. Her bir API URL'sine istek at
         for (i in 0 until videoSourceArray.length()) {
             val source = videoSourceArray.getJSONObject(i)
-            val apiUrl = source.optString("url") ?: continue
+            val apiUrl = source.getString("url")
             Log.d("ANI", "apiUrl » $apiUrl")
 
-            val apiHtml = try {
-                app.get(apiUrl, headers = mapOf(
-                    "Referer" to "https://tranimaci.com/",
-                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                )).text
-            } catch (e: Exception) {
-                Log.d("ANI", "API isteği hatası: ${e.message}")
-                continue
-            }
+            // API için özel headerlar
+            val apiHeaders = mapOf(
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
+                "Referer" to "https://tranimaci.com/",
+                "Origin" to "https://tranimaci.com",
+                "Sec-Fetch-Dest" to "iframe",
+                "Sec-Fetch-Mode" to "navigate",
+                "Sec-Fetch-Site" to "cross-site"
+            )
 
+            // 4. API sayfasını çek - Cloudflare için gecikme ekle
+            delay(500)
+            val apiHtml = app.get(apiUrl, headers = cloudflareHeaders + apiHeaders).text
             val apiDoc = Jsoup.parse(apiHtml)
+            Log.d("ANI", "apiDoc » ${apiDoc.html().take(500)}")
 
+            // 5. const sources = [...] içeren <script> bul
             val sourcesScript = apiDoc.select("script").firstOrNull {
-                val html = it.html()
-                html.contains("const sources") || html.contains("var sources")
+                it.html().contains("const sources")
             } ?: continue
 
-            val scriptHtml = sourcesScript.html()
+            val sourcesArrayRaw = Regex("""const\s+sources\s*=\s*(\[[\s\S]*?])\s*;""")
+                .find(sourcesScript.html())
+                ?.groups?.get(1)
+                ?.value
+                ?: continue
 
-            val sourcesArrayRaw = try {
-                Regex("""(?:const|var)\s+sources\s*=\s*(\[[\s\S]*?])\s*;""")
-                    .find(scriptHtml)?.groups?.get(1)?.value
-            } catch (e: Exception) {
-                Log.d("ANI", "sources regex hatası: ${e.message}")
-                continue
-            } ?: continue
-
-            val mp4Array = try {
-                JSONArray(sourcesArrayRaw)
-            } catch (e: Exception) {
-                Log.d("ANI", "mp4Array parse hatası: ${e.message}")
-                continue
-            }
-
+            // 6. MP4 linklerini JSON olarak parse et
+            val mp4Array = JSONArray(sourcesArrayRaw)
             Log.d("ANI", "mp4Array » $mp4Array")
 
             for (j in 0 until mp4Array.length()) {
                 val mp4 = mp4Array.getJSONObject(j)
-                val rawSrc = mp4.optString("src") ?: continue
+                val videoUrl = "https://api.animeuzayi.com" + mp4.getString("src")
+                val quality = mp4.optInt("size", Qualities.Unknown.value)
 
-                val videoUrl = when {
-                    rawSrc.startsWith("http") -> rawSrc
-                    rawSrc.startsWith("//") -> "https:$rawSrc"
-                    rawSrc.startsWith("/") -> "https://api.animeuzayi.com$rawSrc"
-                    else -> "https://api.animeuzayi.com/$rawSrc"
-                }
-
-                val quality = when {
-                    mp4.has("size") -> mp4.optInt("size", Qualities.Unknown.value)
-                    mp4.has("label") -> {
-                        val label = mp4.optString("label", "")
-                        when {
-                            label.contains("1080") -> Qualities.P1080.value
-                            label.contains("720") -> Qualities.P720.value
-                            label.contains("480") -> Qualities.P480.value
-                            label.contains("360") -> Qualities.P360.value
-                            else -> Qualities.Unknown.value
-                        }
-                    }
-                    else -> Qualities.Unknown.value
-                }
+                // Video linki için özel headerlar
+                val videoLinkHeaders = mapOf(
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Referer" to "https://api.animeuzayi.com/",
+                    "Origin" to "https://api.animeuzayi.com"
+                )
 
                 callback.invoke(
                     newExtractorLink(
@@ -223,6 +201,7 @@ class TRanimaci : MainAPI() {
                     ) {
                         this.referer = "https://api.animeuzayi.com/"
                         this.quality = quality
+                        this.headers = videoLinkHeaders
                     }
                 )
             }
