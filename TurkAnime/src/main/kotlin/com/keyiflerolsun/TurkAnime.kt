@@ -333,29 +333,30 @@ class TurkAnime : MainAPI() {
 
     /**
      * ExtractorLink oluşturur ve callback ile gönderir
-     * NOT: Bu fonksiyon suspend değil, doğrudan callback kullanıyor
+     * newExtractorLink kullanır (deprecated değil)
      */
-    private fun createExtractorLink(
+    private suspend fun createExtractorLink(
         url: String, 
         referer: String, 
         name: String, 
         callback: (ExtractorLink) -> Unit
     ) {
-        val link = ExtractorLink(
+        val link = newExtractorLink(
             source = this.name,
             name = "$name - TurkAnime",
             url = url,
-            referer = referer,
-            quality = Qualities.Unknown.value,
-            isM3u8 = true,
-            headers = mapOf(
+            type = ExtractorLinkType.M3U8
+        ) {
+            this.referer = referer
+            this.quality = Qualities.Unknown.value
+            this.headers = mapOf(
                 "Referer" to referer,
                 "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept" to "*/*",
                 "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
                 "Connection" to "keep-alive"
             )
-        )
+        }
         callback(link)
     }
 }
