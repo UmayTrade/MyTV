@@ -97,256 +97,295 @@ class TRanimaci : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("TRanimaci", "loadLinks başladı - data: $data")
+        Log.d("TRanimaci", "=== loadLinks BAŞLADI ===")
+        Log.d("TRanimaci", "URL: $data")
         
         try {
+            // Sayfayı yükle
             val document = app.get(data).document
+            Log.d("TRanimaci", "Sayfa yüklendi, title: ${document.title()}")
 
-            // 1. video_source içeren <script> etiketi
-            val scriptContent = document.select("script").firstOrNull {
-                it.html().contains("video_source")
-            }?.html() ?: run {
-                Log.e("TRanimaci", "video_source script bulunamadı!")
-                return false
+            // TÜM script'leri kontrol et
+            val allScripts = document.select("script")
+            Log.d("TRanimaci", "Toplam script sayısı: ${allScripts.size}")
+
+            // 1. YÖNTEM: video_source array'ini bul
+            var linkBulundu = false
+            
+            for (script in allScripts) {
+                val scriptHtml = script.html()
+                
+                // video_source kontrolü
+                if (scriptHtml.contains("video_source")) {
+                    Log.d("TRanimaci", "video_source içeren script bulundu!")
+                    linkBulundu = parseVideoSource(scriptHtml, callback)
+                    if (linkBulundu) {
+                        Log.d("TRanimaci", "video_source'dan link bulundu!")
+                        return true
+                    }
+                }
+                
+                // player_config kontrolü
+                if (scriptHtml.contains("player_config") || scriptHtml.contains("playerConfig")) {
+                    Log.d("TRanimaci", "player_config içeren script bulundu!")
+                    linkBulundu = parsePlayerConfig(scriptHtml, callback)
+                    if (linkBulundu) {
+                        Log.d("TRanimaci", "player_config'dan link bulundu!")
+                        return true
+                    }
+                }
             }
 
-            Log.d("TRanimaci", "scriptContent bulundu, uzunluk: ${scriptContent.length}")
+            // 2. YÖNTEM: iframe içinde video ara
+            val iframe = document.selectFirst("iframe")
+            if (iframe != null) {
+                val iframeSrc = iframe.attr("src")
+                Log.d("TRanimaci", "iframe bulundu: $iframeSrc")
+                if (iframeSrc.isNotEmpty()) {
+                    linkBulundu = parseIframe(iframeSrc, callback)
+                    if (linkBulundu) {
+                        Log.d("TRanimaci", "iframe'den link bulundu!")
+                        return true
+                    }
+                }
+            }
 
-            // 2. video_source içindeki JSON array'i çek
+            // 3. YÖNTEM: video etiketi ara
+            val videoElements = document.select("video, source")
+            for (video in videoElements) {
+                var videoUrl = video.attr("src")
+                if (videoUrl.isEmpty()) {
+                    videoUrl = video.attr("data-src")
+                }
+                if (videoUrl.isEmpty()) {
+                    videoUrl = video.attr("file")
+                }
+                if (videoUrl.isNotEmpty()) {
+                    Log.d("TRanimaci", "Video elementi bulundu: $videoUrl")
+                    callback.invoke(
+                        newExtractorLink(
+                            source = this.name,
+                            name = "${this.name} - Video",
+                            url = videoUrl,
+                            type = ExtractorLinkType.VIDEO
+                        ) {
+                            this.referer = mainUrl
+                        }
+                    )
+                    return true
+                }
+            }
+
+            // 4. YÖNTEM: HTML içinde mp4/m3u8 ara
+            val htmlContent = document.html()
+            val urlPatterns = listOf(
+                Regex("""(https?://[^\s"'<>]+\.mp4)"""),
+                Regex("""(https?://[^\s"'<>]+\.m3u8)"""),
+                Regex("""(https?://[^\s"'<>]+/video/[^\s"'<>]+)""")
+            )
+            
+            for (pattern in urlPatterns) {
+                val match = pattern.find(htmlContent)
+                if (match != null) {
+                    val videoUrl = match.groupValues[1]
+                    Log.d("TRanimaci", "HTML içinde video URL bulundu: $videoUrl")
+                    callback.invoke(
+                        newExtractorLink(
+                            source = this.name,
+                            name = "${this.name} - Direct",
+                            url = videoUrl,
+                            type = if (videoUrl.endsWith(".m3u8")) ExtractorLinkType.HLS else ExtractorLinkType.VIDEO
+                        ) {
+                            this.referer = mainUrl
+                        }
+                    )
+                    return true
+                }
+            }
+
+            Log.e("TRanimaci", "Hiçbir link bulunamadı!")
+            return false
+
+        } catch (e: Exception) {
+            Log.e("TRanimaci", "loadLinks HATASI: ${e.message}", e)
+            return false
+        }
+    }
+
+    // video_source parse et
+    private suspend fun parseVideoSource(scriptHtml: String, callback: (ExtractorLink) -> Unit): Boolean {
+        try {
+            // video_source içindeki JSON'u bul
             val videoSourceMatch = Regex("""video_source\s*=\s*`(\[[\s\S]*?])`""", RegexOption.DOT_MATCHES_ALL)
-                .find(scriptContent)
+                .find(scriptHtml)
             
             if (videoSourceMatch == null) {
-                Log.e("TRanimaci", "video_source regex eşleşmesi bulunamadı!")
+                Log.e("TRanimaci", "video_source JSON bulunamadı!")
                 return false
             }
 
             val videoSourceJson = videoSourceMatch.groupValues[1]
-            Log.d("TRanimaci", "videoSourceJson: $videoSourceJson")
+            Log.d("TRanimaci", "videoSourceJson: ${videoSourceJson.take(200)}")
 
             val videoSourceArray = JSONArray(videoSourceJson)
             Log.d("TRanimaci", "videoSourceArray uzunluğu: ${videoSourceArray.length()}")
 
-            // 3. Her bir API URL'sine istek at
-            var linkBulundu = false
-            
             for (i in 0 until videoSourceArray.length()) {
                 try {
                     val source = videoSourceArray.getJSONObject(i)
                     val apiUrl = source.getString("url")
                     Log.d("TRanimaci", "API URL $i: $apiUrl")
 
-                    // 4. API sayfasını çek
-                    val apiResponse = app.get(
-                        apiUrl, 
+                    // API'ye istek at
+                    val response = app.get(
+                        apiUrl,
                         headers = mapOf(
                             "Referer" to mainUrl,
-                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                            "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
-                            "Connection" to "keep-alive"
+                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                         )
                     )
                     
-                    val apiHtml = apiResponse.text
-                    Log.d("TRanimaci", "API HTML uzunluğu: ${apiHtml.length}")
+                    val apiHtml = response.text
+                    Log.d("TRanimaci", "API cevap uzunluğu: ${apiHtml.length}")
 
-                    // 5. const sources = [...] içeren <script> bul
-                    val apiDoc = Jsoup.parse(apiHtml)
-                    val sourcesScript = apiDoc.select("script").firstOrNull {
-                        it.html().contains("const sources") || it.html().contains("var sources")
-                    }
-                    
-                    if (sourcesScript == null) {
-                        Log.e("TRanimaci", "sources script bulunamadı API $i")
-                        continue
-                    }
-
-                    Log.d("TRanimaci", "sourcesScript bulundu, içerik: ${sourcesScript.html().take(200)}")
-
-                    // 6. sources array'ini çek
+                    // sources array'ini bul
                     val sourcesMatch = Regex("""(?:const|var|let)\s+sources\s*=\s*(\[[\s\S]*?])\s*;""")
-                        .find(sourcesScript.html())
+                        .find(apiHtml)
                     
                     if (sourcesMatch == null) {
-                        Log.e("TRanimaci", "sources array regex eşleşmesi bulunamadı API $i")
+                        Log.e("TRanimaci", "sources array bulunamadı!")
                         continue
                     }
 
                     val sourcesArrayRaw = sourcesMatch.groupValues[1]
                     Log.d("TRanimaci", "sourcesArrayRaw: ${sourcesArrayRaw.take(200)}")
 
-                    // 7. MP4 linklerini JSON olarak parse et
-                    try {
-                        val mp4Array = JSONArray(sourcesArrayRaw)
-                        Log.d("TRanimaci", "mp4Array uzunluğu: ${mp4Array.length()}")
+                    val mp4Array = JSONArray(sourcesArrayRaw)
+                    Log.d("TRanimaci", "mp4Array uzunluğu: ${mp4Array.length()}")
 
-                        for (j in 0 until mp4Array.length()) {
-                            try {
-                                val mp4 = mp4Array.getJSONObject(j)
-                                var videoUrl = mp4.getString("src")
-                                
-                                // URL'yi düzelt
-                                if (!videoUrl.startsWith("http")) {
-                                    if (videoUrl.startsWith("//")) {
-                                        videoUrl = "https:" + videoUrl
-                                    } else if (videoUrl.startsWith("/")) {
-                                        videoUrl = "https://api.animeuzayi.com" + videoUrl
-                                    } else {
-                                        videoUrl = "https://api.animeuzayi.com/" + videoUrl
-                                    }
-                                }
-                                
-                                val quality = try {
-                                    val size = mp4.optInt("size", 0)
-                                    when {
-                                        size >= 1080 -> Qualities.Unknown.value // 1080p
-                                        size >= 720 -> Qualities.Unknown.value  // 720p
-                                        size >= 480 -> Qualities.Unknown.value  // 480p
-                                        else -> Qualities.Unknown.value
-                                    }
-                                } catch (e: Exception) {
-                                    Qualities.Unknown.value
-                                }
-
-                                Log.d("TRanimaci", "Video URL bulundu: $videoUrl, quality: $quality")
-
-                                callback.invoke(
-                                    newExtractorLink(
-                                        source = this.name,
-                                        name = "${this.name} - ${if (quality > 0) "${quality}p" else "SD"}",
-                                        url = videoUrl,
-                                        type = ExtractorLinkType.VIDEO
-                                    ) {
-                                        this.referer = "https://api.animeuzayi.com/"
-                                        this.quality = quality
-                                        this.headers = mapOf(
-                                            "Referer" to mainUrl,
-                                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                                        )
-                                    }
-                                )
-                                linkBulundu = true
-                            } catch (e: Exception) {
-                                Log.e("TRanimaci", "MP4 parse hatası j=$j: ${e.message}")
+                    for (j in 0 until mp4Array.length()) {
+                        try {
+                            val mp4 = mp4Array.getJSONObject(j)
+                            var videoUrl = mp4.getString("src")
+                            
+                            // URL'yi düzelt
+                            if (!videoUrl.startsWith("http")) {
+                                videoUrl = "https://api.animeuzayi.com" + videoUrl
                             }
-                        }
-                    } catch (e: Exception) {
-                        Log.e("TRanimaci", "JSONArray parse hatası: ${e.message}")
-                    }
-                } catch (e: Exception) {
-                    Log.e("TRanimaci", "API $i işlenirken hata: ${e.message}")
-                }
-            }
+                            
+                            val quality = mp4.optInt("size", 0)
+                            Log.d("TRanimaci", "Video URL: $videoUrl, Quality: $quality")
 
-            // 8. Eğer hiç link bulunamadıysa, alternatif yöntem dene
-            if (!linkBulundu) {
-                Log.d("TRanimaci", "Hiç link bulunamadı, alternatif yöntem deneniyor...")
-                linkBulundu = tryAlternatifLinkler(document, callback)
-            }
-
-            return linkBulundu
-        } catch (e: Exception) {
-            Log.e("TRanimaci", "loadLinks hatası: ${e.message}", e)
-            return false
-        }
-    }
-
-    private suspend fun tryAlternatifLinkler(
-        document: Document,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        try {
-            // Alternatif 1: iframe içinde video olabilir
-            val iframe = document.selectFirst("iframe")
-            if (iframe != null) {
-                val iframeSrc = iframe.attr("src")
-                if (iframeSrc.isNotEmpty()) {
-                    Log.d("TRanimaci", "iframe bulundu: $iframeSrc")
-                    // iframe içeriğini kontrol et
-                    val iframeDoc = app.get(iframeSrc).document
-                    val videoElement = iframeDoc.selectFirst("video source, video")
-                    if (videoElement != null) {
-                        val videoUrl = videoElement.attr("src")
-                        if (videoUrl.isNotEmpty()) {
                             callback.invoke(
                                 newExtractorLink(
                                     source = this.name,
-                                    name = "${this.name} - iframe",
+                                    name = "${this.name} - ${if (quality > 0) "${quality}p" else "SD"}",
                                     url = videoUrl,
                                     type = ExtractorLinkType.VIDEO
                                 ) {
-                                    this.referer = mainUrl
+                                    this.referer = "https://api.animeuzayi.com/"
+                                    this.quality = quality
                                 }
                             )
                             return true
+                        } catch (e: Exception) {
+                            Log.e("TRanimaci", "MP4 parse hatası: ${e.message}")
                         }
+                    }
+                } catch (e: Exception) {
+                    Log.e("TRanimaci", "API $i hatası: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("TRanimaci", "parseVideoSource hatası: ${e.message}")
+        }
+        return false
+    }
+
+    // player_config parse et
+    private suspend fun parsePlayerConfig(scriptHtml: String, callback: (ExtractorLink) -> Unit): Boolean {
+        try {
+            // player_config içindeki JSON'u bul
+            val configMatch = Regex("""(?:player_config|playerConfig)\s*=\s*({[\s\S]*?});""")
+                .find(scriptHtml)
+            
+            if (configMatch == null) {
+                Log.e("TRanimaci", "player_config bulunamadı!")
+                return false
+            }
+
+            val configJson = configMatch.groupValues[1]
+            Log.d("TRanimaci", "configJson: ${configJson.take(200)}")
+
+            val config = JSONObject(configJson)
+            
+            // sources array'ini bul
+            val sources = config.optJSONArray("sources")
+            if (sources != null) {
+                for (i in 0 until sources.length()) {
+                    val source = sources.getJSONObject(i)
+                    var videoUrl = source.getString("src")
+                    
+                    if (videoUrl.isNotEmpty()) {
+                        Log.d("TRanimaci", "player_config video URL: $videoUrl")
+                        callback.invoke(
+                            newExtractorLink(
+                                source = this.name,
+                                name = "${this.name} - Player",
+                                url = videoUrl,
+                                type = if (videoUrl.endsWith(".m3u8")) ExtractorLinkType.HLS else ExtractorLinkType.VIDEO
+                            ) {
+                                this.referer = mainUrl
+                            }
+                        )
+                        return true
                     }
                 }
             }
-
-            // Alternatif 2: Direkt video etiketi
-            val video = document.selectFirst("video")
-            if (video != null) {
-                val videoUrl = video.attr("src")
-                if (videoUrl.isNotEmpty()) {
-                    callback.invoke(
-                        newExtractorLink(
-                            source = this.name,
-                            name = "${this.name} - video",
-                            url = videoUrl,
-                            type = ExtractorLinkType.VIDEO
-                        ) {
-                            this.referer = mainUrl
-                        }
-                    )
-                    return true
-                }
-            }
-
-            // Alternatif 3: MP4 dosyasına direkt link
-            val mp4Links = document.select("a[href$=.mp4], source[src$=.mp4]")
-            for (element in mp4Links) {
-                val videoUrl = element.attr("href").ifEmpty { element.attr("src") }
-                if (videoUrl.isNotEmpty()) {
-                    callback.invoke(
-                        newExtractorLink(
-                            source = this.name,
-                            name = "${this.name} - mp4",
-                            url = videoUrl,
-                            type = ExtractorLinkType.VIDEO
-                        ) {
-                            this.referer = mainUrl
-                        }
-                    )
-                    return true
-                }
-            }
-
-            // Alternatif 4: player içinde gizli link
-            val playerScript = document.select("script").firstOrNull {
-                it.html().contains("player") || it.html().contains("video")
-            }
-            if (playerScript != null) {
-                val urlMatch = Regex("""(https?://[^\s"'<>]+\.(?:mp4|m3u8))""").find(playerScript.html())
-                if (urlMatch != null) {
-                    val videoUrl = urlMatch.groupValues[1]
-                    callback.invoke(
-                        newExtractorLink(
-                            source = this.name,
-                            name = "${this.name} - player",
-                            url = videoUrl,
-                            type = ExtractorLinkType.VIDEO
-                        ) {
-                            this.referer = mainUrl
-                        }
-                    )
-                    return true
-                }
-            }
-
         } catch (e: Exception) {
-            Log.e("TRanimaci", "Alternatif link hatası: ${e.message}")
+            Log.e("TRanimaci", "parsePlayerConfig hatası: ${e.message}")
+        }
+        return false
+    }
+
+    // iframe parse et
+    private suspend fun parseIframe(iframeUrl: String, callback: (ExtractorLink) -> Unit): Boolean {
+        try {
+            val response = app.get(iframeUrl)
+            val iframeHtml = response.text
+            Log.d("TRanimaci", "iframe içeriği uzunluğu: ${iframeHtml.length}")
+
+            // iframe içinde video ara
+            val videoPatterns = listOf(
+                Regex("""(https?://[^\s"'<>]+\.mp4)"""),
+                Regex("""(https?://[^\s"'<>]+\.m3u8)"""),
+                Regex("""file\s*:\s*['"]([^'"]+)['"]"""),
+                Regex("""src\s*:\s*['"]([^'"]+)['"]""")
+            )
+
+            for (pattern in videoPatterns) {
+                val match = pattern.find(iframeHtml)
+                if (match != null) {
+                    var videoUrl = match.groupValues[1]
+                    if (!videoUrl.startsWith("http")) {
+                        videoUrl = "https:" + videoUrl
+                    }
+                    Log.d("TRanimaci", "iframe içinde video URL: $videoUrl")
+                    callback.invoke(
+                        newExtractorLink(
+                            source = this.name,
+                            name = "${this.name} - iframe",
+                            url = videoUrl,
+                            type = if (videoUrl.endsWith(".m3u8")) ExtractorLinkType.HLS else ExtractorLinkType.VIDEO
+                        ) {
+                            this.referer = mainUrl
+                        }
+                    )
+                    return true
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("TRanimaci", "parseIframe hatası: ${e.message}")
         }
         return false
     }
