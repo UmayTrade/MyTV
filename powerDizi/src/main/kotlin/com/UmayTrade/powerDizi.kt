@@ -8,7 +8,7 @@ import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import java.io.InputStream
 
 class powerDizi : MainAPI() {
-    override var mainUrl              = "https://raw.githubusercontent.com/GitLatte/patr0n/site/lists/power-yabanci-dizi.m3u"
+    override var mainUrl              = "https://github.com"
     override var name                 = "powerDizi"
     override val hasMainPage          = true
     override var lang                 = "tr"

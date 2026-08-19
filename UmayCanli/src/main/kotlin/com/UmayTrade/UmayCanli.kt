@@ -8,7 +8,7 @@ import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import java.io.InputStream
 
 class powerDizi : MainAPI() {
-    override var mainUrl              = "https://raw.githubusercontent.com/UmayTrade/extensions/refs/heads/master/umaylist.m3u"
+    override var mainUrl              = "https://github.com"
     override var name                 = "UmayCanli"
     override val hasMainPage          = true
     override var lang                 = "tr"
