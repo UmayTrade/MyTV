@@ -9,9 +9,6 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.json.*
 import org.jsoup.Jsoup
-import java.net.HttpURLConnection
-import java.net.URL
-import javax.net.ssl.HttpsURLConnection
 
 class TRanimaci : MainAPI() {
     override var mainUrl              = "https://tranimaci.com"
@@ -67,7 +64,7 @@ class TRanimaci : MainAPI() {
             try {
                 Log.d("TRanimaci", "Sayfa yükleniyor (deneme ${retryCount + 1}): $url")
                 
-                // Önce normal istek dene
+                // Normal istek dene
                 val response = app.get(url, headers = cloudflareHeaders)
                 val html = response.text
                 
@@ -77,132 +74,148 @@ class TRanimaci : MainAPI() {
                     html.contains("Please wait") ||
                     html.contains("Checking your browser")) {
                     
-                    Log.d("TRanimaci", "Cloudflare challenge tespit edildi! Alternatif yöntem deneniyor...")
+                    Log.d("TRanimaci", "Cloudflare challenge tespit edildi! Bekleniyor...")
                     
-                    // Alternatif: Session ile tekrar dene
-                    try {
-                        Thread.sleep(3000) // 3 saniye bekle
-                        val retryResponse = app.get(url, headers = cloudflareHeaders)
-                        val retryHtml = retryResponse.text
-                        
-                        if (!retryHtml.contains("cf-browser-verification") && 
-                            !retryHtml.contains("challenge-platform")) {
-                            return retryResponse.document
-                        }
-                    } catch (e: Exception) {
-                        Log.e("TRanimaci", "Retry başarısız: ${e.message}")
-                    }
+                    // Bekle ve tekrar dene
+                    val waitTime = (retryCount + 1) * 2000L
+                    Thread.sleep(waitTime)
                     
-                    // Hala challenge varsa, WebView ile almayı dene
-                    try {
-                        Log.d("TRanimaci", "WebView ile sayfa alınmaya çalışılıyor...")
-                        // Cloudstream'in WebView metodunu kullan
-                        val webViewResponse = app.getWebView(url, headers = cloudflareHeaders)
-                        return webViewResponse.document
-                    } catch (e: Exception) {
-                        Log.e("TRanimaci", "WebView başarısız: ${e.message}")
+                    val retryResponse = app.get(url, headers = cloudflareHeaders)
+                    val retryHtml = retryResponse.text
+                    
+                    if (!retryHtml.contains("cf-browser-verification") && 
+                        !retryHtml.contains("challenge-platform") &&
+                        !retryHtml.contains("Please wait")) {
+                        return retryResponse.document
                     }
+                } else {
+                    return response.document
                 }
-                
-                return response.document
                 
             } catch (e: Exception) {
                 Log.e("TRanimaci", "Sayfa yüklenirken hata (deneme ${retryCount + 1}): ${e.message}")
                 retryCount++
                 if (retryCount < maxRetries) {
-                    Thread.sleep(2000 * retryCount) // Her denemede daha uzun bekle
+                    val waitTime = retryCount * 2000L
+                    Thread.sleep(waitTime)
                 }
             }
         }
         
-        // Tüm denemeler başarısız
-        throw Exception("Cloudflare koruması aşılamadı: $url")
+        // Son bir deneme daha
+        try {
+            Log.d("TRanimaci", "Son deneme: $url")
+            val finalResponse = app.get(url, headers = cloudflareHeaders)
+            return finalResponse.document
+        } catch (e: Exception) {
+            Log.e("TRanimaci", "Son deneme de başarısız: ${e.message}")
+            throw Exception("Cloudflare koruması aşılamadı: $url")
+        }
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = getWithCloudflare(request.data)
-        val home = document.select("a.group.block").mapNotNull { it.toMainPageResult() }
-
-        return newHomePageResponse(request.name, home)
+        try {
+            val document = getWithCloudflare(request.data)
+            val home = document.select("a.group.block").mapNotNull { it.toMainPageResult() }
+            return newHomePageResponse(request.name, home)
+        } catch (e: Exception) {
+            Log.e("TRanimaci", "getMainPage hatası: ${e.message}")
+            return newHomePageResponse(request.name, listOf())
+        }
     }
 
     private fun Element.toMainPageResult(): SearchResponse? {
-        val title = this.selectFirst("h3")?.text()?.trim() ?: return null
-        val href = fixUrlNull(this.attr("href")) ?: return null
-        
-        var posterUrl = this.selectFirst("div.relative img")?.attr("src")
-        posterUrl = fixPosterUrl(posterUrl)
-        
-        return newAnimeSearchResponse(title, href, TvType.Anime) { 
-            this.posterUrl = posterUrl
+        try {
+            val title = this.selectFirst("h3")?.text()?.trim() ?: return null
+            val href = fixUrlNull(this.attr("href")) ?: return null
+            
+            var posterUrl = this.selectFirst("div.relative img")?.attr("src")
+            posterUrl = fixPosterUrl(posterUrl)
+            
+            return newAnimeSearchResponse(title, href, TvType.Anime) { 
+                this.posterUrl = posterUrl
+            }
+        } catch (e: Exception) {
+            Log.e("TRanimaci", "toMainPageResult hatası: ${e.message}")
+            return null
         }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = getWithCloudflare("${mainUrl}/arama?q=${query}")
-        return document.select("a.group.block").mapNotNull { it.toMainPageResult() }
+        try {
+            val document = getWithCloudflare("${mainUrl}/arama?q=${query}")
+            return document.select("a.group.block").mapNotNull { it.toMainPageResult() }
+        } catch (e: Exception) {
+            Log.e("TRanimaci", "search hatası: ${e.message}")
+            return listOf()
+        }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
     override suspend fun load(url: String): LoadResponse? {
-        val document = getWithCloudflare(url)
+        try {
+            val document = getWithCloudflare(url)
 
-        val title = document.selectFirst("h1")?.text()?.trim() ?: return null
-        
-        var poster = document.selectFirst("div.relative img")?.attr("src")
-        poster = fixPosterUrl(poster)
-        
-        val description = document.selectFirst("p.text-sm.text-foreground/80.leading-relaxed")?.text()?.trim()
-        
-        val tags = document.select("div.flex.flex-wrap.gap-1.5 span").map { it.text() }
-
-        val episodeses = mutableListOf<Episode>()
-
-        // Bölümleri bul
-        var episodeLinks = document.select("a[href*='/video/']")
-        if (episodeLinks.isEmpty()) {
-            episodeLinks = document.select("a[href^='/video/']")
-        }
-        
-        if (episodeLinks.isEmpty()) {
-            // Tüm linkleri kontrol et
-            episodeLinks = document.select("a").filter { 
-                it.attr("href").contains("/video/") || it.attr("href").contains("bolum")
-            }
-        }
-        
-        for (link in episodeLinks) {
-            val epHref = fixUrlNull(link.attr("href")) ?: continue
-            val epName = link.selectFirst("span")?.text()?.trim() 
-                ?: link.text()?.trim() 
-                ?: "Bölüm ${episodeses.size + 1}"
+            val title = document.selectFirst("h1")?.text()?.trim() ?: return null
             
-            val epEpisode = Regex("""(\d+)\. Bölüm""").find(epName)
-                ?.groupValues?.get(1)?.toIntOrNull()
-                ?: epName.replace("Bölüm", "").trim().toIntOrNull()
-                ?: episodeses.size + 1
+            var poster = document.selectFirst("div.relative img")?.attr("src")
+            poster = fixPosterUrl(poster)
+            
+            val description = document.selectFirst("p.text-sm.text-foreground/80.leading-relaxed")?.text()?.trim()
+            
+            val tags = document.select("div.flex.flex-wrap.gap-1.5 span").map { it.text() }
 
-            val newEpisode = newEpisode(epHref) {
-                this.name = epName
-                this.episode = epEpisode
+            val episodeses = mutableListOf<Episode>()
+
+            // Bölümleri bul - farklı selector'ları dene
+            var episodeLinks = document.select("a[href*='/video/']")
+            if (episodeLinks.isEmpty()) {
+                episodeLinks = document.select("a[href^='/video/']")
             }
-            episodeses.add(newEpisode)
-        }
+            
+            if (episodeLinks.isEmpty()) {
+                // Tüm linkleri kontrol et
+                episodeLinks = document.select("a").filter { 
+                    it.attr("href").contains("/video/") || it.attr("href").contains("bolum")
+                }
+            }
+            
+            for (link in episodeLinks) {
+                val epHref = fixUrlNull(link.attr("href")) ?: continue
+                val epName = link.selectFirst("span")?.text()?.trim() 
+                    ?: link.text()?.trim() 
+                    ?: "Bölüm ${episodeses.size + 1}"
+                
+                val epEpisode = Regex("""(\d+)\. Bölüm""").find(epName)
+                    ?.groupValues?.get(1)?.toIntOrNull()
+                    ?: epName.replace("Bölüm", "").trim().toIntOrNull()
+                    ?: episodeses.size + 1
 
-        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeses) {
-            this.posterUrl = poster
-            this.plot = description
-            this.tags = tags
+                val newEpisode = newEpisode(epHref) {
+                    this.name = epName
+                    this.episode = epEpisode
+                }
+                episodeses.add(newEpisode)
+            }
+
+            return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeses) {
+                this.posterUrl = poster
+                this.plot = description
+                this.tags = tags
+            }
+        } catch (e: Exception) {
+            Log.e("TRanimaci", "load hatası: ${e.message}")
+            return null
         }
     }
 
     private fun fixPosterUrl(url: String?): String? {
         if (url.isNullOrEmpty()) return null
         
-        return when {
-            url.contains("/_next/image?url=") -> {
-                try {
+        return try {
+            when {
+                url.contains("/_next/image?url=") -> {
                     val decodedUrl = java.net.URLDecoder.decode(url, "UTF-8")
                     val match = Regex("""url=([^&]+)""").find(decodedUrl)
                     match?.groupValues?.get(1)?.let { 
@@ -212,13 +225,13 @@ class TRanimaci : MainAPI() {
                             fixUrlNull(it)
                         }
                     }
-                } catch (e: Exception) {
-                    Log.e("TRanimaci", "Poster URL decode hatası: ${e.message}")
-                    url
                 }
+                url.startsWith("http") -> fixUrlNull(url)
+                else -> fixUrlNull(mainUrl + url)
             }
-            url.startsWith("http") -> fixUrlNull(url)
-            else -> fixUrlNull(mainUrl + url)
+        } catch (e: Exception) {
+            Log.e("TRanimaci", "fixPosterUrl hatası: ${e.message}")
+            url
         }
     }
 
