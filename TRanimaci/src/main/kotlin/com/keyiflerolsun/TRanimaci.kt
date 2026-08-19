@@ -49,8 +49,11 @@ class TRanimaci : MainAPI() {
     private fun Element.toMainPageResult(): SearchResponse? {
         val title = this.selectFirst("h3")?.text()?.trim() ?: return null
         val href = fixUrlNull(this.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("div.relative img")?.attr("src"))
-
+        
+        // Poster URL'ini al ve düzelt
+        var posterUrl = this.selectFirst("div.relative img")?.attr("src")
+        posterUrl = fixPosterUrl(posterUrl)
+        
         return newAnimeSearchResponse(title, href, TvType.Anime) { 
             this.posterUrl = posterUrl
         }
@@ -67,19 +70,23 @@ class TRanimaci : MainAPI() {
         val document = app.get(url).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: return null
-        val poster = fixUrlNull(document.selectFirst("div.relative img")?.attr("src"))
+        
+        // Poster URL'ini al ve düzelt
+        var poster = document.selectFirst("div.relative img")?.attr("src")
+        poster = fixPosterUrl(poster)
+        
         val description = document.selectFirst("p.text-sm.text-foreground/80.leading-relaxed")?.text()?.trim()
         
         val tags = document.select("div.flex.flex-wrap.gap-1.5 span").map { it.text() }
 
         val episodeses = mutableListOf<Episode>()
 
-        // Yeni site yapısında bölümler farklı şekilde gösteriliyor
-        // Önce "Tüm Bölümler" butonunu bulalım
         val episodeLinks = document.select("a[href*='/video/']")
         for (link in episodeLinks) {
             val epHref = fixUrlNull(link.attr("href")) ?: continue
-            val epName = link.selectFirst("span")?.text()?.trim() ?: continue
+            val epName = link.selectFirst("span")?.text()?.trim() 
+                ?: link.text()?.trim() 
+                ?: "Bölüm ${episodeses.size + 1}"
             
             val epEpisode = Regex("""(\d+)\. Bölüm""").find(epName)
                 ?.groupValues?.get(1)?.toIntOrNull()
@@ -92,9 +99,7 @@ class TRanimaci : MainAPI() {
             episodeses.add(newEpisode)
         }
 
-        // Eğer hiç bölüm bulunamadıysa, tüm video linklerini dene
         if (episodeses.isEmpty()) {
-            // Alternatif bölüm listesi
             val allVideoLinks = document.select("a[href*='/video/']")
             for (link in allVideoLinks) {
                 val epHref = fixUrlNull(link.attr("href")) ?: continue
@@ -112,6 +117,37 @@ class TRanimaci : MainAPI() {
             this.posterUrl = poster
             this.plot = description
             this.tags = tags
+        }
+    }
+
+    // Poster URL'ini düzelt
+    private fun fixPosterUrl(url: String?): String? {
+        if (url.isNullOrEmpty()) return null
+        
+        return when {
+            // _next/image formatındaki URL'leri düzelt
+            url.contains("/_next/image?url=") -> {
+                try {
+                    // URL'den gerçek resim yolunu çıkar
+                    val decodedUrl = java.net.URLDecoder.decode(url, "UTF-8")
+                    val match = Regex("""url=([^&]+)""").find(decodedUrl)
+                    match?.groupValues?.get(1)?.let { 
+                        // Eğer relative path ise mainUrl ekle
+                        if (it.startsWith("/")) {
+                            fixUrlNull(mainUrl + it)
+                        } else {
+                            fixUrlNull(it)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("TRanimaci", "Poster URL decode hatası: ${e.message}")
+                    url
+                }
+            }
+            // Direkt URL ise
+            url.startsWith("http") -> fixUrlNull(url)
+            // Relative path ise
+            else -> fixUrlNull(mainUrl + url)
         }
     }
 
@@ -157,28 +193,30 @@ class TRanimaci : MainAPI() {
                 val iframeSrc = iframe.attr("src")
                 if (iframeSrc.isNotEmpty()) {
                     Log.d("TRanimaci", "iframe bulundu: $iframeSrc")
-                    val iframeDoc = app.get(iframeSrc).document
-                    
-                    // iframe içinde video source ara
-                    val innerVideo = iframeDoc.select("source[src], video[src]").first()
-                    if (innerVideo != null) {
-                        var videoUrl = innerVideo.attr("src")
-                        if (videoUrl.isEmpty()) {
-                            videoUrl = innerVideo.attr("data-src")
+                    try {
+                        val iframeDoc = app.get(iframeSrc).document
+                        val innerVideo = iframeDoc.select("source[src], video[src]").first()
+                        if (innerVideo != null) {
+                            var videoUrl = innerVideo.attr("src")
+                            if (videoUrl.isEmpty()) {
+                                videoUrl = innerVideo.attr("data-src")
+                            }
+                            if (videoUrl.isNotEmpty()) {
+                                callback.invoke(
+                                    newExtractorLink(
+                                        source = this.name,
+                                        name = "${this.name} - iframe",
+                                        url = videoUrl,
+                                        type = ExtractorLinkType.VIDEO
+                                    ) {
+                                        this.referer = mainUrl
+                                    }
+                                )
+                                return true
+                            }
                         }
-                        if (videoUrl.isNotEmpty()) {
-                            callback.invoke(
-                                newExtractorLink(
-                                    source = this.name,
-                                    name = "${this.name} - iframe",
-                                    url = videoUrl,
-                                    type = ExtractorLinkType.VIDEO
-                                ) {
-                                    this.referer = mainUrl
-                                }
-                            )
-                            return true
-                        }
+                    } catch (e: Exception) {
+                        Log.e("TRanimaci", "iframe içeriği yüklenemedi: ${e.message}")
                     }
                 }
             }
@@ -188,7 +226,6 @@ class TRanimaci : MainAPI() {
             for (script in scripts) {
                 val scriptHtml = script.html()
                 
-                // video linklerini ara
                 val videoUrlMatch = Regex("""(https?://[^\s"'<>]+\.(?:mp4|m3u8))""").find(scriptHtml)
                 if (videoUrlMatch != null) {
                     val videoUrl = videoUrlMatch.groupValues[1]
@@ -198,7 +235,7 @@ class TRanimaci : MainAPI() {
                             source = this.name,
                             name = "${this.name} - Script",
                             url = videoUrl,
-                            type = if (videoUrl.endsWith(".m3u8")) ExtractorLinkType.VIDEO else ExtractorLinkType.VIDEO
+                            type = ExtractorLinkType.VIDEO
                         ) {
                             this.referer = mainUrl
                         }
@@ -206,7 +243,6 @@ class TRanimaci : MainAPI() {
                     return true
                 }
 
-                // video_source veya player_config ara
                 if (scriptHtml.contains("video_source") || scriptHtml.contains("player_config") || scriptHtml.contains("sources")) {
                     Log.d("TRanimaci", "Video konfigürasyonu içeren script bulundu")
                     val success = parseVideoConfig(scriptHtml, callback)
@@ -272,7 +308,6 @@ class TRanimaci : MainAPI() {
                         val response = app.get(apiUrl)
                         val apiHtml = response.text
                         
-                        // sources array'ini bul
                         val sourcesMatch = Regex("""(?:const|var|let)\s+sources\s*=\s*(\[[\s\S]*?])\s*;""")
                             .find(apiHtml)
                         
