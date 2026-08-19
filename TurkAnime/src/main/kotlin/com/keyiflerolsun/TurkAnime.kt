@@ -7,7 +7,7 @@ import org.jsoup.nodes.Element
 import org.jsoup.nodes.Document
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import org.jsoup.Jsoup
+import kotlinx.coroutines.delay
 
 class TurkAnime : MainAPI() {
     override var mainUrl              = "https://www.turkanime.tv"
@@ -16,6 +16,10 @@ class TurkAnime : MainAPI() {
     override var lang                 = "tr"
     override val hasQuickSearch       = true
     override val supportedTypes       = setOf(TvType.Anime)
+
+    // API Endpoint'leri
+    private val API_BASE = "${mainUrl}/api"
+    private val VIDEO_API = "${mainUrl}/sources"
 
     override val mainPage = mainPageOf(
         "${mainUrl}/anime-turu/1/Aksiyon" to "Aksiyon",
@@ -64,17 +68,14 @@ class TurkAnime : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
-        val home = document.select("div#orta-icerik div.panel, div.anime-list div.item, div.anime-item, div.card").mapNotNull { 
+        val home = document.select("div#orta-icerik div.panel, div.anime-card, div.anime-item, div.card").mapNotNull { 
             it.toMainPageResult() 
         }
         return newHomePageResponse(request.name, home)
     }
 
     private fun Element.toMainPageResult(): SearchResponse? {
-        var titleEl = this.selectFirst("div.panel-title a, h3 a, h4 a, a.anime-link, a.title-link")
-        if (titleEl == null) {
-            titleEl = this.selectFirst("a[href*='/anime-']")
-        }
+        var titleEl = this.selectFirst("div.panel-title a, h3 a, h4 a, a.anime-link, a.title-link, a[href*='/anime-']")
         
         val title = titleEl?.text()?.trim() ?: return null
         val href = fixUrlNull(titleEl?.attr("href")) ?: return null
@@ -82,9 +83,6 @@ class TurkAnime : MainAPI() {
         var posterUrl = this.selectFirst("img")?.attr("data-src")
         if (posterUrl.isNullOrEmpty()) {
             posterUrl = this.selectFirst("img")?.attr("src")
-        }
-        if (posterUrl.isNullOrEmpty()) {
-            posterUrl = this.selectFirst("div.poster img")?.attr("data-src")
         }
         posterUrl = fixUrlNull(posterUrl)
 
@@ -96,7 +94,7 @@ class TurkAnime : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         try {
             val document = app.post("${mainUrl}/arama", data=mapOf("arama" to query)).document
-            return document.select("div#orta-icerik div.panel, div.anime-list div.item, div.anime-item").mapNotNull { 
+            return document.select("div#orta-icerik div.panel, div.anime-item").mapNotNull { 
                 it.toMainPageResult() 
             }
         } catch (e: Exception) {
@@ -127,7 +125,7 @@ class TurkAnime : MainAPI() {
             val year = document.selectFirst("a[href*='yil/']")?.attr("href")?.substringAfter("yil/")?.toIntOrNull()
             val tags = document.select("a[href*='anime-turu']").map { it.text() }
 
-            val episodes = getEpisodes(document, url)
+            val episodes = getEpisodes(document)
 
             if (episodes.isEmpty()) return null
 
@@ -143,61 +141,80 @@ class TurkAnime : MainAPI() {
         }
     }
 
-    private suspend fun getEpisodes(document: Document, url: String): List<Episode> {
-        // 1. AJAX ile bölümleri getir
-        val bolumlerUrl = document.selectFirst("a[data-url*='bolumler']")?.attr("data-url")
+    private suspend fun getEpisodes(document: Document): List<Episode> {
+        val episodes = mutableListOf<Episode>()
+        
+        // 1. Yöntem: AJAX endpoint'inden bölümleri al
+        val bolumlerUrl = document.selectFirst("a[data-url*='bolumler'], div#bolumler a[data-url]")?.attr("data-url")
         
         if (bolumlerUrl != null) {
             try {
-                val token = document.selectFirst("meta[name='_token']")?.attr("content") ?: ""
-                val bolumlerDoc = app.get(
+                val token = document.selectFirst("meta[name='_token']")?.attr("content") 
+                    ?: document.selectFirst("input[name='_token']")?.attr("value")
+                    ?: ""
+                
+                Log.d("TurkAnime", "Fetching episodes from: $bolumlerUrl")
+                
+                val response = app.get(
                     fixUrlNull(bolumlerUrl) ?: return emptyList(),
                     headers = mapOf(
                         "X-Requested-With" to "XMLHttpRequest",
+                        "Accept" to "application/json, text/html, */*",
                         "token" to token
                     ),
                     cookies = mapOf("yasOnay" to "1")
-                ).document
-
-                val episodeElements = bolumlerDoc.select("li a[href*='/video/']")
-                if (episodeElements.isNotEmpty()) {
-                    return episodeElements.mapNotNull { 
-                        val href = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
-                        val name = it.select("span.bolumAdi").text().trim()
-                            .ifEmpty { it.text().trim() }
-                            .ifEmpty { "Bölüm" }
-                        
-                        val episodeNum = Regex("""(\d+)""").find(name)?.groupValues?.get(1)?.toIntOrNull() ?: 1
-                        
+                )
+                
+                val responseDoc = response.document
+                Log.d("TurkAnime", "Episode response length: ${responseDoc.html().length}")
+                
+                val episodeElements = responseDoc.select("li a[href*='/video/'], div.bolum-item a[href*='/video/'], tr a[href*='/video/']")
+                Log.d("TurkAnime", "Found ${episodeElements.size} episode elements")
+                
+                for (element in episodeElements) {
+                    val href = fixUrlNull(element.attr("href")) ?: continue
+                    val name = element.select("span.bolumAdi, .bolum-adi, .episode-name").text().trim()
+                        .ifEmpty { element.text().trim() }
+                        .ifEmpty { "Bölüm" }
+                    
+                    val episodeNum = Regex("""(\d+)""").find(name)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                    
+                    episodes.add(
                         newEpisode(href) {
                             this.name = name
                             this.season = 1
                             this.episode = episodeNum
                         }
-                    }.sortedBy { it.episode }
+                    )
+                }
+                
+                if (episodes.isNotEmpty()) {
+                    return episodes.sortedBy { it.episode }
                 }
             } catch (e: Exception) {
                 Log.e("TurkAnime", "AJAX episode error: ${e.message}")
             }
         }
 
-        // 2. Sayfadaki bölüm linklerini al
+        // 2. Yöntem: Sayfadaki bölüm linklerini al
         val episodeLinks = document.select("a[href*='/video/']")
-        if (episodeLinks.isNotEmpty()) {
-            return episodeLinks.mapNotNull { 
-                val href = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
-                val name = it.text().trim().ifEmpty { "Bölüm" }
-                val episodeNum = Regex("""(\d+)""").find(name)?.groupValues?.get(1)?.toIntOrNull() ?: 1
-                
+        Log.d("TurkAnime", "Found ${episodeLinks.size} episode links in page")
+        
+        for (link in episodeLinks) {
+            val href = fixUrlNull(link.attr("href")) ?: continue
+            val name = link.text().trim().ifEmpty { "Bölüm" }
+            val episodeNum = Regex("""(\d+)""").find(name)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+            
+            episodes.add(
                 newEpisode(href) {
                     this.name = name
                     this.season = 1
                     this.episode = episodeNum
                 }
-            }.sortedBy { it.episode }
+            )
         }
 
-        return emptyList()
+        return episodes.sortedBy { it.episode }
     }
 
     override suspend fun loadLinks(
@@ -206,59 +223,129 @@ class TurkAnime : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit, 
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("TurkAnime", "Loading links: $data")
+        Log.d("TurkAnime", "=== Loading links for: $data ===")
         
         try {
             val document = app.get(data).document
+            val pageHtml = document.html()
+            Log.d("TurkAnime", "Page length: ${pageHtml.length}")
             
-            // 1. Video source'ları kontrol et
-            val videoSources = document.select("video source")
-            for (source in videoSources) {
-                val src = source.attr("src")
-                if (src.isNotEmpty() && src.contains(".m3u8")) {
-                    createExtractorLink(src, data, "Video", callback)
-                    return true
-                }
-            }
-
-            // 2. Video elementinin kendisini kontrol et
+            // 1. Video elementini kontrol et
             val videoElement = document.selectFirst("video")
             if (videoElement != null) {
+                Log.d("TurkAnime", "Video element found")
+                
+                // video source'lar
+                val sources = videoElement.select("source")
+                for (source in sources) {
+                    val src = source.attr("src")
+                    if (src.isNotEmpty()) {
+                        Log.d("TurkAnime", "Video source: $src")
+                        if (src.contains(".m3u8") || src.contains("m3u8")) {
+                            createExtractorLink(src, data, "Video", callback)
+                            return true
+                        }
+                    }
+                }
+                
+                // video'nun kendi src'si
                 val src = videoElement.attr("src")
-                if (src.isNotEmpty() && src.contains(".m3u8")) {
-                    createExtractorLink(src, data, "Video", callback)
-                    return true
+                if (src.isNotEmpty()) {
+                    Log.d("TurkAnime", "Video src: $src")
+                    if (src.contains(".m3u8") || src.contains("m3u8")) {
+                        createExtractorLink(src, data, "Video", callback)
+                        return true
+                    }
                 }
             }
 
-            // 3. data-url kontrolü
-            val dataUrl = document.selectFirst("div.artplayer-app, div#player, div.video-player, div.player")?.attr("data-url")
-            if (dataUrl != null && dataUrl.isNotEmpty() && dataUrl.contains(".m3u8")) {
-                createExtractorLink(dataUrl, data, "Player", callback)
-                return true
+            // 2. ArtPlayer kontrolü (en yaygın kullanılan)
+            val artPlayer = document.selectFirst("div.artplayer-app")
+            if (artPlayer != null) {
+                Log.d("TurkAnime", "ArtPlayer found")
+                
+                // data-url
+                val dataUrl = artPlayer.attr("data-url")
+                if (dataUrl.isNotEmpty()) {
+                    Log.d("TurkAnime", "ArtPlayer data-url: $dataUrl")
+                    if (dataUrl.contains(".m3u8") || dataUrl.contains("m3u8")) {
+                        createExtractorLink(dataUrl, data, "ArtPlayer", callback)
+                        return true
+                    }
+                }
+                
+                // data-video
+                val dataVideo = artPlayer.attr("data-video")
+                if (dataVideo.isNotEmpty()) {
+                    Log.d("TurkAnime", "ArtPlayer data-video: $dataVideo")
+                    if (dataVideo.contains(".m3u8") || dataVideo.contains("m3u8")) {
+                        createExtractorLink(dataVideo, data, "ArtPlayer", callback)
+                        return true
+                    }
+                }
+            }
+
+            // 3. Diğer player'lar
+            val players = document.select("div#player, div.video-player, div.player-container, div#video-player")
+            for (player in players) {
+                val dataUrl = player.attr("data-url")
+                if (dataUrl.isNotEmpty() && (dataUrl.contains(".m3u8") || dataUrl.contains("m3u8"))) {
+                    Log.d("TurkAnime", "Player data-url: $dataUrl")
+                    createExtractorLink(dataUrl, data, "Player", callback)
+                    return true
+                }
             }
 
             // 4. iframe'leri kontrol et
             val iframes = document.select("iframe")
+            Log.d("TurkAnime", "Found ${iframes.size} iframes")
+            
             for (iframe in iframes) {
                 val src = iframe.attr("src")
                 if (src.isNotEmpty() && !src.contains("a-ads.com") && !src.contains("google.com")) {
+                    Log.d("TurkAnime", "Processing iframe: $src")
+                    
                     try {
-                        val iframeDoc = app.get(src).document
+                        // iframe içeriğini yükle
+                        val iframeDoc = app.get(src, cookies = mapOf("yasOnay" to "1")).document
+                        val iframeHtml = iframeDoc.html()
+                        Log.d("TurkAnime", "Iframe page length: ${iframeHtml.length}")
                         
+                        // iframe içinde video source
                         val iframeVideo = iframeDoc.selectFirst("video source")
                         if (iframeVideo != null) {
                             val videoUrl = iframeVideo.attr("src")
-                            if (videoUrl.isNotEmpty() && videoUrl.contains(".m3u8")) {
+                            if (videoUrl.isNotEmpty() && (videoUrl.contains(".m3u8") || videoUrl.contains("m3u8"))) {
+                                Log.d("TurkAnime", "Iframe video source: $videoUrl")
                                 createExtractorLink(videoUrl, src, "iframe", callback)
                                 return true
                             }
                         }
                         
-                        val iframeDataUrl = iframeDoc.selectFirst("div.artplayer-app, div#player")?.attr("data-url")
-                        if (iframeDataUrl != null && iframeDataUrl.isNotEmpty() && iframeDataUrl.contains(".m3u8")) {
-                            createExtractorLink(iframeDataUrl, src, "Player", callback)
-                            return true
+                        // iframe içinde ArtPlayer
+                        val iframeArtPlayer = iframeDoc.selectFirst("div.artplayer-app")
+                        if (iframeArtPlayer != null) {
+                            val dataUrl = iframeArtPlayer.attr("data-url")
+                            if (dataUrl.isNotEmpty() && (dataUrl.contains(".m3u8") || dataUrl.contains("m3u8"))) {
+                                Log.d("TurkAnime", "Iframe ArtPlayer: $dataUrl")
+                                createExtractorLink(dataUrl, src, "iframe", callback)
+                                return true
+                            }
+                        }
+                        
+                        // iframe içindeki script'lerden video URL'ini bul
+                        val scripts = iframeDoc.select("script")
+                        for (script in scripts) {
+                            val scriptData = script.data()
+                            if (scriptData.contains("m3u8") || scriptData.contains(".mp4")) {
+                                val urlMatch = Regex("""(https?://[^\s'\"]+\.m3u8[^\s'\"]*)""").find(scriptData)
+                                if (urlMatch != null) {
+                                    val foundUrl = urlMatch.groupValues[1]
+                                    Log.d("TurkAnime", "Found URL in script: $foundUrl")
+                                    createExtractorLink(foundUrl, src, "Script", callback)
+                                    return true
+                                }
+                            }
                         }
                     } catch (e: Exception) {
                         Log.e("TurkAnime", "iframe load error: ${e.message}")
@@ -266,8 +353,25 @@ class TurkAnime : MainAPI() {
                 }
             }
 
-            // 5. Butonlardan video dene
-            val buttons = document.select("button[onclick*='IndexIcerik'], button[data-url], button[onclick*='video']")
+            // 5. Script'lerden M3U8 linklerini ara
+            val scripts = document.select("script")
+            for (script in scripts) {
+                val scriptData = script.data()
+                if (scriptData.contains("m3u8") || scriptData.contains(".mp4")) {
+                    val urlMatch = Regex("""(https?://[^\s'\"]+\.m3u8[^\s'\"]*)""").find(scriptData)
+                    if (urlMatch != null) {
+                        val foundUrl = urlMatch.groupValues[1]
+                        Log.d("TurkAnime", "Found URL in page script: $foundUrl")
+                        createExtractorLink(foundUrl, data, "Script", callback)
+                        return true
+                    }
+                }
+            }
+
+            // 6. AJAX butonlarından dene
+            val buttons = document.select("button[onclick*='IndexIcerik'], button[data-url], button[onclick*='video'], button.video-source")
+            Log.d("TurkAnime", "Found ${buttons.size} video buttons")
+            
             for (button in buttons) {
                 val onclick = button.attr("onclick")
                 var link = onclick.substringAfter("IndexIcerik('").substringBefore("'")
@@ -276,6 +380,9 @@ class TurkAnime : MainAPI() {
                 if (link == null) {
                     link = button.attr("data-url")
                 }
+                if (link == null) {
+                    link = button.attr("data-video")
+                }
                 
                 if (link != null) {
                     val fullLink = fixUrlNull(link) ?: continue
@@ -283,38 +390,40 @@ class TurkAnime : MainAPI() {
                     
                     try {
                         val response = app.get(fullLink, headers = mapOf(
-                            "X-Requested-With" to "XMLHttpRequest"
+                            "X-Requested-With" to "XMLHttpRequest",
+                            "Accept" to "application/json, text/html, */*"
                         ))
+                        
+                        val responseText = response.text
+                        Log.d("TurkAnime", "Response length: ${responseText.length}")
+                        
+                        // JSON'dan URL bul
+                        val jsonUrlMatch = Regex("""(https?://[^\s'\"]+\.m3u8[^\s'\"]*)""").find(responseText)
+                        if (jsonUrlMatch != null) {
+                            val foundUrl = jsonUrlMatch.groupValues[1]
+                            Log.d("TurkAnime", "Found URL in response: $foundUrl")
+                            createExtractorLink(foundUrl, fullLink, button.text().trim(), callback)
+                            return true
+                        }
+                        
+                        // HTML response
                         val responseDoc = response.document
                         
                         val respVideo = responseDoc.selectFirst("video source")
                         if (respVideo != null) {
                             val videoUrl = respVideo.attr("src")
-                            if (videoUrl.isNotEmpty() && videoUrl.contains(".m3u8")) {
+                            if (videoUrl.isNotEmpty() && (videoUrl.contains(".m3u8") || videoUrl.contains("m3u8"))) {
+                                Log.d("TurkAnime", "Button response video: $videoUrl")
                                 createExtractorLink(videoUrl, fullLink, button.text().trim(), callback)
-                                continue
+                                return true
                             }
                         }
                         
                         val respDataUrl = responseDoc.selectFirst("div.artplayer-app, div#player")?.attr("data-url")
-                        if (respDataUrl != null && respDataUrl.isNotEmpty() && respDataUrl.contains(".m3u8")) {
+                        if (respDataUrl != null && respDataUrl.isNotEmpty() && (respDataUrl.contains(".m3u8") || respDataUrl.contains("m3u8"))) {
+                            Log.d("TurkAnime", "Button response data-url: $respDataUrl")
                             createExtractorLink(respDataUrl, fullLink, button.text().trim(), callback)
-                            continue
-                        }
-                        
-                        val respIframe = responseDoc.selectFirst("iframe")?.attr("src")
-                        if (respIframe != null && respIframe.isNotEmpty()) {
-                            try {
-                                val iframeDoc = app.get(respIframe).document
-                                val videoUrl = iframeDoc.selectFirst("video source")?.attr("src")
-                                    ?: iframeDoc.selectFirst("div.artplayer-app")?.attr("data-url")
-                                
-                                if (videoUrl != null && videoUrl.isNotEmpty() && videoUrl.contains(".m3u8")) {
-                                    createExtractorLink(videoUrl, respIframe, button.text().trim(), callback)
-                                }
-                            } catch (e: Exception) {
-                                Log.e("TurkAnime", "iframe from button error: ${e.message}")
-                            }
+                            return true
                         }
                     } catch (e: Exception) {
                         Log.e("TurkAnime", "Button request error: ${e.message}")
@@ -322,6 +431,8 @@ class TurkAnime : MainAPI() {
                 }
             }
 
+            Log.w("TurkAnime", "No video links found!")
+            
         } catch (e: Exception) {
             Log.e("TurkAnime", "loadLinks error: ${e.message}")
             e.printStackTrace()
@@ -331,20 +442,22 @@ class TurkAnime : MainAPI() {
         return true
     }
 
-    /**
-     * ExtractorLink oluşturur ve callback ile gönderir
-     * newExtractorLink kullanır (deprecated değil)
-     */
     private suspend fun createExtractorLink(
         url: String, 
         referer: String, 
         name: String, 
         callback: (ExtractorLink) -> Unit
     ) {
+        Log.d("TurkAnime", "Creating extractor link: $url")
+        
+        // URL'i temizle
+        var cleanUrl = url.trim()
+        cleanUrl = cleanUrl.replace(Regex("""[\n\r\t]"""), "")
+        
         val link = newExtractorLink(
             source = this.name,
             name = "$name - TurkAnime",
-            url = url,
+            url = cleanUrl,
             type = ExtractorLinkType.M3U8
         ) {
             this.referer = referer
@@ -354,7 +467,8 @@ class TurkAnime : MainAPI() {
                 "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept" to "*/*",
                 "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
-                "Connection" to "keep-alive"
+                "Connection" to "keep-alive",
+                "Origin" to mainUrl
             )
         }
         callback(link)
