@@ -169,19 +169,25 @@ class TRanimaci : MainAPI() {
             val episodeses = mutableListOf<Episode>()
 
             // Bölümleri bul - farklı selector'ları dene
-            var episodeLinks = document.select("a[href*='/video/']")
-            if (episodeLinks.isEmpty()) {
-                episodeLinks = document.select("a[href^='/video/']")
+            var episodeElements = document.select("a[href*='/video/']")
+            
+            // Eğer hiç bölüm yoksa, alternatif selector dene
+            if (episodeElements.isEmpty()) {
+                episodeElements = document.select("a[href^='/video/']")
             }
             
-            if (episodeLinks.isEmpty()) {
-                // Tüm linkleri kontrol et
-                episodeLinks = document.select("a").filter { 
+            // Hala yoksa tüm linkleri kontrol et
+            if (episodeElements.isEmpty()) {
+                val allLinks = document.select("a")
+                val filteredLinks = allLinks.filter { 
                     it.attr("href").contains("/video/") || it.attr("href").contains("bolum")
                 }
+                // filter sonucu List<Element> döner, bunu Elements'e çevirelim
+                episodeElements = org.jsoup.select.Elements()
+                episodeElements.addAll(filteredLinks)
             }
             
-            for (link in episodeLinks) {
+            for (link in episodeElements) {
                 val epHref = fixUrlNull(link.attr("href")) ?: continue
                 val epName = link.selectFirst("span")?.text()?.trim() 
                     ?: link.text()?.trim() 
