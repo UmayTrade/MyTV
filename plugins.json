@@ -1,22 +1,22 @@
 [
     {
-        "iconUrl": "https://www.google.com/s2/favicons?domain=www.4kfilmizlesene.org&sz=%size%",
+        "iconUrl": "https://www.google.com/s2/favicons?sz=64&domain=animeav1.com",
         "apiVersion": 1,
-        "repositoryUrl": "https://github.com/nikyokki/nik-cloudstream",
+        "repositoryUrl": "https://github.com/UmayTrade/Mytv",
         "fileSize": 11825,
         "status": 1,
         "language": "tr",
         "authors": [
-            "nikyokki"
+            "SAKLImavi"
         ],
         "tvTypes": [
-            "Movie"
+            "Anime"
         ],
         "version": 6,
-        "internalName": "4KFilmIzlesene",
+        "internalName": "AnimeAV",
         "description": "En yeni ve sorunsuz \u26a1  Full HD Film izle keyfi her yerde sizinle ! 4K ve 1080p online film izleme fark\u0131yla 4KFilmizlesene&amp;#039;nin Tad\u0131n\u0131 \u00c7\u0131kart.",
-        "url": "https://raw.githubusercontent.com/nikyokki/nik-cloudstream/builds/4KFilmIzlesene.cs3",
-        "name": "4KFilmIzlesene"
+        "url": "https://raw.githubusercontent.com/UmayTrade/Mytv/builds/AnimeAV.cs3",
+        "name": "AnimeAV"
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=animecix.net&sz=%size%",
@@ -82,25 +82,23 @@
         "name": "BelgeselX"
     },
     {
-        "iconUrl": "https://www.google.com/s2/favicons?domain=tr.canlitv.team&sz=%size%",
+        "iconUrl": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://www.animeizlesene.com&size=128",
         "apiVersion": 1,
-        "repositoryUrl": "https://github.com/nikyokki/nik-cloudstream",
+        "repositoryUrl": "https://github.com/UmayTrade/Mytv",
         "fileSize": 18449,
         "status": 1,
         "language": "tr",
         "authors": [
-            "Adippe",
-            "keyiflerolsun",
-            "nikyokki"
+            "SAKLImavi"
         ],
         "tvTypes": [
-            "Live"
+            "Anime"
         ],
         "version": 6,
-        "internalName": "CanliTV",
-        "description": "Canl\u0131 TV",
-        "url": "https://raw.githubusercontent.com/nikyokki/nik-cloudstream/builds/CanliTV.cs3",
-        "name": "CanliTV"
+        "internalName": "AnimeIzlesene",
+        "description": "AnimeIzlesene",
+        "url": "https://raw.githubusercontent.com/UmayTrade/Mytv/builds/AnimeIzlesene.cs3",
+        "name": "AnimeIzlesene"
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=cizgimax.online&sz=%size%",
