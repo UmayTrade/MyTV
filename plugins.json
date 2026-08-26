@@ -39,27 +39,6 @@
         "name": "AnimeciX"
     },
     {
-        "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTWoTDdZwEF06QReGP8V913k9AoMBC5Q4WHQhCNjaJNNHALoQL3rfSecVE&s=10",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/UmayTrade/Mytv",
-        "fileSize": 27260,
-        "status": 1,
-        "language": "tr",
-        "authors": [
-            "kraptor"
-        ],
-        "tvTypes": [
-            "AnimeMovie",
-            "Anime",
-            "Ova"
-        ],
-        "version": 14,
-        "internalName": "Gundogdu",
-        "description": "Sade tasarıma sahip, yüksek kaliteli anime izleme sitesi. En sevdiğiniz anime serilerini, kesintisiz bir şekilde izleyebilirsiniz. Geniş arşivimiz sayesinde, her zaman yeni çıkan animeleri ve eski klasikleri keşfedebilirsiniz.",
-        "url": "https://raw.githubusercontent.com/UmayTrade/Mytv/refs/heads/builds/Gundogdu.cs3",
-        "name": "Gundogdu"
-    },
-    {
         "iconUrl": "https://animeler.me/wp-content/uploads/cropped-animelerpw-48x48.png",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/UmayTrade/Mytv",
