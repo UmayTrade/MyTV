@@ -11,7 +11,7 @@ import com.lagradost.cloudstream3.extractors.SibNet
 import com.lagradost.cloudstream3.extractors.YourUpload
 
 class Animex : MainAPI() {
-    override var mainUrl = "https://animex.tr"
+    override var mainUrl = "http://anmx.app"
     override var name = "Animex"
     override val hasMainPage = true
     override var lang = "tr"

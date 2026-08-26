@@ -15,7 +15,7 @@ import java.net.URI
 import java.net.URLEncoder
 
 class Animeler : MainAPI() {
-    override var mainUrl = "https://animeler.me"
+    override var mainUrl = "https://animeler.pw"
     override var name = "Animeler"
     override val hasMainPage = true
     override var lang = "tr"
