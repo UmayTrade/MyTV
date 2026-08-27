@@ -20,7 +20,7 @@ import kotlin.coroutines.cancellation.CancellationException
 
 
 class AnimeIzlesene : MainAPI() {
-    override var mainUrl = "https://www.animeizlesene.com"
+    override var mainUrl = "https://www.tranimeizle.io"
     override var name = "AnimeIzlesene"
     override val hasMainPage = true
     override var lang = "tr"
