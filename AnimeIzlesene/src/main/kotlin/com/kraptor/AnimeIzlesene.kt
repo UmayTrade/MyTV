@@ -28,7 +28,7 @@ class AnimeIzlesene : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
     override val mainPage = mainPageOf(
         "${mainUrl}/series" to "Yeni Anime Serileri",
-        "${mainUrl}/category/aksiyon" to "Aksiyon",
+        "${mainUrl}/animeizle/aksiyon-anime-izle-1" to "Aksiyon",
         "${mainUrl}/category/fantastik" to "Fantastik",
         "${mainUrl}/category/isekai" to "Isekai",
         "${mainUrl}/category/komedi" to "Komedi",
