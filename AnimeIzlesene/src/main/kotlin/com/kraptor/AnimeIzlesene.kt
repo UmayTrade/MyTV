@@ -39,7 +39,7 @@ class AnimeIzlesene : MainAPI() {
         "${mainUrl}/category/turkce-dublaj" to "Türkçe Dublaj",
         "${mainUrl}/category/arabalar" to "Arabalar",
         "${mainUrl}/category/askeri" to "Askeri",
-        "${mainUrl}/category/bilim-kurgu" to "Bilim Kurgu",
+        "${mainUrl}/animeizle/bilim-kurgu-anime-izle-1" to "Bilim Kurgu",
         "${mainUrl}/category/boys-love" to "Boys Love",
         "${mainUrl}/category/buyu" to "Büyü",
         "${mainUrl}/category/cocuk" to "Çocuk",
