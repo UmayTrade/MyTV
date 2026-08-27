@@ -52,10 +52,10 @@
             "Anime"
         ],
         "version": 13,
-        "internalName": "Animeler",
+        "internalName": "AnimeIzlesene",
         "description": "HD kalitesinde ücretsiz anime izle! Animeler.me, en yeni ve popüler anime serilerini Türkçe altyazılı ve dublajlı olarak sunar. Favori animelerini hemen keşfet!",
-        "url": "https://raw.githubusercontent.com/UmayTrade/Mytv/builds/Animeler.cs3",
-        "name": "Animeler"
+        "url": "https://raw.githubusercontent.com/UmayTrade/Mytv/builds/AnimeIzlesene.cs3",
+        "name": "AnimeIzlesene"
     },
     {
         "iconUrl": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://www.animeworld.ac&size=128",
