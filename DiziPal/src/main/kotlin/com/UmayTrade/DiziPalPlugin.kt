@@ -1,4 +1,4 @@
-// ===== DiziPalPlugin.kt (Değişiklik yok) =====
+// ===== DiziPalPlugin.kt =====
 package com.UmayTrade
 
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
