@@ -6,11 +6,12 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.network.CloudflareKiller
 import okhttp3.Interceptor
 import okhttp3.Response
+import okhttp3.FormBody
 import org.jsoup.nodes.Element
 
 class DiziPal : MainAPI() {
 
-    override var mainUrl = "https://dizipal1539.com"
+    override var mainUrl = "https://dizipalorijinal14.com"
     override var name = "DiziPal"
     override val hasMainPage = true
     override var lang = "tr"
@@ -55,6 +56,32 @@ class DiziPal : MainAPI() {
         }
     }
 
+    // Python'daki gibi: article.type2 ul li içinden veri çek
+    private fun Element.toSearchResponse(isMovie: Boolean = false): SearchResponse? {
+        val title = this.selectFirst("span.title")?.text()?.trim()
+            ?: this.selectFirst("img")?.attr("alt")?.trim()
+            ?: return null
+
+        val link = this.selectFirst("a")?.attr("href")
+            ?.let { fixUrl(it) }
+            ?: return null
+
+        val poster = this.selectFirst("img")?.attr("src")
+            ?.let { fixUrl(it) }
+
+        val actualIsMovie = isMovie 
+            || link.contains("/film") 
+            || link.contains("/movie")
+
+        return newTvSeriesSearchResponse(
+            title,
+            link,
+            if (actualIsMovie) TvType.Movie else TvType.TvSeries
+        ) {
+            posterUrl = poster
+        }
+    }
+
     // ================= MAIN PAGE =================
 
     override suspend fun getMainPage(
@@ -62,42 +89,79 @@ class DiziPal : MainAPI() {
         request: MainPageRequest
     ): HomePageResponse {
 
+        val isMovieSection = request.name == "Filmler"
+        val baseUrl = request.data
+
+        // Sayfa 1: Normal GET
+        // Sayfa 2+: POST /api/load-series ile date parametresi
         val doc = if (page == 1) {
-            app.get(request.data, interceptor = interceptor).document
+            app.get(baseUrl, interceptor = interceptor).document
         } else {
-            // Son sayfadaki son öğenin data-date değerini bulup POST ile devam et
-            // Ancak CloudStream sayfalama için basitçe ?page=$page deneyelim
-            // Çoğu dizi sitesi ?page=2, ?paged=2 vb. destekler
-            app.get("${request.data}&page=$page", interceptor = interceptor).document
+            // Önceki sayfanın son öğesinin data-date değerini bulmak için
+            // CloudStream cache'den önceki sayfayı alamayız, basitçe page parametresi deneyelim
+            // veya önceki sayfayı tekrar çekip son date'i bulalım
+            app.get("$baseUrl&page=$page", interceptor = interceptor).document
         }
 
-        // Python'daki gibi: article.type2 ul li
-        val items = doc.select("article.type2 ul li, article ul li, .type2 ul li")
-            .mapNotNull { element ->
+        // Python: article.type2 ul li
+        var items = doc.select("article.type2 ul li")
+            .mapNotNull { it.toSearchResponse(isMovieSection) }
 
-                val title = element.selectFirst("span.title")?.text()?.trim()
-                    ?: element.selectFirst("img")?.attr("alt")?.trim()
-                    ?: return@mapNotNull null
+        // Eğer type2 bulunamazsa, daha genel selector dene
+        if (items.isEmpty()) {
+            items = doc.select("article ul li, .type2 ul li, .post-item, .poster-item")
+                .mapNotNull { it.toSearchResponse(isMovieSection) }
+        }
 
-                val link = element.selectFirst("a")?.attr("href")
-                    ?.let { fixUrl(it) }
-                    ?: return@mapNotNull null
-
-                val poster = element.selectFirst("img")?.attr("src")
-                    ?.let { fixUrl(it) }
-
-                val isMovie = request.name == "Filmler" 
-                    || link.contains("/film") 
-                    || link.contains("/movie")
-
-                newTvSeriesSearchResponse(
-                    title,
-                    link,
-                    if (isMovie) TvType.Movie else TvType.TvSeries
-                ) {
-                    posterUrl = poster
+        // AJAX sayfalama: Eğer normal sayfalama boşsa ve sayfa > 1 ise POST dene
+        // Not: CloudStream'de bu kısım sınırlıdır, çünkü önceki sayfanın son date'i gerekir
+        if (items.isEmpty() && page > 1) {
+            // Platform sayfaları için farklı sayfalama
+            if (!baseUrl.contains("/platform/")) {
+                // Son sayfayı tekrar çekip son date'i bul
+                val prevDoc = app.get(
+                    baseUrl.replace(Regex("""&page=\d+"""), "").let { 
+                        if (page == 2) it else "$it&page=${page - 1}"
+                    }, 
+                    interceptor = interceptor
+                ).document
+                
+                val lastDate = prevDoc.select("article.type2 ul li a")
+                    .lastOrNull()?.attr("data-date")
+                
+                if (!lastDate.isNullOrBlank()) {
+                    // Tur parametresini URL'den çıkar
+                    val turMatch = Regex("""tur=([\d]+)""").find(baseUrl)
+                    val tur = turMatch?.groupValues?.get(1) ?: "1"
+                    
+                    val formBody = FormBody.Builder()
+                        .add("date", lastDate)
+                        .add("tur", tur)
+                        .add("durum", "")
+                        .add("kelime", "")
+                        .add("type", "")
+                        .add("siralama", "")
+                        .build()
+                    
+                    val postRes = app.post(
+                        "$mainUrl/api/load-series",
+                        requestBody = formBody,
+                        referer = baseUrl,
+                        interceptor = interceptor
+                    )
+                    
+                    val json = postRes.parsedSafe<Map<String, Any>>()
+                    val html = json?.get("html") as? String
+                    
+                    if (!html.isNullOrBlank()) {
+                        val wrapHtml = "<article class='type2'><ul>$html</ul></article>"
+                        val wrapDoc = org.jsoup.Jsoup.parse(wrapHtml)
+                        items = wrapDoc.select("li")
+                            .mapNotNull { it.toSearchResponse(isMovieSection) }
+                    }
                 }
             }
+        }
 
         return newHomePageResponse(request.name, items)
     }
@@ -110,31 +174,15 @@ class DiziPal : MainAPI() {
         val doc = app.get(url, interceptor = interceptor).document
 
         // Arama sonuçları da muhtemelen aynı yapıda
-        return doc.select("article.type2 ul li, article ul li, .result-item, .search-result")
-            .mapNotNull { element ->
+        var items = doc.select("article.type2 ul li")
+            .mapNotNull { it.toSearchResponse() }
 
-                val title = element.selectFirst("span.title")?.text()?.trim()
-                    ?: element.selectFirst("h2, h3, .title")?.text()?.trim()
-                    ?: element.selectFirst("img")?.attr("alt")?.trim()
-                    ?: return@mapNotNull null
+        if (items.isEmpty()) {
+            items = doc.select("article ul li, .result-item, .search-result, .post-item")
+                .mapNotNull { it.toSearchResponse() }
+        }
 
-                val link = element.selectFirst("a")?.attr("href")
-                    ?.let { fixUrl(it) }
-                    ?: return@mapNotNull null
-
-                val poster = element.selectFirst("img")?.attr("src")
-                    ?.let { fixUrl(it) }
-
-                val isMovie = link.contains("/film") || link.contains("/movie")
-
-                newTvSeriesSearchResponse(
-                    title,
-                    link,
-                    if (isMovie) TvType.Movie else TvType.TvSeries
-                ) {
-                    posterUrl = poster
-                }
-            }
+        return items
     }
 
     // ================= LOAD =================
@@ -144,6 +192,7 @@ class DiziPal : MainAPI() {
         val doc = app.get(url, interceptor = interceptor).document
 
         val title = doc.selectFirst("h1, .entry-title, .title, h1.title")?.text()?.trim() 
+            ?: doc.selectFirst("span.title")?.text()?.trim()
             ?: "DiziPal"
 
         val description = doc.selectFirst(".entry-content p, .plot, .description, .summary")?.text()
