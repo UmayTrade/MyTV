@@ -1,4 +1,4 @@
-// ===== DiziPalModels.kt (Şu an kullanılmıyor ama dursun) =====
+// ===== DiziPalModels.kt =====
 package com.UmayTrade
 
 import com.fasterxml.jackson.annotation.JsonProperty
