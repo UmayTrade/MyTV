@@ -3,7 +3,7 @@ version = 1
 cloudstream {
     authors     = listOf("UmayTrade")
     language    = "tr"
-    description = "Film Makinesi ile en yeni ve güncel filmleri Full HD kalite farkı ile izleyebilirsiniz. Film izle denildiğinde akla gelen en kaliteli film sitesi."
+    description = "Trend olan tüm yabancı yerli filmleri Hd ve 720p 1080p kalitesinde kesintisiz indirmeden izleyebilirsiniz, Online film sitemizde Türkçe dublaj olarak izleyebilirsiniz."
 
     /**
      * Status int as the following:
@@ -14,5 +14,5 @@ cloudstream {
     **/
     status  = 1 // will be 3 if unspecified
     tvTypes = listOf("Movie", "TvSeries")
-    iconUrl = "https://www.google.com/s2/favicons?domain=https://www.filmmakinesi.to&sz=%size%"
+    iconUrl = "https://www.google.com/s2/favicons?domain=https://www.filmhane.shop&sz=%size%"
 }
