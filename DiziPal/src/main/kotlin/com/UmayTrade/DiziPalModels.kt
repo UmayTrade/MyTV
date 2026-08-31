@@ -1,8 +1,7 @@
-
+// ===== DiziPalModels.kt (Şu an kullanılmıyor ama dursun) =====
 package com.UmayTrade
 
 import com.fasterxml.jackson.annotation.JsonProperty
-
 
 data class SearchItem(
     @JsonProperty("id") val id: String,
