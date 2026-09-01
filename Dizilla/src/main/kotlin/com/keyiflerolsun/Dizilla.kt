@@ -42,7 +42,7 @@ import javax.crypto.spec.SecretKeySpec
 
 
 class Dizilla : MainAPI() {
-    override var mainUrl = "https://dizilla40.com"
+    override var mainUrl = "https://dizilla.now"
     override var name = "Dizilla"
     override val hasMainPage = true
     override var lang = "tr"
@@ -104,14 +104,9 @@ class Dizilla : MainAPI() {
 
 
     private fun extractPosterUrlFromCategory(element: Element): String? {
-
         val selectors = listOf(
-            "img",
-            "div img",
-            "span img",
-            "a img",
-            "div.relative img",
-            "div.overflow-hidden img"
+            "img", "div img", "span img", "a img",
+            "div.relative img", "div.overflow-hidden img"
         )
 
         for (selector in selectors) {
@@ -121,21 +116,13 @@ class Dizilla : MainAPI() {
                 if (posterUrl != null) return posterUrl
             }
         }
-
-
         return extractPosterUrl(element)
     }
-
 
     private fun extractPosterUrlFromSonBolumler(element: Element): String? {
-
         val selectors = listOf(
-            "img",
-            "div img",
-            "span img",
-            "a img",
-            "div.col-span-3 img",
-            "div.relative img"
+            "img", "div img", "span img", "a img",
+            "div.col-span-3 img", "div.relative img"
         )
 
         for (selector in selectors) {
@@ -145,21 +132,13 @@ class Dizilla : MainAPI() {
                 if (posterUrl != null) return posterUrl
             }
         }
-
-
         return extractPosterUrl(element)
     }
 
-
     private fun extractPosterUrlFromArsiv(element: Element): String? {
-
         val selectors = listOf(
-            "img",
-            "div img",
-            "span img",
-            "a img",
-            "div.w-full img",
-            "div.relative img"
+            "img", "div img", "span img", "a img",
+            "div.w-full img", "div.relative img"
         )
 
         for (selector in selectors) {
@@ -169,8 +148,6 @@ class Dizilla : MainAPI() {
                 if (posterUrl != null) return posterUrl
             }
         }
-
-
         return extractPosterUrl(element)
     }
 
@@ -178,7 +155,6 @@ class Dizilla : MainAPI() {
         var document = app.get(request.data, interceptor = interceptor).document
         val home = when {
             request.data.contains("dizi-turu") -> {
-
                 val items = document.select("div.grid a[href*='/dizi/']").ifEmpty {
                     document.select("div.grid div.relative a[href*='/dizi/']").ifEmpty {
                         document.select("a[href*='/dizi/']").filter { it.selectFirst("img") != null }
@@ -192,8 +168,6 @@ class Dizilla : MainAPI() {
                         ?: return@mapNotNull null
 
                     val href = fixUrlNull(element.attr("href")) ?: return@mapNotNull null
-
-
                     val posterUrl = extractPosterUrlFromCategory(element)
 
                     newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
@@ -209,7 +183,6 @@ class Dizilla : MainAPI() {
                 document.select("a.w-full").mapNotNull { it.yeniEklenenler() }
             }
             request.data.contains("/tum-bolumler") -> {
-
                 document.select("div.col-span-3 a").mapNotNull { element ->
                     val name = element.selectFirst("h2")?.text() ?: return@mapNotNull null
                     val epName = element.selectFirst("div.opacity-80")?.text()?.replace(". Sezon ", "x")
@@ -217,8 +190,6 @@ class Dizilla : MainAPI() {
 
                     val title = "$name - $epName"
                     val href = fixUrlNull(element.attr("href")) ?: return@mapNotNull null
-
-
                     val posterUrl = extractPosterUrlFromSonBolumler(element)
 
                     newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
@@ -227,7 +198,6 @@ class Dizilla : MainAPI() {
                 }
             }
             else -> {
-
                 document.select("div.col-span-3 a").mapNotNull { it.sonBolumler() }
             }
         }
@@ -235,15 +205,10 @@ class Dizilla : MainAPI() {
         return newHomePageResponse(request.name, home)
     }
 
-
-
     private fun Element.yeniEklenenler(): SearchResponse? {
         val title = this.selectFirst("h2")?.text() ?: return null
         val href = fixUrlNull(this.attr("href")) ?: return null
-
-
         val posterUrl = extractPosterUrlFromArsiv(this)
-
         val score = this.selectFirst("div.absolute.bottom-0 span")?.text()?.trim()
 
         return newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
@@ -251,17 +216,15 @@ class Dizilla : MainAPI() {
             this.score = Score.from10(score)
         }
     }
+
     private suspend fun Element.sonBolumler(): SearchResponse? {
         val name = this.selectFirst("h2")?.text() ?: return null
         val epName = this.selectFirst("div.opacity-80")?.text()?.replace(". Sezon ", "x")
             ?.replace(". Bölüm", "") ?: return null
 
         val title = "$name - $epName"
-
         val epDoc = fixUrlNull(this.attr("href"))?.let { app.get(it, interceptor = interceptor).document }
-
         val href = fixUrlNull(epDoc?.selectFirst("div.poster a")?.attr("href")) ?: return null
-
 
         val posterUrl = if (epDoc != null) {
             extractPosterUrlFromSonBolumler(epDoc.selectFirst("div.poster img") ?: epDoc.selectFirst("div.poster a") ?: epDoc)
@@ -274,66 +237,54 @@ class Dizilla : MainAPI() {
         }
     }
 
-    private fun SearchItem.toSearchResponse(): SearchResponse? {
-        return newTvSeriesSearchResponse(
-            title ?: return null,
-            "${mainUrl}/${slug}",
-            TvType.TvSeries,
-        ) {
-            this.posterUrl = poster
-        }
-    }
-
+    /* ─────────────────────────────────────────────────────────────
+       SEARCH — bakalim.py'deki gibi cKey + cValue ile çalışıyor
+       ───────────────────────────────────────────────────────────── */
     override suspend fun search(query: String): List<SearchResponse> {
+        // 1. Ana sayfadan cKey & cValue çek (bakalim.py mantığı)
+        val mainPage = app.get(mainUrl, interceptor = interceptor)
+        val mainDoc  = mainPage.document
+        val cKey     = mainDoc.selectFirst("input[name=cKey]")?.attr("value")   ?: ""
+        val cValue   = mainDoc.selectFirst("input[name=cValue]")?.attr("value") ?: ""
+
+        // 2. Form-Data POST  (/bg/searchcontent  —  /api/bg/searchcontent değil)
         val searchReq = app.post(
-            "${mainUrl}/api/bg/searchcontent?searchterm=$query",
+            "${mainUrl}/bg/searchcontent",
             headers = mapOf(
-                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0",
-                "user-agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0",
-                "Accept" to "application/json, text/plain, */*",
-                "Accept-Language" to "en-US,en;q=0.5",
+                "Accept"           to "application/json, text/javascript, */*; q=0.01",
                 "X-Requested-With" to "XMLHttpRequest",
-                "Sec-Fetch-Site" to "same-origin",
-                "Sec-Fetch-Mode" to "cors",
-                "Sec-Fetch-Dest" to "empty",
-                "Referer" to "${mainUrl}/"
+                "Referer"          to "${mainUrl}/"
             ),
             referer = "${mainUrl}/",
+            data = mapOf(
+                "cKey"       to cKey,
+                "cValue"     to cValue,
+                "searchterm" to query
+            )
         )
-        val objectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
-        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-        val searchResult: SearchResult = objectMapper.readValue(searchReq.toString())
+
+        // 3. JSON parse & Base64 decode
+        val mapper = ObjectMapper()
+            .registerModule(KotlinModule.Builder().build())
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+
+        val searchResult: SearchResult = mapper.readValue(searchReq.text)
         val decodedSearch = base64Decode(searchResult.response.toString())
-        val contentJson: SearchData = objectMapper.readValue(decodedSearch)
+        val contentJson: SearchData   = mapper.readValue(decodedSearch)
+
         if (contentJson.state != true) {
             throw ErrorLoadingException("Invalid Json response")
         }
-        val veriler = mutableListOf<SearchResponse>()
-        contentJson.result?.forEach {
-            val name = it.title.toString()
-            val link = fixUrl(it.slug.toString())
-            val posterLink = it.poster.toString()
-            val toSearchResponse = toSearchResponse(name, link, posterLink)
-            veriler.add(toSearchResponse)
-        }
-        return veriler
-    }
 
-    private fun toSearchResponse(ad: String, link: String, posterLink: String): SearchResponse {
+        return contentJson.result?.mapNotNull { item ->
+            val name  = item.title ?: return@mapNotNull null
+            val link  = fixUrl(item.slug ?: return@mapNotNull null)
+            val poster = item.poster
 
-        val cleanPosterLink = if (posterLink.isNotEmpty() && posterLink != "null") {
-            fixUrl(posterLink)
-        } else {
-            null
-        }
-
-        return newTvSeriesSearchResponse(
-            ad,
-            link,
-            TvType.TvSeries,
-        ) {
-            this.posterUrl = cleanPosterLink
-        }
+            newTvSeriesSearchResponse(name, link, TvType.TvSeries) {
+                this.posterUrl = if (!poster.isNullOrEmpty() && poster != "null") fixUrl(poster) else null
+            }
+        } ?: emptyList()
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
@@ -342,9 +293,7 @@ class Dizilla : MainAPI() {
         val mainReq = app.get(url, interceptor = interceptor)
         val document = mainReq.document
 
-
         val title = document.selectFirst("div.poster h2, h1.text-2xl")?.text() ?: return null
-
 
         val posterElement = document.selectFirst("div.w-full.page-top.relative img, div.poster img") 
             ?: document.selectFirst("img[src*='images.macellan.online']") 
@@ -352,23 +301,18 @@ class Dizilla : MainAPI() {
 
         val poster = posterElement?.let { extractPosterUrl(it) }
 
-
         val yearElement = document.select("div.w-fit.min-w-fit, div.flex.items-center")
             .find { it.text().contains("Yapım Yılı") }
         val year = yearElement?.selectFirst("span.text-sm.opacity-60, span.opacity-60")?.text()
             ?.split(" ")?.last()?.toIntOrNull()
 
-
         val description = document.selectFirst("div.mt-2.text-sm, div.text-sm.opacity-80")?.text()?.trim()
-
 
         val tags = document.selectFirst("div.poster h3, div.flex.items-center.flex-wrap.gap-1")?.text()
             ?.split(",")?.map { it.trim() }
 
-
         val ratingString = document.selectFirst("div.flex.items-center span.text-white.text-sm, span.text-yellow-400")
             ?.text()?.trim()
-
 
         val actors = document.select("div.global-box h5, div.cast-item span").map {
             Actor(it.text())
@@ -376,12 +320,10 @@ class Dizilla : MainAPI() {
 
         val episodeses = mutableListOf<Episode>()
 
-
         val seasonLinks = document.select("div.flex.items-center.flex-wrap.gap-2.mb-4 a, div.seasons a")
         for (sezon in seasonLinks) {
             val sezonhref = fixUrl(sezon.attr("href"))
             val sezonReq = app.get(sezonhref, interceptor = interceptor)
-
 
             val split = sezonhref.split("-")
             val season = split.lastOrNull { it.toIntOrNull() != null }?.toIntOrNull()
@@ -389,13 +331,11 @@ class Dizilla : MainAPI() {
 
             val sezonDoc = sezonReq.document
 
-
             val episodeElements = sezonDoc.select("div.episodes div.cursor-pointer, div.episodes-box div.episode-item")
             for (bolum in episodeElements) {
                 val epLink = bolum.select("a").lastOrNull() ?: continue
                 val epName = epLink.text().trim()
                 val epHref = fixUrlNull(epLink.attr("href")) ?: continue
-
 
                 val epNumberText = bolum.selectFirst("a, span.episode-number")?.text()?.trim() ?: ""
                 val epEpisode = epNumberText.replace("Bölüm", "").trim().toIntOrNull()
@@ -427,29 +367,43 @@ class Dizilla : MainAPI() {
     ): Boolean {
         val document = app.get(data, interceptor = interceptor).document
 
-
+        // 1. __NEXT_DATA__ üzerinden iframe çekmeye çalış
         val script = document.selectFirst("script#__NEXT_DATA__")?.data()
         if (script != null) {
             try {
-                val objectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
-                objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-                val secureData = objectMapper.readTree(script).get("props").get("pageProps").get("secureData")
-                val decodedData = decryptDizillaResponse(secureData.toString().replace("\"", ""))
-                val source = objectMapper.readTree(decodedData).get("RelatedResults")
-                    .get("getEpisodeSources").get("result").get(0).get("source_content").toString()
-                    .replace("\"", "").replace("\\", "")
-                val iframe = fixUrlNull(Jsoup.parse(source).select("iframe").attr("src"))
-                if (iframe != null) {
-                    loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
-                    return true
+                val mapper = ObjectMapper()
+                    .registerModule(KotlinModule.Builder().build())
+                    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+
+                val secureData = mapper.readTree(script)
+                    .get("props")?.get("pageProps")?.get("secureData")
+
+                if (secureData != null && !secureData.isNull) {
+                    val decodedData = decryptDizillaResponse(secureData.toString().replace("\"", ""))
+                    if (!decodedData.isNullOrBlank()) {
+                        val source = mapper.readTree(decodedData)
+                            .get("RelatedResults")
+                            ?.get("getEpisodeSources")
+                            ?.get("result")
+                            ?.get(0)
+                            ?.get("source_content")
+                            .toString()
+                            .replace("\"", "")
+                            .replace("\\", "")
+
+                        val iframe = fixUrlNull(Jsoup.parse(source).select("iframe").attr("src"))
+                        if (iframe != null) {
+                            loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
+                            return true
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("Dizilla", "Error parsing NEXT_DATA: ${e.message}")
-
             }
         }
 
-
+        // 2. Direkt iframe tarama
         val iframes = document.select("iframe")
         if (iframes.isNotEmpty()) {
             for (iframe in iframes) {
@@ -461,8 +415,10 @@ class Dizilla : MainAPI() {
             }
         }
 
-
-        val dataSrcIframes = document.select("[data-src]").filter { it.tagName() == "iframe" || it.hasAttr("data-src") }
+        // 3. data-src attribute'lu iframe'ler
+        val dataSrcIframes = document.select("[data-src]").filter { 
+            it.tagName() == "iframe" || it.hasAttr("data-src") 
+        }
         if (dataSrcIframes.isNotEmpty()) {
             for (iframe in dataSrcIframes) {
                 val src = fixUrlNull(iframe.attr("data-src")) ?: continue
@@ -479,24 +435,20 @@ class Dizilla : MainAPI() {
     private val privateAESKey = "9bYMCNQiWsXIYFWYAu7EkdsSbmGBTyUI"
 
     private fun decryptDizillaResponse(response: String): String? {
-        try {
+        return try {
             val algorithm = "AES/CBC/PKCS5Padding"
             val keySpec = SecretKeySpec(privateAESKey.toByteArray(), "AES")
-
             val iv = ByteArray(16)
             val ivSpec = IvParameterSpec(iv)
 
-            val cipher1 = Cipher.getInstance(algorithm)
-            cipher1.init(Cipher.DECRYPT_MODE, keySpec,ivSpec)
-            val firstIterationData =
-                cipher1.doFinal(Base64.decode(response, Base64.DEFAULT))
+            val cipher = Cipher.getInstance(algorithm)
+            cipher.init(Cipher.DECRYPT_MODE, keySpec, ivSpec)
+            val decrypted = cipher.doFinal(Base64.decode(response, Base64.DEFAULT))
 
-            val jsonString = String(firstIterationData)
-
-            return jsonString
+            String(decrypted)
         } catch (e: Exception) {
             Log.e("Dizilla", "Decryption failed: ${e.message}")
-            return null
+            null
         }
     }
 }
