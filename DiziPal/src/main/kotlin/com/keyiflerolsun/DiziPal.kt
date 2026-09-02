@@ -13,17 +13,9 @@ import okhttp3.Interceptor
 import okhttp3.Response
 import org.jsoup.Jsoup
 
-// ! EKSİK DATA CLASS EKLENDİ
-data class SearchItem(
-    val title: String,
-    val url: String,
-    val poster: String,
-    val type: String // "series" veya "movie"
-)
-
 class DiziPal : MainAPI() {
-    // ! Kendi güncel domain'ini buraya yaz (sonda / olmamalı)
-    override var mainUrl              = "https://dizipalorijinal15.com"
+    // ! Güncel domain
+    override var mainUrl              = "https://dizipal2123.com"
     override var name                 = "DiziPal"
     override val hasMainPage          = true
     override var lang                 = "tr"
@@ -80,17 +72,11 @@ class DiziPal : MainAPI() {
             interceptor = interceptor
         ).document
 
-        // Debug için log
-        Log.d("DZP", "getMainPage URL: ${request.data}")
-        Log.d("DZP", "HTML preview: ${document.html().take(300)}")
-
         val home = if (request.data.contains("/diziler/son-bolumler")) {
             document.select("div.episode-item").mapNotNull { it.sonBolumler() }
         } else {
             document.select("article.type2 ul li").mapNotNull { it.diziler() }
         }
-
-        Log.d("DZP", "Found ${home.size} items for ${request.name}")
 
         return newHomePageResponse(request.name, home)
     }
@@ -120,8 +106,9 @@ class DiziPal : MainAPI() {
         val title     = this.title
         val href      = "${mainUrl}${this.url}"
         val posterUrl = this.poster
+        val isSeries  = this.type.lowercase().contains("series") || this.type.lowercase() == "dizi"
 
-        return if (this.type == "series") {
+        return if (isSeries) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
         } else {
             newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
@@ -164,7 +151,6 @@ class DiziPal : MainAPI() {
         val rating      = document.selectXpath("//div[text()='IMDB Puanı']//following-sibling::div").text().trim()
         val duration    = Regex("(\\d+)").find(document.selectXpath("//div[text()='Ortalama Süre']//following-sibling::div").text())?.value?.toIntOrNull()
 
-        // ! DÜZELTİLDİ: String rating -> Double -> Score?
         val scoreValue = rating.replace(",", ".").toDoubleOrNull()?.let { Score.from10(it) }
 
         if (url.contains("/dizi/")) {
