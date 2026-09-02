@@ -4,14 +4,12 @@ package com.keyiflerolsun
 
 import android.util.Log
 import org.jsoup.nodes.Element
+import org.jsoup.Jsoup
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.fasterxml.jackson.module.kotlin.readValue
 import com.lagradost.cloudstream3.network.CloudflareKiller
 import okhttp3.Interceptor
 import okhttp3.Response
-import org.jsoup.Jsoup
 
 class DiziPal : MainAPI() {
     override var mainUrl              = "https://dizipal2123.com"
@@ -25,16 +23,12 @@ class DiziPal : MainAPI() {
     override var sequentialMainPageDelay      = 50L
     override var sequentialMainPageScrollDelay = 50L
 
-    // ! CloudFlare v2 + User-Agent
     private val cloudflareKiller by lazy { CloudflareKiller() }
     private val interceptor      by lazy { CloudflareInterceptor(cloudflareKiller) }
 
     class CloudflareInterceptor(private val cloudflareKiller: CloudflareKiller): Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
-            val originalRequest = chain.request()
-            
-            // Gerçek tarayıcı User-Agent'ı ekle
-            val request = originalRequest.newBuilder()
+            val request = chain.request().newBuilder()
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
                 .header("Accept-Language", "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7")
@@ -43,7 +37,6 @@ class DiziPal : MainAPI() {
             val response = chain.proceed(request)
             val body     = response.peekBody(1024 * 1024).string()
 
-            // CloudFlare kontrolü - birden fazla pattern
             val isCloudflare = body.contains("cf-browser-verification") ||
                                body.contains("challenge-platform") ||
                                body.contains("Just a moment") ||
@@ -83,6 +76,9 @@ class DiziPal : MainAPI() {
         "${mainUrl}/tur/erotik"                                    to "Erotik Filmler",
     )
 
+    // ! Lazy loading için cache
+    private val dateCache = mutableMapOf<String, String>()
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         Log.d("DZP", "getMainPage: page=$page, url=${request.data}")
 
@@ -108,10 +104,20 @@ class DiziPal : MainAPI() {
                 home.addAll(document.select("article ul li, .type2 ul li, .content-item, .series-item, .movie-item, .grid-item").mapNotNull { it.diziler() })
             }
 
+            // İlk sayfadaki son data-date'i cache'le (lazy loading için)
+            val lastDate = document.select("article.type2 ul li a[data-date]").last()?.attr("data-date")
+                ?: document.select("a[data-date]").last()?.attr("data-date")
+            if (lastDate != null) {
+                dateCache[request.data] = lastDate
+                Log.d("DZP", "Cached date: $lastDate")
+            }
+
             Log.d("DZP", "Primary load: ${home.size} items")
         } else {
-            // Sonraki sayfalar: AJAX lazy loading (bakalim.py mantığı)
-            val lastDate = getLastDateFromCache(request.data)
+            // Sonraki sayfalar: AJAX lazy loading
+            val lastDate = dateCache[request.data]
+            Log.d("DZP", "Lazy loading with date: $lastDate")
+
             if (lastDate != null) {
                 val apiUrl = when {
                     request.data.contains("/filmler") -> "${mainUrl}/api/load-movies"
@@ -138,33 +144,29 @@ class DiziPal : MainAPI() {
                     interceptor = interceptor
                 )
 
-                val json = jacksonObjectMapper().readValue<Map<String, Any>>(response.text)
-                val html = json["html"] as? String ?: ""
+                val jsonText = response.text
+                Log.d("DZP", "API response: ${jsonText.take(200)}")
+
+                // CloudStream3 parseJson kullan (type-safe)
+                val json = parseJson<Map<String, String>>(jsonText)
+                val html = json["html"] ?: ""
 
                 if (html.isNotEmpty()) {
                     val doc = Jsoup.parse("<article class='type2'><ul>$html</ul></article>")
                     home.addAll(doc.select("li").mapNotNull { it.diziler() })
-                }
 
-                // Sonraki sayfa için yeni date'i cache'le
-                val newDate = doc.select("li a[data-date]").last()?.attr("data-date")
-                if (newDate != null) cacheLastDate(request.data, newDate)
+                    // Sonraki sayfa için yeni date'i cache'le
+                    val newDate = doc.select("li a[data-date]").last()?.attr("data-date")
+                    if (newDate != null) {
+                        dateCache[request.data] = newDate
+                        Log.d("DZP", "New cached date: $newDate")
+                    }
+                }
             }
         }
 
         Log.d("DZP", "Returning ${home.size} items for ${request.name}")
         return newHomePageResponse(request.name, home)
-    }
-
-    // Basit cache (lazy loading için)
-    private val dateCache = mutableMapOf<String, String>()
-
-    private fun getLastDateFromCache(url: String): String? {
-        return dateCache[url]
-    }
-
-    private fun cacheLastDate(url: String, date: String) {
-        dateCache[url] = date
     }
 
     private fun Element.sonBolumler(): SearchResponse? {
@@ -209,13 +211,11 @@ class DiziPal : MainAPI() {
                 "X-Requested-With" to "XMLHttpRequest"
             ),
             referer     = "${mainUrl}/",
-            data        = mapOf(
-                "query" to query
-            ),
+            data        = mapOf("query" to query),
             interceptor = interceptor
         )
 
-        val searchItemsMap = jacksonObjectMapper().readValue<Map<String, SearchItem>>(responseRaw.text)
+        val searchItemsMap = parseJson<Map<String, SearchItem>>(responseRaw.text)
 
         val searchResponses = mutableListOf<SearchResponse>()
 
@@ -281,7 +281,9 @@ class DiziPal : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         Log.d("DZP", "data » $data")
         val document = app.get(data, interceptor = interceptor).document
-        val iframe   = document.selectFirst(".series-player-container iframe")?.attr("src") ?: document.selectFirst("div#vast_new iframe")?.attr("src") ?: return false
+        val iframe   = document.selectFirst(".series-player-container iframe")?.attr("src")
+            ?: document.selectFirst("div#vast_new iframe")?.attr("src")
+            ?: return false
         Log.d("DZP", "iframe » $iframe")
 
         val iSource = app.get(iframe, referer="${mainUrl}/").text
@@ -297,24 +299,12 @@ class DiziPal : MainAPI() {
                 subtitles.split(",").forEach {
                     val subLang = it.substringAfter("[").substringBefore("]")
                     val subUrl  = it.replace("[${subLang}]", "")
-
-                    subtitleCallback.invoke(
-                        SubtitleFile(
-                            lang = subLang,
-                            url  = fixUrl(subUrl)
-                        )
-                    )
+                    subtitleCallback.invoke(SubtitleFile(lang = subLang, url = fixUrl(subUrl)))
                 }
             } else {
                 val subLang = subtitles.substringAfter("[").substringBefore("]")
                 val subUrl  = subtitles.replace("[${subLang}]", "")
-
-                subtitleCallback.invoke(
-                    SubtitleFile(
-                        lang = subLang,
-                        url  = fixUrl(subUrl)
-                    )
-                )
+                subtitleCallback.invoke(SubtitleFile(lang = subLang, url = fixUrl(subUrl)))
             }
         }
 
