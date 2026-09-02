@@ -25,20 +25,35 @@ class DiziPal : MainAPI() {
     override var sequentialMainPageDelay      = 50L
     override var sequentialMainPageScrollDelay = 50L
 
+    // ! CloudFlare v2 + User-Agent
     private val cloudflareKiller by lazy { CloudflareKiller() }
     private val interceptor      by lazy { CloudflareInterceptor(cloudflareKiller) }
 
     class CloudflareInterceptor(private val cloudflareKiller: CloudflareKiller): Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
-            val request  = chain.request()
+            val originalRequest = chain.request()
+            
+            // Gerçek tarayıcı User-Agent'ı ekle
+            val request = originalRequest.newBuilder()
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                .header("Accept-Language", "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7")
+                .build()
+
             val response = chain.proceed(request)
-            val doc      = Jsoup.parse(response.peekBody(1024 * 1024).string())
+            val body     = response.peekBody(1024 * 1024).string()
 
-            val title = doc.select("title").text()
-            Log.d("DZP", "Cloudflare check title: $title")
+            // CloudFlare kontrolü - birden fazla pattern
+            val isCloudflare = body.contains("cf-browser-verification") ||
+                               body.contains("challenge-platform") ||
+                               body.contains("Just a moment") ||
+                               body.contains("Bir dakika") ||
+                               body.contains("Checking your browser") ||
+                               body.contains("Turnstile") ||
+                               response.request.url.toString().contains("challenges.cloudflare")
 
-            if (title == "Just a moment..." || title == "Bir dakika lütfen...") {
-                Log.d("DZP", "Cloudflare detected, solving...")
+            if (isCloudflare) {
+                Log.d("DZP", "Cloudflare detected! Solving...")
                 return cloudflareKiller.intercept(chain)
             }
             return response
@@ -71,49 +86,85 @@ class DiziPal : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         Log.d("DZP", "getMainPage: page=$page, url=${request.data}")
 
-        val response = app.get(request.data, interceptor = interceptor)
-        Log.d("DZP", "Response code: ${response.code}")
+        val home = mutableListOf<SearchResponse>()
 
-        val document = response.document
-        val html = document.html()
+        if (page == 1) {
+            // İlk sayfa: Normal GET
+            val document = app.get(request.data, interceptor = interceptor).document
+            val html     = document.html()
 
-        Log.d("DZP", "HTML length: ${html.length}")
-        Log.d("DZP", "HTML preview: ${html.take(800)}")
+            Log.d("DZP", "HTML length: ${html.length}")
+            Log.d("DZP", "Title: ${document.selectFirst("title")?.text()}")
 
-        // ! Tüm olası selector'ları dene ve logla
-        val possibleSelectors = listOf(
-            "article.type2 ul li",
-            "article ul li",
-            ".type2 ul li",
-            "div.content-item",
-            "div.episode-item",
-            "div.series-item",
-            "div.movie-item",
-            ".grid-item",
-            "a[href*='/dizi/']",
-            "a[href*='/film/']",
-            ".series-card",
-            ".movie-card",
-            "li.series",
-            "li.movie"
-        )
-
-        for (selector in possibleSelectors) {
-            val count = document.select(selector).size
-            if (count > 0) {
-                Log.d("DZP", "FOUND selector '$selector' with $count items")
-                Log.d("DZP", "Sample HTML: ${document.select(selector).first()?.outerHtml()?.take(300)}")
+            if (request.data.contains("/diziler/son-bolumler")) {
+                home.addAll(document.select("div.episode-item").mapNotNull { it.sonBolumler() })
+            } else {
+                home.addAll(document.select("article.type2 ul li").mapNotNull { it.diziler() })
             }
-        }
 
-        val home = if (request.data.contains("/diziler/son-bolumler")) {
-            document.select("div.episode-item").mapNotNull { it.sonBolumler() }
+            // Eğer boşsa alternatif seçiciler dene
+            if (home.isEmpty()) {
+                Log.d("DZP", "Primary selectors empty, trying alternatives...")
+                home.addAll(document.select("article ul li, .type2 ul li, .content-item, .series-item, .movie-item, .grid-item").mapNotNull { it.diziler() })
+            }
+
+            Log.d("DZP", "Primary load: ${home.size} items")
         } else {
-            document.select("article.type2 ul li").mapNotNull { it.diziler() }
+            // Sonraki sayfalar: AJAX lazy loading (bakalim.py mantığı)
+            val lastDate = getLastDateFromCache(request.data)
+            if (lastDate != null) {
+                val apiUrl = when {
+                    request.data.contains("/filmler") -> "${mainUrl}/api/load-movies"
+                    else -> "${mainUrl}/api/load-series"
+                }
+
+                val tur = Regex("""tur=([\d]+)""").find(request.data)?.groupValues?.get(1) ?: ""
+
+                val response = app.post(
+                    apiUrl,
+                    headers = mapOf(
+                        "X-Requested-With" to "XMLHttpRequest",
+                        "Accept" to "application/json, text/javascript, */*; q=0.01"
+                    ),
+                    referer = "${mainUrl}/",
+                    data = mapOf(
+                        "date"     to lastDate,
+                        "tur"      to tur,
+                        "durum"    to "",
+                        "kelime"   to "",
+                        "type"     to "",
+                        "siralama" to ""
+                    ),
+                    interceptor = interceptor
+                )
+
+                val json = jacksonObjectMapper().readValue<Map<String, Any>>(response.text)
+                val html = json["html"] as? String ?: ""
+
+                if (html.isNotEmpty()) {
+                    val doc = Jsoup.parse("<article class='type2'><ul>$html</ul></article>")
+                    home.addAll(doc.select("li").mapNotNull { it.diziler() })
+                }
+
+                // Sonraki sayfa için yeni date'i cache'le
+                val newDate = doc.select("li a[data-date]").last()?.attr("data-date")
+                if (newDate != null) cacheLastDate(request.data, newDate)
+            }
         }
 
         Log.d("DZP", "Returning ${home.size} items for ${request.name}")
         return newHomePageResponse(request.name, home)
+    }
+
+    // Basit cache (lazy loading için)
+    private val dateCache = mutableMapOf<String, String>()
+
+    private fun getLastDateFromCache(url: String): String? {
+        return dateCache[url]
+    }
+
+    private fun cacheLastDate(url: String, date: String) {
+        dateCache[url] = date
     }
 
     private fun Element.sonBolumler(): SearchResponse? {
@@ -130,9 +181,9 @@ class DiziPal : MainAPI() {
     }
 
     private fun Element.diziler(): SearchResponse? {
-        val title     = this.selectFirst("span.title")?.text() ?: return null
+        val title     = this.selectFirst("span.title")?.text() ?: this.selectFirst("a")?.attr("title") ?: return null
         val href      = fixUrlNull(this.selectFirst("a")?.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("src"))
+        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("src")) ?: fixUrlNull(this.selectFirst("img")?.attr("data-src"))
 
         return newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
     }
@@ -160,7 +211,8 @@ class DiziPal : MainAPI() {
             referer     = "${mainUrl}/",
             data        = mapOf(
                 "query" to query
-            )
+            ),
+            interceptor = interceptor
         )
 
         val searchItemsMap = jacksonObjectMapper().readValue<Map<String, SearchItem>>(responseRaw.text)
