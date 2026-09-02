@@ -1,8 +1,8 @@
+// ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
 
-package com.UmayTrade
+package com.keyiflerolsun
 
 import com.fasterxml.jackson.annotation.JsonProperty
-
 
 data class SearchItem(
     @JsonProperty("id") val id: String,
@@ -14,6 +14,6 @@ data class SearchItem(
     @JsonProperty("duration") val duration: String,
     @JsonProperty("year") val year: String,
     @JsonProperty("view") val view: Int,
-    @JsonProperty("type") val type: String = "defaultType",
+    @JsonProperty("type") val type: String = "series",
     @JsonProperty("url") val url: String
 )
