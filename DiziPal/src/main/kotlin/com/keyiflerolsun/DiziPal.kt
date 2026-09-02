@@ -45,8 +45,8 @@ class DiziPal : MainAPI() {
 
     override val mainPage = mainPageOf(
         "${mainUrl}/diziler/son-bolumler"                          to "Son Bölümler",
-        "${mainUrl}/diziler"                                       to "Yeni Diziler",
-        "${mainUrl}/filmler"                                       to "Yeni Filmler",
+        "${mainUrl}/diziler"                                       to "Diziler",
+        "${mainUrl}/filmler"                                       to "Filmler",
         "${mainUrl}/koleksiyon/netflix"                            to "Netflix",
         "${mainUrl}/koleksiyon/exxen"                              to "Exxen",
         "${mainUrl}/koleksiyon/blutv"                              to "BluTV",
