@@ -14,7 +14,6 @@ import okhttp3.Response
 import org.jsoup.Jsoup
 
 class DiziPal : MainAPI() {
-    // ! Güncel domain
     override var mainUrl              = "https://dizipal2123.com"
     override var name                 = "DiziPal"
     override val hasMainPage          = true
@@ -26,7 +25,6 @@ class DiziPal : MainAPI() {
     override var sequentialMainPageDelay      = 50L
     override var sequentialMainPageScrollDelay = 50L
 
-    // ! CloudFlare v2
     private val cloudflareKiller by lazy { CloudflareKiller() }
     private val interceptor      by lazy { CloudflareInterceptor(cloudflareKiller) }
 
@@ -36,7 +34,11 @@ class DiziPal : MainAPI() {
             val response = chain.proceed(request)
             val doc      = Jsoup.parse(response.peekBody(1024 * 1024).string())
 
-            if (doc.select("title").text() == "Just a moment..." || doc.select("title").text() == "Bir dakika lütfen...") {
+            val title = doc.select("title").text()
+            Log.d("DZP", "Cloudflare check title: $title")
+
+            if (title == "Just a moment..." || title == "Bir dakika lütfen...") {
+                Log.d("DZP", "Cloudflare detected, solving...")
                 return cloudflareKiller.intercept(chain)
             }
             return response
@@ -67,10 +69,42 @@ class DiziPal : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(
-            request.data,
-            interceptor = interceptor
-        ).document
+        Log.d("DZP", "getMainPage: page=$page, url=${request.data}")
+
+        val response = app.get(request.data, interceptor = interceptor)
+        Log.d("DZP", "Response code: ${response.code}")
+
+        val document = response.document
+        val html = document.html()
+
+        Log.d("DZP", "HTML length: ${html.length}")
+        Log.d("DZP", "HTML preview: ${html.take(800)}")
+
+        // ! Tüm olası selector'ları dene ve logla
+        val possibleSelectors = listOf(
+            "article.type2 ul li",
+            "article ul li",
+            ".type2 ul li",
+            "div.content-item",
+            "div.episode-item",
+            "div.series-item",
+            "div.movie-item",
+            ".grid-item",
+            "a[href*='/dizi/']",
+            "a[href*='/film/']",
+            ".series-card",
+            ".movie-card",
+            "li.series",
+            "li.movie"
+        )
+
+        for (selector in possibleSelectors) {
+            val count = document.select(selector).size
+            if (count > 0) {
+                Log.d("DZP", "FOUND selector '$selector' with $count items")
+                Log.d("DZP", "Sample HTML: ${document.select(selector).first()?.outerHtml()?.take(300)}")
+            }
+        }
 
         val home = if (request.data.contains("/diziler/son-bolumler")) {
             document.select("div.episode-item").mapNotNull { it.sonBolumler() }
@@ -78,6 +112,7 @@ class DiziPal : MainAPI() {
             document.select("article.type2 ul li").mapNotNull { it.diziler() }
         }
 
+        Log.d("DZP", "Returning ${home.size} items for ${request.name}")
         return newHomePageResponse(request.name, home)
     }
 
