@@ -13,9 +13,17 @@ import okhttp3.Interceptor
 import okhttp3.Response
 import org.jsoup.Jsoup
 
+// ! EKSİK DATA CLASS EKLENDİ
+data class SearchItem(
+    val title: String,
+    val url: String,
+    val poster: String,
+    val type: String // "series" veya "movie"
+)
+
 class DiziPal : MainAPI() {
-    // ! Kendi güncel domain'ini buraya yaz
-    override var mainUrl              = "https://dizipalorijinal15.com/"
+    // ! Kendi güncel domain'ini buraya yaz (sonda / olmamalı)
+    override var mainUrl              = "https://dizipalorijinal15.com"
     override var name                 = "DiziPal"
     override val hasMainPage          = true
     override var lang                 = "tr"
@@ -45,8 +53,8 @@ class DiziPal : MainAPI() {
 
     override val mainPage = mainPageOf(
         "${mainUrl}/diziler/son-bolumler"                          to "Son Bölümler",
-        "${mainUrl}/diziler"                                       to "Diziler",
-        "${mainUrl}/filmler"                                       to "Filmler",
+        "${mainUrl}/diziler"                                       to "Yeni Diziler",
+        "${mainUrl}/filmler"                                       to "Yeni Filmler",
         "${mainUrl}/koleksiyon/netflix"                            to "Netflix",
         "${mainUrl}/koleksiyon/exxen"                              to "Exxen",
         "${mainUrl}/koleksiyon/blutv"                              to "BluTV",
@@ -71,13 +79,20 @@ class DiziPal : MainAPI() {
             request.data,
             interceptor = interceptor
         ).document
-        val home     = if (request.data.contains("/diziler/son-bolumler")) {
+
+        // Debug için log
+        Log.d("DZP", "getMainPage URL: ${request.data}")
+        Log.d("DZP", "HTML preview: ${document.html().take(300)}")
+
+        val home = if (request.data.contains("/diziler/son-bolumler")) {
             document.select("div.episode-item").mapNotNull { it.sonBolumler() }
         } else {
             document.select("article.type2 ul li").mapNotNull { it.diziler() }
         }
 
-        return newHomePageResponse(request.name, home, hasNext=false)
+        Log.d("DZP", "Found ${home.size} items for ${request.name}")
+
+        return newHomePageResponse(request.name, home)
     }
 
     private fun Element.sonBolumler(): SearchResponse? {
@@ -149,6 +164,9 @@ class DiziPal : MainAPI() {
         val rating      = document.selectXpath("//div[text()='IMDB Puanı']//following-sibling::div").text().trim()
         val duration    = Regex("(\\d+)").find(document.selectXpath("//div[text()='Ortalama Süre']//following-sibling::div").text())?.value?.toIntOrNull()
 
+        // ! DÜZELTİLDİ: String rating -> Double -> Score?
+        val scoreValue = rating.replace(",", ".").toDoubleOrNull()?.let { Score.from10(it) }
+
         if (url.contains("/dizi/")) {
             val title       = document.selectFirst("div.cover h5")?.text() ?: return null
 
@@ -170,7 +188,7 @@ class DiziPal : MainAPI() {
                 this.year      = year
                 this.plot      = description
                 this.tags      = tags
-                this.score     = Score.from10(rating)  // ! Düzeltildi: Double? yerine Score?
+                this.score     = scoreValue
                 this.duration  = duration
             }
         } else {
@@ -181,7 +199,7 @@ class DiziPal : MainAPI() {
                 this.year      = year
                 this.plot      = description
                 this.tags      = tags
-                this.score     = Score.from10(rating)  // ! Düzeltildi: Double? yerine Score?
+                this.score     = scoreValue
                 this.duration  = duration
             }
         }
