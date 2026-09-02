@@ -382,60 +382,137 @@ class DiziPal : MainAPI() {
         
         try {
             val document = app.get(data, interceptor = interceptor).document
+            val html = document.html()
+            Log.d("DZP", "HTML length: ${html.length}")
             
-            // ! Yeni site için iframe bulma
-            val iframe = document.selectFirst("iframe[src*='dizipal'], iframe[src*='embed'], .video-player iframe, .series-player-container iframe")?.attr("src")
+            // ! 1. Yöntem: Doğrudan iframe ara
+            var iframe = document.selectFirst("iframe[src*='dizipal'], iframe[src*='embed'], iframe[src*='player'], .video-player iframe, .series-player-container iframe, .episode-player iframe, #player iframe")?.attr("src")
+            
+            // ! 2. Yöntem: Script içinde player değişkenini ara
+            if (iframe.isNullOrEmpty()) {
+                val scriptMatch = Regex("""player\s*=\s*new\s+Player\s*\(\s*\{[^}]*src\s*:\s*['"]([^'"]+)['"]""").find(html)
+                iframe = scriptMatch?.groupValues?.get(1)
+                Log.d("DZP", "Player from script: $iframe")
+            }
+            
+            // ! 3. Yöntem: data-player-src veya data-src attribute'u ara
+            if (iframe.isNullOrEmpty()) {
+                iframe = document.selectFirst("[data-player-src], [data-src*='dizipal'], [data-embed]")?.attr("data-player-src") 
+                    ?: document.selectFirst("[data-player-src], [data-src*='dizipal'], [data-embed]")?.attr("data-src")
+                Log.d("DZP", "From data attribute: $iframe")
+            }
+            
+            // ! 4. Yöntem: window.open veya location.href içinde ara
+            if (iframe.isNullOrEmpty()) {
+                val windowMatch = Regex("""window\.open\s*\(\s*['"]([^'"]+)['"]""").find(html)
+                iframe = windowMatch?.groupValues?.get(1)
+                Log.d("DZP", "From window.open: $iframe")
+            }
+            
+            // ! 5. Yöntem: İframe içeriğini doğrudan sayfada ara (gömülü video)
+            if (iframe.isNullOrEmpty()) {
+                // Video elementi veya kaynak linki ara
+                val videoSrc = document.selectFirst("video source")?.attr("src")
+                if (!videoSrc.isNullOrEmpty()) {
+                    callback.invoke(
+                        newExtractorLink(
+                            source = this.name,
+                            name = this.name,
+                            url = videoSrc,
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.referer = mainUrl
+                            this.quality = Qualities.Unknown.value
+                        }
+                    )
+                    return true
+                }
+            }
             
             if (iframe.isNullOrEmpty()) {
-                Log.d("DZP", "No iframe found")
+                Log.d("DZP", "No iframe or video found")
                 return false
             }
             
-            Log.d("DZP", "iframe: $iframe")
-
-            // Iframe içeriğini al
-            val iSource = app.get(iframe, referer = mainUrl).text
+            Log.d("DZP", "iframe found: $iframe")
             
-            // M3U8 linkini bul
-            val m3uLink = Regex("""file:"([^"]+)""").find(iSource)?.groupValues?.get(1)
-                ?: Regex("""(https?://[^\s]+\.m3u8[^\s]*)""").find(iSource)?.groupValues?.get(1)
+            // ! Iframe'in tam URL olup olmadığını kontrol et
+            val fullIframeUrl = if (iframe.startsWith("http")) iframe else "${mainUrl}${iframe}"
+            
+            // ! Iframe içeriğini al
+            val iSource = app.get(fullIframeUrl, referer = mainUrl, interceptor = interceptor).text
+            Log.d("DZP", "iSource length: ${iSource.length}")
+            
+            // ! M3U8 linkini bul - birden fazla pattern dene
+            var m3uLink = Regex("""file:"([^"]+)"""").find(iSource)?.groupValues?.get(1)
+            if (m3uLink == null) {
+                m3uLink = Regex("""src:\s*['"]([^'"]+\.m3u8[^'"]*)['"]""").find(iSource)?.groupValues?.get(1)
+            }
+            if (m3uLink == null) {
+                m3uLink = Regex("""(https?://[^\s]+\.m3u8[^\s]*)""").find(iSource)?.groupValues?.get(1)
+            }
+            if (m3uLink == null) {
+                m3uLink = Regex("""video:\s*['"]([^'"]+\.m3u8[^'"]*)['"]""").find(iSource)?.groupValues?.get(1)
+            }
             
             if (m3uLink == null) {
-                Log.d("DZP", "No m3u8 link found, trying extractor")
-                return loadExtractor(iframe, mainUrl, subtitleCallback, callback)
+                Log.d("DZP", "No m3u8 link found, trying extractor with iframe: $fullIframeUrl")
+                return loadExtractor(fullIframeUrl, mainUrl, subtitleCallback, callback)
             }
-
-            // Altyazıları bul
+            
+            Log.d("DZP", "m3uLink found: $m3uLink")
+            
+            // ! Altyazıları bul
             val subtitles = Regex(""""subtitle":"([^"]+)"""").find(iSource)?.groupValues?.get(1)
+                ?: Regex("""subtitle:\s*['"]([^'"]+)['"]""").find(iSource)?.groupValues?.get(1)
+            
             subtitles?.let {
                 if (it.contains(",")) {
                     it.split(",").forEach { sub ->
                         val subLang = sub.substringAfter("[").substringBefore("]")
                         val subUrl = sub.replace("[${subLang}]", "")
-                        subtitleCallback.invoke(SubtitleFile(lang = subLang, url = fixUrlNull(subUrl) ?: subUrl))
+                        if (subUrl.isNotBlank()) {
+                            subtitleCallback.invoke(SubtitleFile(lang = subLang, url = fixUrlNull(subUrl) ?: subUrl))
+                        }
                     }
                 } else {
                     val subLang = it.substringAfter("[").substringBefore("]")
                     val subUrl = it.replace("[${subLang}]", "")
-                    subtitleCallback.invoke(SubtitleFile(lang = subLang, url = fixUrlNull(subUrl) ?: subUrl))
+                    if (subUrl.isNotBlank()) {
+                        subtitleCallback.invoke(SubtitleFile(lang = subLang, url = fixUrlNull(subUrl) ?: subUrl))
+                    }
                 }
             }
-
+            
+            // ! M3U8 linkini düzelt (göreceli ise)
+            val finalM3uLink = if (m3uLink.startsWith("http")) m3uLink else {
+                if (m3uLink.startsWith("//")) "https:$m3uLink" else {
+                    // Ana domainden al
+                    val baseUrl = fullIframeUrl.substringBeforeLast("/")
+                    "$baseUrl/$m3uLink"
+                }
+            }
+            
             callback.invoke(
                 newExtractorLink(
                     source = this.name,
                     name = this.name,
-                    url = m3uLink,
+                    url = finalM3uLink,
                     type = ExtractorLinkType.M3U8
                 ) {
                     this.referer = mainUrl
                     this.quality = Qualities.Unknown.value
+                    this.headers = mapOf(
+                        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                        "Referer" to mainUrl
+                    )
                 }
             )
-
+            
             return true
         } catch (e: Exception) {
             Log.e("DZP", "Error in loadLinks: ${e.message}")
+            e.printStackTrace()
             return false
         }
     }
