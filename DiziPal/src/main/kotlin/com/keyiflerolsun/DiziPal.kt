@@ -1,5 +1,6 @@
 // ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
 // ! Güncelleme: 03.09.2026 - bandai-azuma.com yeni tema uyumlu
+// ! Derleme hataları giderildi (fixUrl -> fixUrlNull)
 
 package com.keyiflerolsun
 
@@ -124,8 +125,8 @@ class DiziPal : MainAPI() {
                         val img = element.selectFirst("img")
                         val poster = img?.attr("src") ?: img?.attr("data-src")
                         if (title.isNotBlank() && href.isNotBlank()) {
-                            newTvSeriesSearchResponse(title, fixUrl(href), TvType.TvSeries) {
-                                this.posterUrl = fixUrl(poster)
+                            newTvSeriesSearchResponse(title, fixUrlNull(href) ?: href, TvType.TvSeries) {
+                                this.posterUrl = fixUrlNull(poster)
                             }
                         } else null
                     } else null
@@ -229,8 +230,8 @@ class DiziPal : MainAPI() {
                         val poster = img?.attr("src") ?: img?.attr("data-src")
                         if (title.isNotBlank() && href.isNotBlank()) {
                             results.add(
-                                newTvSeriesSearchResponse(title, fixUrl(href), TvType.TvSeries) {
-                                    this.posterUrl = fixUrl(poster)
+                                newTvSeriesSearchResponse(title, fixUrlNull(href) ?: href, TvType.TvSeries) {
+                                    this.posterUrl = fixUrlNull(poster)
                                 }
                             )
                         }
@@ -335,12 +336,12 @@ class DiziPal : MainAPI() {
                     it.split(",").forEach { sub ->
                         val subLang = sub.substringAfter("[").substringBefore("]")
                         val subUrl = sub.replace("[${subLang}]", "")
-                        subtitleCallback.invoke(SubtitleFile(lang = subLang, url = fixUrl(subUrl)))
+                        subtitleCallback.invoke(SubtitleFile(lang = subLang, url = fixUrlNull(subUrl) ?: subUrl))
                     }
                 } else {
                     val subLang = it.substringAfter("[").substringBefore("]")
                     val subUrl = it.replace("[${subLang}]", "")
-                    subtitleCallback.invoke(SubtitleFile(lang = subLang, url = fixUrl(subUrl)))
+                    subtitleCallback.invoke(SubtitleFile(lang = subLang, url = fixUrlNull(subUrl) ?: subUrl))
                 }
             }
 
