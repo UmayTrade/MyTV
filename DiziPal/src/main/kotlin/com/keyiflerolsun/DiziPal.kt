@@ -8,6 +8,8 @@ import org.jsoup.Jsoup
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.network.CloudflareKiller
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
 import okhttp3.Interceptor
 import okhttp3.Response
 
@@ -25,6 +27,7 @@ class DiziPal : MainAPI() {
 
     private val cloudflareKiller by lazy { CloudflareKiller() }
     private val interceptor      by lazy { CloudflareInterceptor(cloudflareKiller) }
+    private val mapper           by lazy { jacksonObjectMapper() }
 
     class CloudflareInterceptor(private val cloudflareKiller: CloudflareKiller): Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
@@ -76,7 +79,6 @@ class DiziPal : MainAPI() {
         "${mainUrl}/tur/erotik"                                    to "Erotik Filmler",
     )
 
-    // ! Lazy loading için cache
     private val dateCache = mutableMapOf<String, String>()
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -85,7 +87,6 @@ class DiziPal : MainAPI() {
         val home = mutableListOf<SearchResponse>()
 
         if (page == 1) {
-            // İlk sayfa: Normal GET
             val document = app.get(request.data, interceptor = interceptor).document
             val html     = document.html()
 
@@ -98,13 +99,11 @@ class DiziPal : MainAPI() {
                 home.addAll(document.select("article.type2 ul li").mapNotNull { it.diziler() })
             }
 
-            // Eğer boşsa alternatif seçiciler dene
             if (home.isEmpty()) {
                 Log.d("DZP", "Primary selectors empty, trying alternatives...")
                 home.addAll(document.select("article ul li, .type2 ul li, .content-item, .series-item, .movie-item, .grid-item").mapNotNull { it.diziler() })
             }
 
-            // İlk sayfadaki son data-date'i cache'le (lazy loading için)
             val lastDate = document.select("article.type2 ul li a[data-date]").last()?.attr("data-date")
                 ?: document.select("a[data-date]").last()?.attr("data-date")
             if (lastDate != null) {
@@ -114,7 +113,6 @@ class DiziPal : MainAPI() {
 
             Log.d("DZP", "Primary load: ${home.size} items")
         } else {
-            // Sonraki sayfalar: AJAX lazy loading
             val lastDate = dateCache[request.data]
             Log.d("DZP", "Lazy loading with date: $lastDate")
 
@@ -147,15 +145,13 @@ class DiziPal : MainAPI() {
                 val jsonText = response.text
                 Log.d("DZP", "API response: ${jsonText.take(200)}")
 
-                // CloudStream3 parseJson kullan (type-safe)
-                val json = parseJson<Map<String, String>>(jsonText)
+                val json = mapper.readValue<Map<String, String>>(jsonText)
                 val html = json["html"] ?: ""
 
                 if (html.isNotEmpty()) {
                     val doc = Jsoup.parse("<article class='type2'><ul>$html</ul></article>")
                     home.addAll(doc.select("li").mapNotNull { it.diziler() })
 
-                    // Sonraki sayfa için yeni date'i cache'le
                     val newDate = doc.select("li a[data-date]").last()?.attr("data-date")
                     if (newDate != null) {
                         dateCache[request.data] = newDate
@@ -215,7 +211,7 @@ class DiziPal : MainAPI() {
             interceptor = interceptor
         )
 
-        val searchItemsMap = parseJson<Map<String, SearchItem>>(responseRaw.text)
+        val searchItemsMap = mapper.readValue<Map<String, SearchItem>>(responseRaw.text)
 
         val searchResponses = mutableListOf<SearchResponse>()
 
