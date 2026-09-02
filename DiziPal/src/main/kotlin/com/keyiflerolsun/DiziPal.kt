@@ -15,7 +15,7 @@ import org.jsoup.Jsoup
 
 class DiziPal : MainAPI() {
     // ! Kendi güncel domain'ini buraya yaz (örn: https://dizipalXXXX.com/)
-    override var mainUrl              = "https://dizipal2219.com/"
+    override var mainUrl              = "https://dizipalorijinal15.com/"
     override var name                 = "DiziPal"
     override val hasMainPage          = true
     override var lang                 = "tr"
