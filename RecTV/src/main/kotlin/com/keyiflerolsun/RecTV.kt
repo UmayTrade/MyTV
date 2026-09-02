@@ -14,7 +14,7 @@ val Int.toMinutes: Long
     get() = this * 1000L
 
 class RecTV : MainAPI() {
-    override var mainUrl              = "https://rectv13.cloudflareaccess.com"
+    override var mainUrl              = "http://a.prectv70.lol"
     override var name                 = "RecTV"
     override val hasMainPage          = true
     override var lang                 = "tr"
