@@ -4,7 +4,6 @@ package com.keyiflerolsun
 
 import com.fasterxml.jackson.annotation.JsonProperty
 
-
 data class SearchItem(
     @JsonProperty("id") val id: String,
     @JsonProperty("title") val title: String,
