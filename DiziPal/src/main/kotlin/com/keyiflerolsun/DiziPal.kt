@@ -1,6 +1,5 @@
 // ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
 // ! Güncelleme: 03.09.2026 - bandai-azuma.com yeni tema uyumlu
-// ! Derleme hataları giderildi (fixUrl -> fixUrlNull)
 
 package com.keyiflerolsun
 
@@ -251,42 +250,119 @@ class DiziPal : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url, interceptor = interceptor).document
 
-        // ! Yeni site yapısına göre detay sayfası
+        // ! Poster
         val poster = fixUrlNull(document.selectFirst("meta[property='og:image']")?.attr("content"))
-        val title = document.selectFirst("h1, .card-title, .ep-title, .trending-title")?.text()?.trim() ?: return null
         
-        // Bilgileri çek
-        val year = Regex("(\\d{4})").find(document.selectFirst(".card-year")?.text() ?: "")?.value?.toIntOrNull()
-        val description = document.selectFirst("p, .summary, .description, .plot")?.text()?.trim()
+        // ! Başlık - JSON-LD'dan veya sayfadan al
+        val title = document.selectFirst("h1.series-title")?.text()?.trim()
+            ?: document.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
+            ?: return null
         
-        val ratingText = document.selectFirst(".card-rating, .rating")?.text()?.trim()
-        val scoreValue = ratingText?.replace(",", ".")?.replace(Regex("[^0-9.]"), "")?.toDoubleOrNull()?.let { Score.from10(it) }
-
-        val tags = document.select(".card-badge, .genre, .tag").map { it.text().trim() }.filter { it.isNotEmpty() }
-
-        // Tür kontrolü
+        // ! Açıklama - JSON-LD'dan veya sayfadan al
+        val description = document.selectFirst("p.series-description")?.text()?.trim()
+            ?: document.selectFirst("meta[name='description']")?.attr("content")?.trim()
+        
+        // ! Yıl ve Puan - JSON-LD'dan al (daha güvenilir)
+        var year: Int? = null
+        var score: Score? = null
+        
+        // JSON-LD'dan verileri çek
+        document.select("script[type='application/ld+json']").forEach { script ->
+            try {
+                val json = script.data()
+                if (json.contains("\"datePublished\"")) {
+                    year = Regex("\"datePublished\":\"?(\\d{4})\"?").find(json)?.groupValues?.get(1)?.toIntOrNull()
+                }
+                if (json.contains("\"ratingValue\"")) {
+                    val rating = Regex("\"ratingValue\":([\\d.]+)").find(json)?.groupValues?.get(1)?.toDoubleOrNull()
+                    score = rating?.let { Score.from10(it) }
+                }
+            } catch (_: Exception) { }
+        }
+        
+        // ! Etiketler (Kategoriler)
+        val tags = document.select(".sidebar-info .info-value.categories a").map { it.text().trim() }.filter { it.isNotEmpty() }
+        
+        // ! Tür kontrolü
         val isSeries = url.contains("/dizi/") || url.contains("/bolum/")
         val isMovie = url.contains("/film/")
 
         return if (isSeries) {
-            val episodes = document.select("a.episode-list-item").mapNotNull {
-                val epHref = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
-                val epTitle = it.selectFirst(".ep-title")?.text()?.trim() ?: return@mapNotNull null
-                val epInfo = it.selectFirst(".ep-info")?.text()?.trim() ?: ""
+            // ! ★★★ BÖLÜMLER - Yeni site yapısına göre ★★★
+            val episodes = mutableListOf<Episode>()
+            
+            // ! 1. Yöntem: detail-episode-list içindeki bölümler
+            document.select(".detail-episode-list .detail-episode-item-wrap").forEach { item ->
+                val link = item.selectFirst("a.detail-episode-item")
+                val epHref = fixUrlNull(link?.attr("href")) ?: return@forEach
                 
-                newEpisode(epHref) {
-                    this.name = "$epTitle $epInfo"
-                    this.season = Regex("(\\d+)\\.").find(epInfo)?.groupValues?.get(1)?.toIntOrNull()
-                    this.episode = Regex("(\\d+)\\.").find(epInfo.replaceFirst(Regex("\\d+\\."), ""))?.groupValues?.get(1)?.toIntOrNull()
+                val titleText = link?.selectFirst(".detail-episode-title")?.text()?.trim() ?: ""
+                val subtitleText = link?.selectFirst(".detail-episode-subtitle")?.text()?.trim() ?: ""
+                
+                // Sezon ve bölüm numaralarını çıkar (örn: "1. Sezon 1. Bölüm")
+                val seasonMatch = Regex("(\\d+)\\.\\s*Sezon").find(subtitleText)
+                val episodeMatch = Regex("(\\d+)\\.\\s*Bölüm").find(subtitleText)
+                
+                val season = seasonMatch?.groupValues?.get(1)?.toIntOrNull()
+                val episode = episodeMatch?.groupValues?.get(1)?.toIntOrNull()
+                
+                val displayName = if (season != null && episode != null) {
+                    "${season}x${episode.toString().padStart(2, '0')}"
+                } else {
+                    titleText.ifEmpty { subtitleText }
+                }
+                
+                episodes.add(
+                    newEpisode(epHref) {
+                        this.name = displayName
+                        this.season = season
+                        this.episode = episode
+                    }
+                )
+            }
+            
+            // ! 2. Yöntem: Eğer hiç bölüm bulunamadıysa, tüm /bolum/ linklerini dene
+            if (episodes.isEmpty()) {
+                document.select("a[href*=/bolum/]").forEach { link ->
+                    val epHref = fixUrlNull(link.attr("href")) ?: return@forEach
+                    val text = link.text().trim()
+                    
+                    // Sezon ve bölüm bilgisini çıkar
+                    val seasonMatch = Regex("(\\d+)\\s*[.-]?\\s*Sezon").find(text)
+                    val episodeMatch = Regex("(\\d+)\\s*[.-]?\\s*Bölüm").find(text)
+                    
+                    val season = seasonMatch?.groupValues?.get(1)?.toIntOrNull()
+                    val episode = episodeMatch?.groupValues?.get(1)?.toIntOrNull()
+                    
+                    val displayName = if (season != null && episode != null) {
+                        "${season}x${episode.toString().padStart(2, '0')}"
+                    } else {
+                        text.ifEmpty { "Bölüm" }
+                    }
+                    
+                    episodes.add(
+                        newEpisode(epHref) {
+                            this.name = displayName
+                            this.season = season
+                            this.episode = episode
+                        }
+                    )
                 }
             }
-
+            
+            // ! 3. Yöntem: JSON-LD'dan sezon sayısını al (hata ayıklama için)
+            val totalSeasons = document.select("script[type='application/ld+json']").firstOrNull()?.let { script ->
+                Regex("\"numberOfSeasons\":(\\d+)").find(script.data())?.groupValues?.get(1)?.toIntOrNull()
+            } ?: 0
+            
+            Log.d("DZP", "Total seasons from JSON-LD: $totalSeasons, Episodes found: ${episodes.size}")
+            
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 this.posterUrl = poster
                 this.year = year
                 this.plot = description
                 this.tags = tags
-                this.score = scoreValue
+                this.score = score
             }
         } else if (isMovie) {
             newMovieLoadResponse(title, url, TvType.Movie, url) {
@@ -294,7 +370,7 @@ class DiziPal : MainAPI() {
                 this.year = year
                 this.plot = description
                 this.tags = tags
-                this.score = scoreValue
+                this.score = score
             }
         } else {
             null
