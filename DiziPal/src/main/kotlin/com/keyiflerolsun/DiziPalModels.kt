@@ -14,6 +14,6 @@ data class SearchItem(
     @JsonProperty("duration") val duration: String,
     @JsonProperty("year") val year: String,
     @JsonProperty("view") val view: Int,
-    @JsonProperty("type") val type: String = "series", // ! API'den gelmezse varsayılan dizi
+    @JsonProperty("type") val type: String = "series",
     @JsonProperty("url") val url: String
 )
