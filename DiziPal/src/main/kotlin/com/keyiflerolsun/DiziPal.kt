@@ -14,8 +14,8 @@ import okhttp3.Response
 import org.jsoup.Jsoup
 
 class DiziPal : MainAPI() {
-    // ! Kendi güncel domain'ini buraya yaz (örn: https://dizipalXXXX.com/)
-    override var mainUrl              = "https://dizipalorijinal15.com/"
+    // ! Kendi güncel domain'ini buraya yaz
+    override var mainUrl              = "https://dizipal2219.com/"
     override var name                 = "DiziPal"
     override val hasMainPage          = true
     override var lang                 = "tr"
@@ -170,7 +170,7 @@ class DiziPal : MainAPI() {
                 this.year      = year
                 this.plot      = description
                 this.tags      = tags
-                this.score     = rating.toDoubleOrNull()
+                this.score     = Score.from10(rating)  // ! Düzeltildi: Double? yerine Score?
                 this.duration  = duration
             }
         } else {
@@ -181,7 +181,7 @@ class DiziPal : MainAPI() {
                 this.year      = year
                 this.plot      = description
                 this.tags      = tags
-                this.score     = rating.toDoubleOrNull()
+                this.score     = Score.from10(rating)  // ! Düzeltildi: Double? yerine Score?
                 this.duration  = duration
             }
         }
