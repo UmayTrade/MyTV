@@ -1,4 +1,3 @@
-// ===== DiziPalPlugin.kt =====
 package com.UmayTrade
 
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
@@ -9,5 +8,23 @@ import android.content.Context
 class DiziPalPlugin: Plugin() {
     override fun load(context: Context) {
         registerMainAPI(DiziPal())
+        registerExtractorAPI(ContentX())
+        registerExtractorAPI(Hotlinger())
+        registerExtractorAPI(RapidVid())
+        registerExtractorAPI(TRsTX())
+        registerExtractorAPI(VidMoxy())
+        registerExtractorAPI(Sobreatsesuyp())
+        registerExtractorAPI(TurboImgz())
+        registerExtractorAPI(TurkeyPlayer())
+        registerExtractorAPI(Hotlinger())
+        registerExtractorAPI(FourCX())
+        registerExtractorAPI(PlayRu())
+        registerExtractorAPI(FourPlayRu())
+        registerExtractorAPI(FourPichive())
+        registerExtractorAPI(Pichive())
+        registerExtractorAPI(FourDplayer())
+        registerExtractorAPI(SNDplayer())
+        registerExtractorAPI(ORGDplayer())
+        registerExtractorAPI(Dplayer())
     }
 }
