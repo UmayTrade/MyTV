@@ -22,8 +22,8 @@ class DiziPal : MainAPI() {
     override val supportedTypes       = setOf(TvType.TvSeries, TvType.Movie)
 
     override var sequentialMainPage           = true
-    override var sequentialMainPageDelay      = 50L
-    override var sequentialMainPageScrollDelay = 50L
+    override var sequentialMainPageDelay      = 200L  // API yanıt gecikmesine karşı artırıldı
+    override var sequentialMainPageScrollDelay = 200L
 
     private val cloudflareKiller by lazy { CloudflareKiller() }
     private val interceptor      by lazy { CloudflareInterceptor(cloudflareKiller) }
@@ -93,19 +93,23 @@ class DiziPal : MainAPI() {
             Log.d("DZP", "HTML length: ${html.length}")
             Log.d("DZP", "Title: ${document.selectFirst("title")?.text()}")
 
+            // ! Python scriptindeki gibi doğrudan "a[data-date]" seçicisi kullanıldı
             if (request.data.contains("/diziler/son-bolumler")) {
                 home.addAll(document.select("div.episode-item").mapNotNull { it.sonBolumler() })
             } else {
                 home.addAll(document.select("article.type2 ul li").mapNotNull { it.diziler() })
             }
 
+            // ! Alternatif seçiciler (boş sayfa ihtimaline karşı)
             if (home.isEmpty()) {
                 Log.d("DZP", "Primary selectors empty, trying alternatives...")
                 home.addAll(document.select("article ul li, .type2 ul li, .content-item, .series-item, .movie-item, .grid-item").mapNotNull { it.diziler() })
             }
 
-            val lastDate = document.select("article.type2 ul li a[data-date]").last()?.attr("data-date")
+            // ! Tarih önbelleğe alma (Python scriptiyle birebir aynı seçici)
+            val lastDate = document.select("article.type2 ul li a").last()?.attr("data-date")
                 ?: document.select("a[data-date]").last()?.attr("data-date")
+            
             if (lastDate != null) {
                 dateCache[request.data] = lastDate
                 Log.d("DZP", "Cached date: $lastDate")
@@ -117,11 +121,13 @@ class DiziPal : MainAPI() {
             Log.d("DZP", "Lazy loading with date: $lastDate")
 
             if (lastDate != null) {
+                // ! API endpoint'ini belirle
                 val apiUrl = when {
                     request.data.contains("/filmler") -> "${mainUrl}/api/load-movies"
                     else -> "${mainUrl}/api/load-series"
                 }
 
+                // ! URL'den 'tur' parametresini çek (Python scriptiyle aynı regex)
                 val tur = Regex("""tur=([\d]+)""").find(request.data)?.groupValues?.get(1) ?: ""
 
                 val response = app.post(
@@ -152,7 +158,8 @@ class DiziPal : MainAPI() {
                     val doc = Jsoup.parse("<article class='type2'><ul>$html</ul></article>")
                     home.addAll(doc.select("li").mapNotNull { it.diziler() })
 
-                    val newDate = doc.select("li a[data-date]").last()?.attr("data-date")
+                    // ! Yeni tarihi güncelle (Python scriptiyle aynı mantık)
+                    val newDate = doc.select("li a").last()?.attr("data-date")
                     if (newDate != null) {
                         dateCache[request.data] = newDate
                         Log.d("DZP", "New cached date: $newDate")
