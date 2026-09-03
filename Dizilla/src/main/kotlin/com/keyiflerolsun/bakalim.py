@@ -5,30 +5,25 @@ from Kekik.cli    import konsol
 from httpx        import Client as Session
 from parsel       import Selector
 
-mainUrl = "https://dizilla.club"
+mainUrl = "https://dizilla.to"
 oturum  = Session()
 
 istek   = oturum.get(mainUrl)
 secici  = Selector(istek.text)
-c_key   = secici.css("input[name=cKey]::attr(value)").get()
-c_value = secici.css("input[name=cValue]::attr(value)").get()
 
 
 
 oturum.cookies.clear()
 oturum.headers.update({
-    "Accept"           : "application/json, text/javascript, */*; q=0.01",
+    "Accept"           : "application/json, text/plain, */*",
     "X-Requested-With" : "XMLHttpRequest",
     "Referer"          : f"{mainUrl}/",
 })
-oturum.cookies.set("showAllDaFull", "true")
-oturum.cookies.set("PHPSESSID", istek.cookies["PHPSESSID"])
+oturum.cookies.set("showAllDaFull", "true", "30")
 istek = oturum.post(
-    f"{mainUrl}/bg/searchcontent",
+    f"{mainUrl}/api/bg/searchContent?searchterm=",
     data = {
-        "cKey"       : c_key,
-        "cValue"     : c_value,
-        "searchterm" : "the"
+        "searchterm=" : "aslan"
     }
 )
 try:
