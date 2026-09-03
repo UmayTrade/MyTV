@@ -8,83 +8,71 @@ import com.lagradost.cloudstream3.utils.*
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import okhttp3.Interceptor
-import java.util.Base64
-
-val Int.toMinutes: Long
-    get() = this * 1000L
+import java.security.MessageDigest
+import java.util.UUID
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 class RecTV : MainAPI() {
-    override var mainUrl              = "https://rectv13.cloudflareaccess.com"
+    override var mainUrl              = "https://m.prectv70.lol"
     override var name                 = "RecTV"
     override val hasMainPage          = true
     override var lang                 = "tr"
     override val hasQuickSearch       = false
     override val supportedTypes       = setOf(TvType.Movie, TvType.Live, TvType.TvSeries)
 
-    private val swKey = "4F5A9C3D9A86FA54EACEDDD635185/c3c5bd17-e37b-4b94-a944-8a3688a30452"
+    private val swKey      = "4F5A9C3D9A86FA54EACEDDD635185/c3c5bd17-e37b-4b94-a944-8a3688a30452"
+    private val hmacKey    = "3508611138826751fdf77beaa6f93eb93fd27e6a5acb910e7aad22665513dd6e"
+    private val appVersion = "141"
+    private val clientId   = "rectv-android"
 
-    private var currentToken: String? = null
-    private var tokenExpirationTime: Long = 0L 
-    
-    private val AUTH_URL = "${mainUrl}/api/attest/nonce"
-
-    /**
-     * Geçerli bir JWT döndürür. Token yoksa veya süresi dolmak üzereyse yenileme yapar.
-     */
-    private suspend fun getValidToken(): String {
-        val currentTime = System.currentTimeMillis()
-
-        // Token'ın süresinin dolmasına 30 saniyeden az kalmışsa yenile.
-        if (currentToken == null || tokenExpirationTime < (currentTime + 30.toMinutes)) {
-            refreshToken()
-        }
-        
-        return currentToken ?: throw IllegalStateException("Token yenilenemedi.")
+    // ---- HMAC imzalama ----
+    private fun sha256Hex(data: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(data.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
     }
 
-    private suspend fun refreshToken() {
-        Log.d(name, "Refreshing token...")
+    private fun hmacSha256Hex(key: String, message: String): String {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(key.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+        return mac.doFinal(message.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+    }
 
-        val response = app.get(AUTH_URL, headers = mapOf(
-            "User-Agent" to "googleusercontent"
-        ))
-
-        if (response.isSuccessful) {
-            val authResponse = try {
-                jacksonObjectMapper().readValue<AuthResponse>(response.text)
-            } catch (_: Exception) {
-                AuthResponse(accessToken = response.text.trim()) 
-            }
-
-            currentToken = authResponse.accessToken
-            
-            val expirationSeconds = authResponse.expiresIn
-            
-            if (expirationSeconds != null) {
-                tokenExpirationTime = System.currentTimeMillis() + (expirationSeconds.toInt()).toMinutes
-            } else {
-                try {
-                    val parts = currentToken!!.split(".")
-                    if (parts.size == 3) {
-                        val payloadBase64 = parts[1]
-                        // Base64Url decode işlemi
-                        val payloadJson = String(Base64.getUrlDecoder().decode(payloadBase64))
-                        val jwtPayload = jacksonObjectMapper().readValue<JWTPayload>(payloadJson)
-                        
-                        tokenExpirationTime = jwtPayload.expiration * 1000L
-                    } else {
-                         tokenExpirationTime = System.currentTimeMillis() + 60.toMinutes 
-                    }
-                } catch (e: Exception) {
-                    Log.e(name, "JWT expiration time could not be parsed: $e")
-                    tokenExpirationTime = System.currentTimeMillis() + 60.toMinutes 
-                }
-            }
-            Log.d(name, "Token refreshed successfully. Expires at $tokenExpirationTime")
-        } else {
-            Log.e(name, "Token refresh failed: ${response.text}")
-            throw Exception("Token alınamadı. Yanıt: ${response.text}")
+    private suspend fun getNonce(): String? {
+        return try {
+            val response = app.get(
+                "$mainUrl/api/attest/nonce",
+                headers = mapOf("User-Agent" to "googleusercontent")
+            )
+            AppUtils.tryParseJson<RecNonce>(response.text)?.nonce
+        } catch (e: Exception) {
+            Log.e("RCTV", "Failed to fetch nonce: ${e.message}")
+            null
         }
+    }
+
+    private suspend fun signedHeaders(method: String, path: String, body: String = ""): Map<String, String> {
+        val ts        = (System.currentTimeMillis() / 1000L).toString()
+        val nonce     = UUID.randomUUID().toString()
+        val bodyHash  = sha256Hex(body)
+        val message   = "$method\n$path\n$ts\n$nonce\n$bodyHash"
+        val signature = hmacSha256Hex(hmacKey, message)
+        
+        val headers = mutableMapOf(
+            "User-Agent"     to "googleusercontent",
+            "Referer"        to "https://twitter.com/",
+            "X-Timestamp"    to ts,
+            "X-Nonce"        to nonce,
+            "X-Signature"    to signature,
+            "X-App-Version"  to appVersion,
+            "X-Client-Id"    to clientId
+        )
+
+        getNonce()?.let {
+            headers["Authorization"] = "Bearer $it"
+        }
+
+        return headers
     }
 
     override val mainPage = mainPageOf(
@@ -107,14 +95,11 @@ class RecTV : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         @Suppress("NAME_SHADOWING") val page = page - 1
 
-        val validToken = getValidToken()
-
-        val url  = request.data.replace("SAYFA", "$page")
-        val home = app.get(url, headers = mapOf(
-            "User-Agent" to "googleusercontent", 
-            "Referer" to "https://twitter.com/", 
-            "authorization" to "Bearer $validToken"
-        ))
+        val url      = request.data.replace("SAYFA", "$page")
+        val uri      = java.net.URI(url)
+        val path     = uri.rawPath
+        val headers  = signedHeaders("GET", path)
+        val home     = app.get(url, headers = headers)
 
         val movies = AppUtils.tryParseJson<List<RecItem>>(home.text)!!.map { item ->
             val toDict = jacksonObjectMapper().writeValueAsString(item)
@@ -132,10 +117,9 @@ class RecTV : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val home    = app.get(
-            "${mainUrl}/api/search/${query}/${swKey}/",
-            headers = mapOf("user-agent" to "okhttp/4.12.0") 
-        )
+        val path    = "/api/search/${query}/${swKey}/"
+        val headers = signedHeaders("GET", path)
+        val home    = app.get("${mainUrl}${path}", headers = headers)
         val veriler = AppUtils.tryParseJson<RecSearch>(home.text)
 
         val sonuclar = mutableListOf<SearchResponse>()
@@ -143,7 +127,6 @@ class RecTV : MainAPI() {
         veriler?.channels?.let { channels ->
             for (item in channels) {
                 val toDict = jacksonObjectMapper().writeValueAsString(item)
-
                 sonuclar.add(newMovieSearchResponse(item.title, toDict, TvType.Movie) { this.posterUrl = item.image })
             }
         }
@@ -151,7 +134,6 @@ class RecTV : MainAPI() {
         veriler?.posters?.let { posters ->
             for (item in posters) {
                 val toDict = jacksonObjectMapper().writeValueAsString(item)
-
                 sonuclar.add(newMovieSearchResponse(item.title, toDict, TvType.Movie) { this.posterUrl = item.image })
             }
         }
@@ -165,31 +147,31 @@ class RecTV : MainAPI() {
         val veri = AppUtils.tryParseJson<RecItem>(url) ?: return null
 
         if (veri.type == "serie") {
-            val diziReq  = app.get(
-                "${mainUrl}/api/season/by/serie/${veri.id}/${swKey}/",
-                // load fonksiyonunda da Bearer token gerekiyorsa buraya eklenmelidir.
-                headers = mapOf("user-agent" to "okhttp/4.12.0")
-            )
+            val path     = "/api/season/by/serie/${veri.id}/${swKey}/"
+            val headers  = signedHeaders("GET", path)
+            val diziReq  = app.get("${mainUrl}${path}", headers = headers)
             val sezonlar = AppUtils.tryParseJson<List<RecDizi>>(diziReq.text) ?: return null
 
-            val episodes = mutableMapOf<DubStatus,MutableList<Episode>>()
+            val episodes = mutableMapOf<DubStatus, MutableList<Episode>>()
 
             val numberRegex = Regex("\\d+")
 
             for (sezon in sezonlar) {
-                val seasonDubStatus = if(sezon.title.contains("altyazı",ignoreCase = true)) DubStatus.Subbed else if(sezon.title.contains("dublaj",ignoreCase = true)) DubStatus.Dubbed else DubStatus.None
+                val seasonDubStatus = if (sezon.title.contains("altyazı", ignoreCase = true)) DubStatus.Subbed
+                                      else if (sezon.title.contains("dublaj", ignoreCase = true)) DubStatus.Dubbed
+                                      else DubStatus.None
                 for (bolum in sezon.episodes) {
                     episodes.getOrPut(seasonDubStatus) { mutableListOf() }.add(newEpisode(bolum.sources.first().url) {
-                        this.name = bolum.title
-                        this.season = numberRegex.find(sezon.title)?.value?.toIntOrNull()
-                        this.episode = numberRegex.find(bolum.title)?.value?.toIntOrNull()
+                        this.name        = bolum.title
+                        this.season      = numberRegex.find(sezon.title)?.value?.toIntOrNull()
+                        this.episode     = numberRegex.find(bolum.title)?.value?.toIntOrNull()
                         this.description = sezon.title.substringAfter(".S ")
-                        this.posterUrl = veri.image
+                        this.posterUrl   = veri.image
                     })
                 }
             }
 
-            return newAnimeLoadResponse(name = veri.title, url = url, type = TvType.TvSeries, comingSoonIfNone = false){
+            return newAnimeLoadResponse(name = veri.title, url = url, type = TvType.TvSeries, comingSoonIfNone = false) {
                 this.episodes = episodes.mapValues { it.value.toList() }.toMutableMap()
                 this.posterUrl = veri.image
                 this.plot      = veri.description
@@ -223,10 +205,10 @@ class RecTV : MainAPI() {
                     name    = this.name,
                     url     = data,
                     type    = INFER_TYPE
-			) {
-                headers = mapOf("Referer" to "https://twitter.com/")
-                quality = Qualities.Unknown.value
-            }
+                ) {
+                    headers = mapOf("Referer" to "https://twitter.com/")
+                    quality = Qualities.Unknown.value
+                }
             )
             return true
         }
@@ -252,7 +234,7 @@ class RecTV : MainAPI() {
     }
 
     override fun getVideoInterceptor(extractorLink: ExtractorLink): Interceptor {
-        val interceptor = Interceptor { chain ->
+        return Interceptor { chain ->
             val originalRequest = chain.request()
             val modifiedRequest = originalRequest.newBuilder()
                 .removeHeader("If-None-Match")
@@ -260,6 +242,5 @@ class RecTV : MainAPI() {
                 .build()
             chain.proceed(modifiedRequest)
         }
-        return interceptor
     }
 }
