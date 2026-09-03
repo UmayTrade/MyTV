@@ -3,7 +3,6 @@ package com.UmayTrade
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.network.CloudflareKiller
-import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import okhttp3.Interceptor
@@ -14,7 +13,7 @@ import kotlin.text.Charsets.UTF_8
 
 class DiziBal : MainAPI() {
 
-    override var mainUrl = "https://dizibal.com/"
+    override var mainUrl = "https://dizibal.org/"
     override var name = "DiziBal"
     override val hasMainPage = true
     override var lang = "tr"
@@ -138,7 +137,7 @@ class DiziBal : MainAPI() {
     }
 
     private fun getPosterFromItem(item: WItem): String? {
-        return fixUrl(item.poster) ?: fixUrl(item.imdbId?.let { "https://img.omdbapi.com/?apikey=YOUR_API_KEY&i=$it" })
+        return fixUrl(item.poster)
     }
 
     private fun getTypeFromUrl(url: String): String {
@@ -152,6 +151,14 @@ class DiziBal : MainAPI() {
 
     private fun getSlugFromUrl(url: String): String {
         return url.split("/").filter { it.isNotEmpty() }.lastOrNull() ?: ""
+    }
+
+    // Extension function for Element
+    private fun Element.getPoster(): String? {
+        val img = selectFirst("img")
+        return img?.let { 
+            fixUrl(it.attr("src").ifEmpty { it.attr("data-src") })
+        }
     }
 
     // ================= MAIN PAGE =================
