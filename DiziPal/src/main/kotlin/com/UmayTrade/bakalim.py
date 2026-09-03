@@ -1,3 +1,4 @@
+# ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
 
 from Kekik.cli    import konsol
 from cloudscraper import CloudScraper
@@ -6,7 +7,7 @@ from re           import findall
 
 oturum  = CloudScraper()
 
-mainUrl = "https://dizipal1539.com"
+mainUrl = "https://dizipal737.com"
 pageUrl = f"{mainUrl}/diziler?kelime=&durum=&tur=1&type=&siralama="
 istek   = oturum.get(pageUrl)
 secici  = Selector(istek.text)
