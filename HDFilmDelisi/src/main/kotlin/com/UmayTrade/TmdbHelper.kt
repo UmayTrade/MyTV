@@ -3,10 +3,9 @@ package com.UmayTrade
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.ActorData
-import com.lagradost.cloudstream3.ActorRole
 import com.lagradost.cloudstream3.ShowStatus
 import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.utils.AppUtils.parseJson
+import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.app
 import com.lagradost.api.Log
 
@@ -115,7 +114,8 @@ object TmdbHelper {
 
         return try {
             val raw     = app.get(aramaUrl).text
-            val yanit   = parseJson<TmdbSearchBase>(raw)
+            // tryParseJson kullan
+            val yanit   = tryParseJson<TmdbSearchBase>(raw) ?: return null
             val sonuclar = yanit.results ?: return null
 
             val puan = sonuclar.mapNotNull { s ->
@@ -181,7 +181,7 @@ object TmdbHelper {
     private suspend fun resolveIdFromImdb(imdbId: String, tvTurleri: TvType): Int? {
         return try {
             val url = "$TMDB_BASE/find/$imdbId?api_key=$API_KEY&external_source=imdb_id&language=tr-TR"
-            val json = parseJson<Map<String, Any>>(app.get(url).text)
+            val json = tryParseJson<Map<String, Any>>(app.get(url).text) ?: return null
             val key  = if (tvTurleri == TvType.Movie || tvTurleri == TvType.AnimeMovie) "movie_results" else "tv_results"
             @Suppress("UNCHECKED_CAST")
             val arr  = json[key] as? List<Map<String, Any>>
@@ -200,7 +200,7 @@ object TmdbHelper {
         return try {
             val detailUrl = "$TMDB_BASE/$yol/$tmdbId?api_key=$API_KEY&language=tr-TR&append_to_response=credits,videos,external_ids,recommendations"
             val raw = app.get(detailUrl).text
-            val json = parseJson<Map<String, Any>>(raw)
+            val json = tryParseJson<Map<String, Any>>(raw) ?: return null
 
             val poster = (json["poster_path"] as? String)?.let { "$IMAGE_BASE$it" }
             val plot   = (json["overview"] as? String)?.takeIf { it.isNotBlank() } ?: sitePlot
@@ -278,7 +278,7 @@ object TmdbHelper {
         sNo    ?: return null
         return try {
             val url = "$TMDB_BASE/tv/$tmdbId/season/$sNo?api_key=$API_KEY&language=tr-TR"
-            parseJson<TmdbSeasonResponse>(app.get(url).text)
+            tryParseJson<TmdbSeasonResponse>(app.get(url).text)
         } catch (e: Exception) {
             null
         }
