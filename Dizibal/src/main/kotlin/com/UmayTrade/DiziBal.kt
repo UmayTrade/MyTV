@@ -3,6 +3,7 @@ package com.UmayTrade
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.network.CloudflareKiller
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import okhttp3.Interceptor
@@ -13,7 +14,7 @@ import kotlin.text.Charsets.UTF_8
 
 class DiziBal : MainAPI() {
 
-    override var mainUrl = "https://dizibal.org/"
+    override var mainUrl = "https://dizibal.com/"
     override var name = "DiziBal"
     override val hasMainPage = true
     override var lang = "tr"
