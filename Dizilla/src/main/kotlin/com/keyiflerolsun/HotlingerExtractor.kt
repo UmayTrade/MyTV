@@ -4,7 +4,7 @@ package com.keyiflerolsun
 
 class Hotlinger : ContentX() {
     override var name    = "Hotlinger"
-    override var mainUrl = "https://hotlinger.com"
+    override var mainUrl = "https://sn.hotlinger.com"
 }
 
 class FourCX : ContentX() {
@@ -30,4 +30,9 @@ class Pichive : ContentX() {
 class FourPichive : ContentX() {
     override var name    = "FourPichive"
     override var mainUrl = "https://four.pichive.online"
+}
+
+class SNplayer : ContentX() {
+    override var name    = "SNplayer"
+    override var mainUrl = "https://sn.dplayer82.site"
 }
