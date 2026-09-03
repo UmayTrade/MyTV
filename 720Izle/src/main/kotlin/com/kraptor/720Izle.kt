@@ -9,9 +9,6 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.json.JSONArray
 
 class FilmIzle720 : MainAPI() {
     override var mainUrl = "https://720izle.com"
@@ -54,7 +51,6 @@ class FilmIzle720 : MainAPI() {
             app.get("${request.data}page/$page/").document
         }
         
-        // 720izle.com için film kartları
         val home = document.select("div.movie-item, div.movie_box, div.film-item").mapNotNull { it.toMainPageResult() }
 
         return newHomePageResponse(request.name, home)
@@ -98,16 +94,13 @@ class FilmIzle720 : MainAPI() {
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
-    // Base64 decode işlemi
     private fun decodeBase64(input: String): String? {
         return try {
-            // 720izle.com'da kullanılan base64 decode
             val cleaned = input.replace("\n", "").replace("\r", "")
             val decoded = Base64.decode(cleaned, Base64.DEFAULT)
             String(decoded, Charsets.UTF_8)
         } catch (e: Exception) {
             try {
-                // Alternatif decode
                 val cleaned = input.replace("\n", "").replace("\r", "")
                 val padded = cleaned.padEnd((cleaned.length + 3) and -4, '=')
                 val decoded = Base64.decode(padded, Base64.URL_SAFE)
@@ -122,47 +115,33 @@ class FilmIzle720 : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
-        // Başlık
         val title = document.selectFirst("h1, .film-title, .movie-title, .title")?.text()?.trim() ?: return null
         
-        // Poster
         val poster = fixUrlNull(
             document.selectFirst(".poster img, .movie-poster img, .film-poster img")?.attr("data-src")
                 ?: document.selectFirst(".poster img, .movie-poster img, .film-poster img")?.attr("src")
         )
         
-        // Açıklama
         val description = document.selectFirst(".description p, .movie-description, .film-description, .desc p")?.text()?.trim()
         
-        // Yıl
         val year = document.selectFirst(".year, .movie-year, .film-year, li:contains(Yıl)")?.text()?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
         
-        // Türler
         val tags = document.select(".genres a, .movie-genres a, .film-genres a, .tur a").map { it.text() }
         
-        // IMDb puanı
         val rating = document.selectFirst(".imdb span, .rating-value, .imdb-score")?.text()?.trim()
         
-        // Süre
         val duration = document.selectFirst(".duration, .movie-duration, .film-duration, .sure")?.text()?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
         
-        // Oyuncular
         val actors = document.select(".actors a, .cast a, .oyuncular a").map { Actor(it.text()) }
         
-        // Dizi mi?
         val isSeries = document.selectFirst(".type, .film-type, .movie-type")?.text()?.contains("Dizi", ignoreCase = true) == true
             || document.selectFirst("li:contains(Bölüm)") != null
         
-        // Video linklerini bul
         val pageText = app.get(url).text
         
-        // iframe URL'lerini bul
         val iframeUrls = mutableListOf<String>()
         var trailerUrl: String? = null
         
-        // 720izle.com için video linklerini bulma - çeşitli yöntemler
-        
-        // Yöntem 1: pdata içinde base64
         val pdataRegex = Regex("""pdata\['(prt_.*?)'\]\s*=\s*'(.*?)';""")
         val pdataMatches = pdataRegex.findAll(pageText)
         
@@ -195,7 +174,6 @@ class FilmIzle720 : MainAPI() {
             }
         }
         
-        // Yöntem 2: Doğrudan iframe etiketleri
         document.select("iframe").forEach { iframe ->
             val src = iframe.attr("src")
             if (src.isNotBlank() && !iframeUrls.contains(src)) {
@@ -203,7 +181,6 @@ class FilmIzle720 : MainAPI() {
             }
         }
         
-        // Yöntem 3: Video etiketleri
         document.select("video source, video").forEach { video ->
             val src = video.attr("src")
             if (src.isNotBlank() && !iframeUrls.contains(src)) {
@@ -211,7 +188,6 @@ class FilmIzle720 : MainAPI() {
             }
         }
         
-        // Yöntem 4: JavaScript içinde video linkleri
         val jsRegex = Regex("""(?:file|video|src|source)\s*[:=]\s*['"]([^'"]+\.(?:m3u8|mp4|mkv|avi))['"]""", RegexOption.IGNORE_CASE)
         jsRegex.findAll(pageText).forEach { match ->
             val url = match.groupValues[1]
@@ -264,14 +240,13 @@ class FilmIzle720 : MainAPI() {
         Log.d("720izle", "loadLinks: $data")
 
         try {
-            // Doğrudan video linki
             if (data.contains(".m3u8") || data.contains(".mp4")) {
                 callback.invoke(
                     newExtractorLink(
                         source = name,
                         name = "Video",
                         url = data,
-                        type = if (data.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.DIRECT
+                        type = if (data.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.STREAM
                     ) {
                         headers = mapOf(
                             "Referer" to mainUrl,
@@ -282,7 +257,6 @@ class FilmIzle720 : MainAPI() {
                 return true
             }
 
-            // VidMody player
             if (data.contains("vidmody.com") || data.contains("player.vidmody.com")) {
                 val extractor = VidMody720()
                 val links = extractor.getUrl(data, mainUrl)
@@ -290,7 +264,6 @@ class FilmIzle720 : MainAPI() {
                 return links.isNotEmpty()
             }
 
-            // Diğer player'lar için generic extractor
             try {
                 loadExtractor(data, subtitleCallback, callback)
                 return true
@@ -298,7 +271,6 @@ class FilmIzle720 : MainAPI() {
                 Log.w("720izle", "Generic extractor failed: ${e.message}")
             }
 
-            // Iframe içinden link çıkarma
             try {
                 val doc = app.get(data, referer = mainUrl).document
                 val iframe = doc.selectFirst("iframe")
