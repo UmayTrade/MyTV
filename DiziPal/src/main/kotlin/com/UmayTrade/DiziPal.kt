@@ -392,32 +392,56 @@ class DiziPal : MainAPI() {
             
             if (videoContainer != null) {
                 val dataCfg = videoContainer.attr("data-cfg")
+                Log.d("DZP", "data-cfg: $dataCfg")
+                
                 if (dataCfg.isNotEmpty()) {
                     try {
                         // Base64 decode
                         val decoded = String(android.util.Base64.decode(dataCfg, android.util.Base64.DEFAULT))
                         Log.d("DZP", "Decoded data-cfg: $decoded")
                         
-                        // JSON'dan video URL'sini çıkar
-                        val vMatch = Regex("\"v\"\\s*:\\s*\"([^\"]+)\"").find(decoded)
+                        // ! JSON parse - "v" alanını bul
+                        val vMatch = Regex(""""v"\s*:\s*"([^"]+)"""").find(decoded)
                         if (vMatch != null) {
                             embedUrl = vMatch.groupValues[1]
                             Log.d("DZP", "Found embed URL from data-cfg: $embedUrl")
+                        } else {
+                            // Alternatif: "url" alanını kontrol et
+                            val urlMatch = Regex(""""url"\s*:\s*"([^"]+)"""").find(decoded)
+                            if (urlMatch != null) {
+                                embedUrl = urlMatch.groupValues[1]
+                                Log.d("DZP", "Found URL from data-cfg: $embedUrl")
+                            }
                         }
                     } catch (e: Exception) {
-                        Log.d("DZP", "Failed to decode data-cfg: ${e.message}")
+                        Log.e("DZP", "Failed to decode data-cfg: ${e.message}")
+                        // ! Base64 decode başarısızsa, doğrudan data-cfg içinde ara
+                        val directMatch = Regex("""v\\?":\\?"([^"\\]+)"""").find(dataCfg)
+                        if (directMatch != null) {
+                            embedUrl = directMatch.groupValues[1]
+                            Log.d("DZP", "Found embed URL from raw data-cfg: $embedUrl")
+                        }
                     }
                 }
             }
             
-            // ! 2. YÖNTEM: Eğer data-cfg yoksa, iframe ara
+            // ! 2. YÖNTEM: Eğer data-cfg yoksa veya çalışmazsa, iframe ara
             if (embedUrl == null) {
-                // Iframe'leri kontrol et
+                // Tüm iframe'leri kontrol et
                 val iframes = document.select("iframe")
+                Log.d("DZP", "Found ${iframes.size} iframes")
                 for (frame in iframes) {
                     val src = frame.attr("src")
-                    if (src.isNotEmpty() && (src.contains("embed") || src.contains("player") || src.contains("video"))) {
-                        embedUrl = src
+                    val dataSrc = frame.attr("data-src")
+                    val srcCandidate = if (src.isNotEmpty()) src else dataSrc
+                    
+                    if (srcCandidate.isNotEmpty() && 
+                        (srcCandidate.contains("embed") || 
+                         srcCandidate.contains("player") || 
+                         srcCandidate.contains("video") ||
+                         srcCandidate.contains("dizipal") ||
+                         srcCandidate.contains("formationfeed"))) {
+                        embedUrl = srcCandidate
                         Log.d("DZP", "Found iframe: $embedUrl")
                         break
                     }
@@ -430,18 +454,38 @@ class DiziPal : MainAPI() {
                 for (script in scripts) {
                     val scriptData = script.data()
                     
-                    // window.playerConfig veya benzeri
-                    val configMatch = Regex("""playerConfig\s*=\s*\{[^}]*url\s*:\s*['"]([^'"]+)['"]""").find(scriptData)
-                    if (configMatch != null) {
-                        embedUrl = configMatch.groupValues[1]
-                        Log.d("DZP", "Found from playerConfig: $embedUrl")
-                        break
+                    // playerConfig veya benzeri
+                    val patterns = listOf(
+                        Regex("""playerConfig\s*=\s*\{[^}]*url\s*:\s*['"]([^'"]+)['"]"""),
+                        Regex("""videoUrl\s*:\s*['"]([^'"]+)['"]"""),
+                        Regex("""embedUrl\s*:\s*['"]([^'"]+)['"]"""),
+                        Regex("""src\s*:\s*['"]([^'"]+\.html)['"]""")
+                    )
+                    
+                    for (pattern in patterns) {
+                        val match = pattern.find(scriptData)
+                        if (match != null) {
+                            embedUrl = match.groupValues[1]
+                            Log.d("DZP", "Found from script: $embedUrl")
+                            break
+                        }
                     }
+                    if (embedUrl != null) break
+                }
+            }
+            
+            // ! 4. YÖNTEM: window.open veya location.href
+            if (embedUrl == null) {
+                val windowMatch = Regex("""window\.open\s*\(\s*['"]([^'"]+)['"]""").find(html)
+                if (windowMatch != null) {
+                    embedUrl = windowMatch.groupValues[1]
+                    Log.d("DZP", "Found from window.open: $embedUrl")
                 }
             }
             
             if (embedUrl == null) {
-                Log.d("DZP", "No embed URL found")
+                Log.d("DZP", "No embed URL found - giving up")
+                Log.d("DZP", "HTML preview: ${html.take(1000)}")
                 return false
             }
             
@@ -450,25 +494,45 @@ class DiziPal : MainAPI() {
                 embedUrl.startsWith("http") -> embedUrl
                 embedUrl.startsWith("//") -> "https:$embedUrl"
                 embedUrl.startsWith("/") -> "${mainUrl}${embedUrl}"
-                else -> embedUrl
+                else -> {
+                    // Eğer göreceli ise, ana sayfaya ekle
+                    if (embedUrl.contains("formationfeed") || embedUrl.contains("embed")) {
+                        "https://$embedUrl"
+                    } else {
+                        "${mainUrl}/$embedUrl"
+                    }
+                }
             }
             
             Log.d("DZP", "Full embed URL: $fullEmbedUrl")
             
-            // ! Embed sayfasını al
-            val embedDoc = app.get(fullEmbedUrl, referer = mainUrl, interceptor = interceptor)
-            val embedHtml = embedDoc.text
-            Log.d("DZP", "Embed HTML length: ${embedHtml.length}")
+            // ! Embed sayfasını al - birden fazla deneme
+            var embedHtml = ""
+            try {
+                val embedResponse = app.get(fullEmbedUrl, referer = mainUrl, interceptor = interceptor)
+                embedHtml = embedResponse.text
+                Log.d("DZP", "Embed HTML length: ${embedHtml.length}")
+            } catch (e: Exception) {
+                Log.e("DZP", "Failed to get embed page: ${e.message}")
+                // Alternatif olarak doğrudan extractor dene
+                return loadExtractor(fullEmbedUrl, mainUrl, subtitleCallback, callback)
+            }
+            
+            if (embedHtml.isEmpty()) {
+                Log.d("DZP", "Embed HTML is empty, trying extractor")
+                return loadExtractor(fullEmbedUrl, mainUrl, subtitleCallback, callback)
+            }
             
             // ! M3U8 linkini bul - tüm olası pattern'ler
             val m3uPatterns = listOf(
-                Regex("""file:\s*['"]([^'"]+\.m3u8[^'"]*)['"]"""),
-                Regex("""src:\s*['"]([^'"]+\.m3u8[^'"]*)['"]"""),
-                Regex("""url:\s*['"]([^'"]+\.m3u8[^'"]*)['"]"""),
-                Regex("""video:\s*['"]([^'"]+\.m3u8[^'"]*)['"]"""),
-                Regex("""source:\s*['"]([^'"]+\.m3u8[^'"]*)['"]"""),
-                Regex("""href:\s*['"]([^'"]+\.m3u8[^'"]*)['"]"""),
-                Regex("""(https?://[^\s'"]+\.m3u8[^\s'"]*)""")
+                Regex("""file\s*:\s*["']([^"']+\.m3u8[^"']*)["']"""),
+                Regex("""src\s*:\s*["']([^"']+\.m3u8[^"']*)["']"""),
+                Regex("""url\s*:\s*["']([^"']+\.m3u8[^"']*)["']"""),
+                Regex("""video\s*:\s*["']([^"']+\.m3u8[^"']*)["']"""),
+                Regex("""source\s*:\s*["']([^"']+\.m3u8[^"']*)["']"""),
+                Regex("""href\s*:\s*["']([^"']+\.m3u8[^"']*)["']"""),
+                Regex("""(https?://[^\s"']+\.m3u8[^\s"']*)"""),
+                Regex("""([a-zA-Z0-9\-_]+\.m3u8)""")
             )
             
             var m3uLink: String? = null
@@ -491,9 +555,9 @@ class DiziPal : MainAPI() {
             
             // ! Altyazıları bul
             val subtitlePatterns = listOf(
-                Regex(""""subtitle":"([^"]+)""""),
-                Regex("""subtitle:\s*['"]([^'"]+)['"]"""),
-                Regex("""subtitles:\s*['"]([^'"]+)['"]""")
+                Regex(""""subtitle"\s*:\s*"([^"]+)""""),
+                Regex("""subtitle\s*:\s*['"]([^'"]+)['"]"""),
+                Regex("""subtitles\s*:\s*['"]([^'"]+)['"]""")
             )
             
             for (pattern in subtitlePatterns) {
@@ -502,17 +566,17 @@ class DiziPal : MainAPI() {
                     val subtitles = match.groupValues[1]
                     if (subtitles.contains(",")) {
                         subtitles.split(",").forEach { sub ->
-                            val subLang = sub.substringAfter("[").substringBefore("]")
-                            val subUrl = sub.replace("[${subLang}]", "")
-                            if (subUrl.isNotBlank()) {
-                                subtitleCallback.invoke(SubtitleFile(lang = subLang, url = fixUrlNull(subUrl) ?: subUrl))
+                            val subLang = sub.substringAfter("[").substringBefore("]").ifEmpty { "Türkçe" }
+                            val subUrl = sub.replace("[${subLang}]", "").trim()
+                            if (subUrl.isNotBlank() && subUrl.startsWith("http")) {
+                                subtitleCallback.invoke(SubtitleFile(lang = subLang, url = subUrl))
                             }
                         }
                     } else {
-                        val subLang = subtitles.substringAfter("[").substringBefore("]")
-                        val subUrl = subtitles.replace("[${subLang}]", "")
-                        if (subUrl.isNotBlank()) {
-                            subtitleCallback.invoke(SubtitleFile(lang = subLang, url = fixUrlNull(subUrl) ?: subUrl))
+                        val subLang = subtitles.substringAfter("[").substringBefore("]").ifEmpty { "Türkçe" }
+                        val subUrl = subtitles.replace("[${subLang}]", "").trim()
+                        if (subUrl.isNotBlank() && subUrl.startsWith("http")) {
+                            subtitleCallback.invoke(SubtitleFile(lang = subLang, url = subUrl))
                         }
                     }
                     break
@@ -525,6 +589,7 @@ class DiziPal : MainAPI() {
                 m3uLink.startsWith("//") -> "https:$m3uLink"
                 m3uLink.startsWith("/") -> "${mainUrl}${m3uLink}"
                 else -> {
+                    // Göreceli ise, embed sayfasının base URL'sini kullan
                     val baseUrl = fullEmbedUrl.substringBeforeLast("/")
                     "$baseUrl/$m3uLink"
                 }
