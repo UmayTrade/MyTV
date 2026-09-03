@@ -9,8 +9,6 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import org.json.JSONObject
-import kotlin.sequences.forEach
 
 class VidMody720 : ExtractorApi() {
     override val name = "VidMody"
@@ -24,7 +22,6 @@ class VidMody720 : ExtractorApi() {
             
             val pageText = app.get(url).text
             
-            // video id'yi bul (ttXXXXX formatında)
             val idRegex = Regex(pattern = """var\s+id\s*=\s*['"](tt\d+)['"]""", options = setOf(RegexOption.IGNORE_CASE))
             val idMatch = idRegex.find(pageText)
             
@@ -49,7 +46,6 @@ class VidMody720 : ExtractorApi() {
                     }
                 )
             } else {
-                // Alternatif: JSON içinde video linki
                 val jsonRegex = Regex("""\{[^{}]*"file"\s*:\s*"([^"]+)"[^{}]*\}""")
                 val jsonMatch = jsonRegex.find(pageText)
                 if (jsonMatch != null) {
@@ -59,7 +55,7 @@ class VidMody720 : ExtractorApi() {
                             source = name,
                             name = "VidMody",
                             url = videoUrl,
-                            type = if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.DIRECT
+                            type = if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.STREAM
                         ) {
                             quality = Qualities.Unknown.value
                             headers = mapOf(
