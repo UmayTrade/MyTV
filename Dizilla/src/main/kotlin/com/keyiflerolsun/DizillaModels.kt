@@ -18,22 +18,11 @@ data class SearchData(
 data class SearchItem(
     @JsonProperty("used_slug")         val slug: String?   = null,
     @JsonProperty("object_name")       val title: String?  = null,
+    @JsonProperty("title")             val backupTitle: String? = null,
+    @JsonProperty("original_title")    val originalTitle: String? = null,
     @JsonProperty("object_poster_url") val poster: String? = null,
+    @JsonProperty("poster_url")        val posterUrl: String? = null,
+    @JsonProperty("square_url")        val squareUrl: String? = null,
+    @JsonProperty("face_url")          val faceUrl: String? = null,
+    @JsonProperty("back_url")          val backUrl: String? = null,
 )
-
-data class PageData(
-    @JsonProperty("state")   val state: Boolean?           = null,
-    @JsonProperty("result")  val result: List<PageItem>? = arrayListOf(),
-
-    )
-
-data class PageItem(
-    @JsonProperty("original_title") val originalTitle: String? = null,
-    @JsonProperty("imdb_point") val imdbPoint: Double? = null,
-    @JsonProperty("release_year") val releaseYear: Int? = null,
-    @JsonProperty("poster_url") val posterUrl: String? = null,
-    @JsonProperty("used_slug") val slug: String?   = null,
-    @JsonProperty("description") val description: String?   = null,
-    @JsonProperty("categories") val categories: String?   = null,
-
-    )
