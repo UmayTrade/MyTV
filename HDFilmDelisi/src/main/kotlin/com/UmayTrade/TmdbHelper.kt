@@ -9,7 +9,6 @@ import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.app
 import com.lagradost.api.Log
-import me.xdrop.fuzzywuzzy.FuzzySearch
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class TmdbSearchResult(
@@ -121,8 +120,8 @@ object TmdbHelper {
 
             val puan = sonuclar.mapNotNull { s ->
                 val ad = s.name ?: s.title ?: return@mapNotNull null
-                val skor1 = FuzzySearch.ratio(temizIsim.lowercase(), ad.lowercase())
-                val skor2 = temizIkinci?.let { FuzzySearch.ratio(it.lowercase(), ad.lowercase()) } ?: 0
+                val skor1 = stringSimilarity(temizIsim.lowercase(), ad.lowercase())
+                val skor2 = temizIkinci?.let { stringSimilarity(it.lowercase(), ad.lowercase()) } ?: 0
                 Triple(s, ad, maxOf(skor1, skor2))
             }
 
@@ -134,6 +133,49 @@ object TmdbHelper {
             Log.d("TmdbHelper", "isim araması hatası: ${e.message}")
             null
         }
+    }
+
+    // FuzzyWuzzy olmadan benzerlik hesaplama fonksiyonu
+    private fun stringSimilarity(s1: String, s2: String): Int {
+        if (s1.isEmpty() || s2.isEmpty()) return 0
+        
+        // Levenshtein distance hesapla
+        val distance = levenshteinDistance(s1, s2)
+        val maxLen = maxOf(s1.length, s2.length)
+        
+        // Benzerlik oranını yüzde olarak hesapla
+        return if (maxLen > 0) {
+            ((1.0 - distance.toDouble() / maxLen) * 100).toInt()
+        } else {
+            0
+        }
+    }
+
+    // Levenshtein Distance algoritması
+    private fun levenshteinDistance(s1: String, s2: String): Int {
+        val len1 = s1.length
+        val len2 = s2.length
+        
+        if (len1 == 0) return len2
+        if (len2 == 0) return len1
+        
+        val dp = Array(len1 + 1) { IntArray(len2 + 1) }
+        
+        for (i in 0..len1) dp[i][0] = i
+        for (j in 0..len2) dp[0][j] = j
+        
+        for (i in 1..len1) {
+            for (j in 1..len2) {
+                val cost = if (s1[i - 1] == s2[j - 1]) 0 else 1
+                dp[i][j] = minOf(
+                    dp[i - 1][j] + 1,
+                    dp[i][j - 1] + 1,
+                    dp[i - 1][j - 1] + cost
+                )
+            }
+        }
+        
+        return dp[len1][len2]
     }
 
     private suspend fun resolveIdFromImdb(imdbId: String, tvTurleri: TvType): Int? {
