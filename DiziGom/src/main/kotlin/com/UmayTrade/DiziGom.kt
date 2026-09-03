@@ -13,6 +13,7 @@ class DiziGom : MainAPI() {
 
     override val mainPage = mainPageOf(
         "$mainUrl/dizi-izle/" to "Diziler",
+        "$mainUrl/dizi-izle/?filtrele=imdb&sirala=DESC&yil=&imdb=&kelime=&tur=Belgesel/" to "Belgesel Diziler",
     )
 
     private val seasonEpisodeRegex = Regex("""-(\d+)-sezon-(\d+)-bolum""")
