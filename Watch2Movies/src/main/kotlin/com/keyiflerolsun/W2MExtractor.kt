@@ -1,0 +1,119 @@
+// ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
+
+package com.keyiflerolsun
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import com.lagradost.api.Log
+import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.utils.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
+
+open class W2MExtractor(override val mainUrl: String, override val name: String, private val context: Context) : ExtractorApi() {
+    override val requiresReferer = true
+    private lateinit var webView: WebView
+
+    @OptIn(Prerelease::class)
+    @SuppressLint("SetJavaScriptEnabled")
+    override suspend fun getUrl(url: String, referer: String?, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit) {
+        withContext(Dispatchers.Main) {
+            webView = WebView(context).apply {
+                settings.apply {
+                    javaScriptEnabled                  = true
+                    domStorageEnabled                  = true
+                    javaScriptCanOpenWindowsAutomatically = true
+                    loadWithOverviewMode               = true
+                    useWideViewPort                    = true
+                    allowFileAccess                    = true
+                    builtInZoomControls                = true
+                    displayZoomControls                = false
+                    allowContentAccess                 = true
+                    mixedContentMode                   = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    userAgentString                    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0"
+                }
+
+                evaluateJavascript(
+                    """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+Object.defineProperty(navigator, 'language', { get: () => 'en-US' });
+window.chrome = { runtime: {} };
+""".trimIndent()
+                ) {}
+
+                webViewClient = object : WebViewClient() {
+                    override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                        @Suppress("NAME_SHADOWING") val url = request?.url.toString()
+                        val headers = request?.requestHeaders
+
+                        Thread {
+                            fetchAndCheckResponse(url, headers) { sourceUrl, headers ->
+                                val linkType = if (sourceUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                                @Suppress("DEPRECATION")
+                                callback.invoke(
+                                    ExtractorLink(
+                                        source  = this@W2MExtractor.name,
+                                        name    = this@W2MExtractor.name,
+                                        url     = sourceUrl,
+                                        referer = headers["Referer"] ?: headers["referer"] ?: mainUrl,
+                                        quality = Qualities.Unknown.value,
+                                        type    = linkType,
+                                        headers = headers
+                                    )
+                                )
+                            }
+                        }.start()
+
+                        return super.shouldInterceptRequest(view, request)
+                    }
+                }
+
+                loadUrl(url)
+            }
+        }
+
+        delay(10_000)
+    }
+
+    private fun fetchAndCheckResponse(url: String, headers: Map<String, String>?, onResponseCaptured: (url: String, headers: Map<String, String>) -> Unit) {
+        try {
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 3000
+            connection.readTimeout = 3000
+
+            headers?.forEach { (key, value) ->
+                connection.setRequestProperty(key, value)
+            }
+
+            connection.connect()
+            val contentType = connection.contentType ?: ""
+
+            if (contentType.contains("mpegurl", ignoreCase = true) || url.contains(".m3u8") || url.contains(".txt")) {
+                val firstLine = BufferedReader(InputStreamReader(connection.inputStream)).use { reader ->
+                    reader.readLine() ?: ""
+                }
+                if (firstLine.startsWith("#EXTM3U")) {
+                    Log.d("W2M", "Captured HLS playlist: $url")
+                    onResponseCaptured(connection.url.toString(), headers ?: mapOf())
+                }
+            } else if (contentType.startsWith("video/", ignoreCase = true) || url.contains(".mp4") || url.contains(".mkv")) {
+                Log.d("W2M", "Captured direct video URL: $url")
+                onResponseCaptured(connection.url.toString(), headers ?: mapOf())
+            }
+        } catch (e: Exception) {
+            // Ignore connection errors during background pre-check
+        }
+    }
+}
