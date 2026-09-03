@@ -3,93 +3,76 @@
 package com.keyiflerolsun
 
 import android.util.Log
-import com.fasterxml.jackson.databind.DeserializationFeature
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.KotlinModule
-import com.fasterxml.jackson.module.kotlin.readValue
-import com.lagradost.cloudstream3.Actor
-import com.lagradost.cloudstream3.HomePageResponse
-import com.lagradost.cloudstream3.LoadResponse
-import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
-import com.lagradost.cloudstream3.MainAPI
-import com.lagradost.cloudstream3.MainPageRequest
-import com.lagradost.cloudstream3.Score
-import com.lagradost.cloudstream3.SearchResponse
-import com.lagradost.cloudstream3.SubtitleFile
-import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.app
-import com.lagradost.cloudstream3.fixUrlNull
-import com.lagradost.cloudstream3.mainPageOf
-import com.lagradost.cloudstream3.newHomePageResponse
-import com.lagradost.cloudstream3.newMovieLoadResponse
-import com.lagradost.cloudstream3.newMovieSearchResponse
-import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.ExtractorLinkType
-import com.lagradost.cloudstream3.utils.JsUnpacker
-import com.lagradost.cloudstream3.utils.Qualities
-import com.lagradost.cloudstream3.utils.getQualityFromName
-import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.cloudstream3.utils.newExtractorLink
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.jsoup.nodes.Element
+import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.APIHolder.capitalize
+import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 
 class JetFilmizle : MainAPI() {
-    override var mainUrl = "https://jetfilmizle.now"
-    override var name = "JetFilmizle"
-    override val hasMainPage = true
-    override var lang = "tr"
-    override val hasQuickSearch = false
-    override val supportedTypes = setOf(TvType.Movie)
+    override var mainUrl              = "https://jetfilmizle.now"
+    override var name                 = "JetFilmizle"
+    override val hasMainPage          = true
+    override var lang                 = "tr"
+    override val hasQuickSearch       = false
+    override val supportedTypes       = setOf(TvType.Movie)
 
     override val mainPage = mainPageOf(
         mainUrl to "Son Filmler",
-        "${mainUrl}/netflix" to "Netflix",
-        "${mainUrl}/editorun-secimi" to "Editörün Seçimi",
-        "${mainUrl}/turk-film-full-hd-izle" to "Türk Filmleri",
-        "${mainUrl}/cizgi-filmler-full-izle" to "Çizgi Filmler",
-        "${mainUrl}/kategoriler/yesilcam-filmleri-full-izle" to "Yeşilçam Filmleri"
+        "${mainUrl}/saglayici/netflix"        to "Netflix",
+        "${mainUrl}/gunun-kesleri"            to "Editörün Seçimi",
+        "${mainUrl}/yerli-filmler"            to "Türk Filmleri",
+        "${mainUrl}/diziler"                  to "Diziler",
+        "${mainUrl}/nette-ilkler"             to "Nette İlk Filmler"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        var url = request.data
-        if (page > 1) {
-            url = "$url/page/$page"
-        }
-        val document = app.get(url).document
-        val home = document.select("article.movie").mapNotNull { it.toSearchResult() }
+        val baseUrl = request.data
+        val urlpage = if (page == 1) baseUrl else "$baseUrl/page/$page"
+        val document = app.get(urlpage).document
+
+        // HTML'de her bir içerik "div.film-card" sınıfına sahip bir kart içinde tutuluyor.
+        val home = document.select("div.film-card").mapNotNull { it.toSearchResult() }
 
         return newHomePageResponse(request.name, home)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        var title = this.selectFirst("h2 a")?.text() ?: this.selectFirst("h3 a")?.text()
-        ?: this.selectFirst("h4 a")?.text() ?: this.selectFirst("h5 a")?.text() ?: this.selectFirst(
-            "h6 a"
-        )?.text() ?: return null
-        title = title.substringBefore(" izle")
-
+        // 1. URL'yi al: İlk <a> etiketinin href'i direkt olarak içeriğe gidiyor.
         val href = fixUrlNull(this.selectFirst("a")?.attr("href")) ?: return null
-        var posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src"))
-        if (posterUrl == null) {
-            posterUrl = fixUrlNull(this.selectFirst("img")?.attr("src"))
-        }
-        val score = this.selectFirst("span.puan_1")?.text()?.trim()
 
-        return newMovieSearchResponse(title, href, TvType.Movie) {
+        // 2. Başlığı al: h2, h3 diye tek tek aramak yerine doğrudan ".card-title a" sınıfını hedefliyoruz.
+        var title = this.selectFirst(".card-title a")?.text()?.trim() ?: return null
+        // İleride başlıklarda " izle" takısı gelirse diye güvenli bir şekilde temizleyelim.
+        title = title.substringBeforeLast(" izle").trim()
+
+        // 3. Afiş URL'sini al: ".film-poster img" içinde src olarak duruyor.
+        // Ancak lazy-loading (sonradan yüklenme) durumlarına karşı önce data-src kontrolü yapmak best-practice'dir.
+        val imgElement = this.selectFirst(".film-poster img")
+        val posterUrl = fixUrlNull(
+            imgElement?.attr("data-src")?.takeIf { it.isNotBlank() }
+                ?: imgElement?.attr("src")
+        )
+
+        // 4. Senior Dokunuşu: İçerik film mi dizi mi? URL yapısından dinamik olarak tespit ediyoruz.
+        // Örnek: https://jetfilmizle.net/dizi/ejderhalar-prensi
+        val isTvSeries = href.contains("/dizi/", ignoreCase = true)
+        val tvType = if (isTvSeries) TvType.TvSeries else TvType.Movie
+
+        // Cloudstream'in yapısına uygun olarak sonucu dön.
+        return newMovieSearchResponse(title, href, tvType) {
             this.posterUrl = posterUrl
-            this.score = Score.from10(score)
         }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.post(
-            "${mainUrl}/filmara.php",
+            "${mainUrl}/arama?q=",
             referer = "${mainUrl}/",
-            data = mapOf("s" to query)
+            data    = mapOf("s" to query)
         ).document
 
-        return document.select("article.movie").mapNotNull { it.toSearchResult() }
+        return document.select("div.film-card").mapNotNull { it.toSearchResult() }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
@@ -97,33 +80,63 @@ class JetFilmizle : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
-        val title = document.selectFirst("section.movie-exp div.movie-exp-title")?.text()
-            ?.substringBefore(" izle")?.trim() ?: return null
-        val poster = fixUrlNull(document.selectFirst("section.movie-exp img")?.attr("data-src"))
-            ?: fixUrlNull(document.selectFirst("section.movie-exp img")?.attr("src"))
-        val yearDiv =
-            document.selectXpath("//div[@class='yap' and contains(strong, 'Vizyon') or contains(strong, 'Yapım')]")
-                .text().trim()
-        val year = Regex("""(\d{4})""").find(yearDiv)?.groupValues?.get(1)?.toIntOrNull()
-        val description = document.selectFirst("section.movie-exp p.aciklama")?.text()?.trim()
-        val tags = document.select("section.movie-exp div.catss a").map { it.text() }
-        val rating =
-            document.selectFirst("section.movie-exp div.imdb_puan span")?.text()?.split(" ")?.last()
-        val actors = document.select("section.movie-exp div.oyuncu").map {
-            Actor(
-                it.selectFirst("div.name")!!.text(),
-                fixUrlNull(it.selectFirst("img")!!.attr("data-src"))
-            )
+        // 1. Başlık: Artık h1.film-title içinde.
+        // "ownText()" kullanarak içindeki orijinal adı tutan <span> etiketini dışarıda bırakıyoruz.
+        val title = document.selectFirst("h1.film-title")?.ownText()?.trim()
+            ?: document.selectFirst("h1.film-title")?.text()?.substringBefore("(")?.trim()
+            ?: return null
+
+        // 2. Afiş: Artık .film-poster sınıfına sahip.
+        val imgElement = document.selectFirst("img.film-poster")
+        val poster = fixUrlNull(
+            imgElement?.attr("data-src")?.takeIf { it.isNotBlank() }
+                ?: imgElement?.attr("src")
+        )
+
+        // 3. Yıl: Yeni HTML'de "Yapım: 2026" gibi net bir div yok.
+        // Ancak Trakt.tv linkinin sonunda (örn: ...-2026) geçiyor. Oradan çekmek çok daha güvenli.
+        // Eğer Trakt linki yoksa, fallback olarak metnin içinden ilk mantıklı yılı (Regex ile) arıyoruz.
+        val traktUrl = document.selectFirst("a.trakt")?.attr("href")
+        var year = traktUrl?.substringAfterLast("-")?.toIntOrNull()
+        if (year == null) {
+            val textMatch = Regex("""\b(19|20)\d{2}\b""").find(document.text())
+            year = textMatch?.value?.toIntOrNull()
         }
 
-        val recommendations = document.select("div#benzers article").mapNotNull {
-            var recName = it.selectFirst("h2 a")?.text() ?: it.selectFirst("h3 a")?.text()
-            ?: it.selectFirst("h4 a")?.text() ?: it.selectFirst("h5 a")?.text()
-            ?: it.selectFirst("h6 a")?.text() ?: return@mapNotNull null
-            recName = recName.substringBefore(" izle")
+        // 4. Açıklama: div.description-text içine taşınmış.
+        val description = document.selectFirst("div.description-text")?.text()?.trim()
+
+        // DİKKAT: Gönderdiğin HTML parçasında Etiketler, Oyuncular ve Benzer Filmler kısmı yok.
+        // Bu yüzden buradaki seçicileri genelleyerek korudum. Eğer sayfada bu kısımlar da değiştiyse,
+        // o bölümlerin HTML'ini gönderdiğinde burayı da nokta atışı güncelleyebiliriz.
+
+        val tags = document.select("div.catss a, div.film-categories a").map { it.text().trim() }
+
+        val actors = document.select("div.oyuncu, div.cast-item").mapNotNull {
+            val name = it.selectFirst("div.name, span.actor-name")?.text()?.trim() ?: return@mapNotNull null
+            val actorImg = it.selectFirst("img")
+            val actorPoster = fixUrlNull(
+                actorImg?.attr("data-src")?.takeIf { src -> src.isNotBlank() }
+                    ?: actorImg?.attr("src")
+            )
+            Actor(name, actorPoster)
+        }
+
+        // Benzer filmler için bir önceki sorunda yazdığımız getMainPage yapısını buraya da entegre ettim.
+        val recommendations = document.select("div#benzers article, div.film-card").mapNotNull {
+            var recName = it.selectFirst(".card-title a")?.text()?.trim()
+                ?: it.selectFirst("h2 a, h3 a")?.text()?.trim()
+                ?: return@mapNotNull null
+
+            recName = recName.substringBeforeLast(" izle").trim()
 
             val recHref = fixUrlNull(it.selectFirst("a")?.attr("href")) ?: return@mapNotNull null
-            val recPosterUrl = fixUrlNull(it.selectFirst("img")?.attr("data-src"))
+
+            val recImg = it.selectFirst("img")
+            val recPosterUrl = fixUrlNull(
+                recImg?.attr("data-src")?.takeIf { src -> src.isNotBlank() }
+                    ?: recImg?.attr("src")
+            )
 
             newMovieSearchResponse(recName, recHref, TvType.Movie) {
                 this.posterUrl = recPosterUrl
@@ -131,160 +144,92 @@ class JetFilmizle : MainAPI() {
         }
 
         return newMovieLoadResponse(title, url, TvType.Movie, url) {
-            this.posterUrl = poster
-            this.year = year
-            this.plot = description
-            this.tags = tags
-            this.score = Score.from10(rating)
+            this.posterUrl       = poster
+            this.year            = year
+            this.plot            = description
+            this.tags            = tags
             this.recommendations = recommendations
             addActors(actors)
         }
     }
 
-    override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        Log.d("JTF", "data » $data")
-        val document = app.get(data).document
+    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
+        Log.d("JTF", "loadLinks » $data")
 
-        val iframes = mutableListOf<String>()
-        val mainIframe =
-            fixUrlNull(document.selectFirst("div#movie iframe")?.attr("data-src")) ?: fixUrlNull(
-                document.selectFirst("div#movie iframe")?.attr("data-litespeed-src")
-            ) ?: fixUrlNull(document.selectFirst("div#movie iframe")?.attr("data")) ?: fixUrlNull(
-                document.selectFirst("div#movie iframe")?.attr("src")
+        val document = app.get(
+            data,
+            headers = mapOf(
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer"    to "$mainUrl/"
             )
-        Log.d("JTF", "mainIframe » $mainIframe")
-        if (mainIframe != null) {
-            iframes.add(mainIframe)
+        ).document
+
+        
+        val filmId = document.selectFirst("input[name=film_id]")?.attr("value")
+        Log.d("JTF", "film_id » $filmId")
+        if (filmId.isNullOrBlank()) {
+            Log.e("JTF", "film_id bulunamadı!")
+            return false
         }
 
-        document.select("div.film_part a").forEach {
-            val source = it.selectFirst("span")?.text()?.trim() ?: return@forEach
-            if (source.lowercase().contains("fragman")) return@forEach
+        
+        val playerTypes = listOf("dublaj", "altyazili")
+        val sourceButtons = document.select(".player-source-btn")
+        val maxIndex = sourceButtons.mapNotNull { it.attr("data-source-index").toIntOrNull() }.maxOrNull() ?: 4
 
-            val movDoc = app.get(it.attr("href")).document
-            val iframe =
-                fixUrlNull(movDoc.selectFirst("div#movie iframe")?.attr("data-src")) ?: fixUrlNull(
-                    movDoc.selectFirst("div#movie iframe")?.attr("data")
-                ) ?: fixUrlNull(movDoc.selectFirst("div#movie iframe")?.attr("src"))
-            Log.d("JTF", "iframe » $iframe")
+        for (playerType in playerTypes) {
+            for (sourceIndex in 0..maxIndex) {
+                try {
+                    Log.d("JTF", "jetplayer POST » film_id=$filmId source=$sourceIndex type=$playerType")
 
-            if (iframe != null) {
-                iframes.add(iframe)
-            } else {
-                movDoc.select("div#movie p a").forEach downloadLinkForEach@{ link ->
-                    val downloadLink = fixUrlNull(link.attr("href")) ?: return@downloadLinkForEach
-                    iframes.add(downloadLink)
+                    
+                    val responseText = app.post(
+                        "$mainUrl/jetplayer",
+                        headers = mapOf(
+                            "User-Agent"       to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                            "Referer"          to data,
+                            "X-Requested-With" to "XMLHttpRequest",
+                            "Content-Type"     to "application/x-www-form-urlencoded"
+                        ),
+                        data = mapOf(
+                            "film_id"      to filmId,
+                            "source_index" to sourceIndex.toString(),
+                            "player_type"  to playerType
+                        )
+                    ).text
+
+                    Log.d("JTF", "jetplayer response » ${responseText.take(300)}")
+
+                    if (responseText.isBlank()) continue
+
+                    
+                    val responseDoc  = responseText.let { org.jsoup.Jsoup.parse(it) }
+                    val iframeEl     = responseDoc.selectFirst("iframe") ?: continue
+                    var iframeSrc    = iframeEl.attr("src").takeIf { it.isNotBlank() } ?: continue
+
+                    
+                    if (iframeSrc.startsWith("//")) iframeSrc = "https:$iframeSrc"
+
+                    Log.d("JTF", "iframe bulundu » $iframeSrc")
+
+                    val sourceName = when (playerType) {
+                        "dublaj"    -> "Dublaj"
+                        "altyazili" -> "Altyazılı"
+                        else        -> playerType
+                    }
+
+                    loadExtractor(iframeSrc, data, subtitleCallback, callback)
+
+                } catch (e: Exception) {
+                    Log.e("JTF", "Kaynak yükleme hatası [idx=$sourceIndex type=$playerType]: ${e.message}")
                 }
             }
         }
-        val objectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
-        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
 
-        iframes.forEach { iframe ->
-            try {
-                if (iframe.contains("jetv.xyz")) {
-                    Log.d("JTF", "jetv » $iframe")
-                    val jetvDoc = app.get(iframe).document
-                    /*val jetvIframe = fixUrlNull(jetvDoc.selectFirst("iframe")?.attr("src")) ?: return@forEach
-                    Log.d("JTF", "jetvIframe » $jetvIframe")
-                    loadExtractor(jetvIframe, "${mainUrl}/", subtitleCallback, callback)*/
-                    val script =
-                        jetvDoc.select("script").find { it.data().contains("\"sources\": [") }
-                            ?.data()
-                            ?: ""
-                    val source = script.substringAfter("\"sources\": [").substringBefore("]")
-                        .addMarks("file").addMarks("type").addMarks("label").replace("\'", "\"")
-                    Log.d("JTF", "source -> $source")
-                    val son: Source = objectMapper.readValue(source)
-                    callback.invoke(
-                        newExtractorLink(
-                            source = "Jetv" + " - " + son.label,
-                            name = "Jetv" + " - " + son.label,
-                            url = son.file,
-                            ExtractorLinkType.M3U8
-                        ) {
-                            this.quality = Qualities.Unknown.value
-                        }
-                    )
-
-                } else if (iframe.contains("d2rs.com")) {
-                    val doc = app.get(iframe).text
-                    val parameter =
-                        doc.substringAfter("form.append(\"q\", \"").substringBefore("\");");
-                    val d2List = app.post(
-                        "https://d2rs.com/zeus/api.php",
-                        data = mapOf("q" to parameter),
-                        referer = iframe
-                    ).body.string()
-                    val son: List<Source> = objectMapper.readValue(d2List)
-                    for (it in son) {
-                        val type = if (it.type == "video/mp4") {
-                            ExtractorLinkType.VIDEO
-                        } else ExtractorLinkType.M3U8
-                        try {
-                            callback.invoke(
-                                newExtractorLink(
-                                    source = "D2rs" + " - " + it.label,
-                                    name = "D2rs" + " - " + it.label,
-                                    url = "https://d2rs.com/zeus/" + it.file,
-                                    type
-                                ) {
-                                    this.quality = getQualityFromName(it.label)
-                                }
-                            )
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                            continue
-                        }
-                    }
-                } else if (iframe.contains("videolar.biz")) {
-                    val doc = app.get(iframe, referer = mainUrl).document
-                    val script =
-                        doc.select("script").find { it.data().contains("eval(function(p,a,c,k,e,") }
-                            ?.data() ?: ""
-                    val unpacked = JsUnpacker(script).unpack()
-                    val kaken =
-                        unpacked?.substringAfter("window.kaken=\"")?.substringBefore("\";") ?: ""
-                    val urls = "https://s2.videolar.biz/api/"
-                    val mediaType = "text/plain".toMediaType()
-                    val requestBody = kaken.toRequestBody(mediaType)
-                    val doc2 = app.post(urls, requestBody = requestBody).body.string()
-                    val son: VidBiz = objectMapper.readValue(doc2)
-                    if (son.status == "ok") {
-                        for (it in son.sources) {
-                            try {
-                                callback.invoke(
-                                    newExtractorLink(
-                                        source = "VidBiz" + " - " + it.label,
-                                        name = "VidBiz" + " - " + it.label,
-                                        url = it.file,
-                                        ExtractorLinkType.M3U8
-                                    ) {
-                                        this.quality = getQualityFromName(it.label)
-                                    }
-                                )
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                                continue
-                            }
-                        }
-                    }
-                } else {
-                    loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
-                }
-            } catch (e: Exception) {
-                return@forEach
-            }
-        }
         return true
     }
 
-    private fun String.addMarks(str: String): String {
+	    private fun String.addMarks(str: String): String {
         return this.replace(Regex("\"?$str\"?"), "\"$str\"")
     }
 }
