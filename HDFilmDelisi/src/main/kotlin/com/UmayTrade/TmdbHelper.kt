@@ -1,4 +1,3 @@
-
 package com.UmayTrade
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
