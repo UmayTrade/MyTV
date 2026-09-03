@@ -1,6 +1,6 @@
 // ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
 
-package com.keyiflerolsun
+package com.UmayTrade
 
 import android.util.Log
 import com.lagradost.cloudstream3.*
