@@ -1,7 +1,7 @@
 version = 24
 
 cloudstream {
-    authors     = listOf("UmayTrade")
+    authors     = listOf("keyiflerolsun")
     language    = "tr"
     description = "Güncel ve en iyi yabancı filmleri yüksek görüntü kalitesinde, Türkçe dublaj ve altyazı seçenekleriyle filmleri full izleyin."
 
