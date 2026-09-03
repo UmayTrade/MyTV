@@ -44,16 +44,6 @@ class Sinezy : MainAPI() {
         "${mainUrl}/izle/yerli-filmler/"            to  "Yerli Filmler",
     )
 
-    // Base64 decode yardımcı fonksiyonu
-    private fun String.base64Decode(): String {
-        return try {
-            String(Base64.decode(this, Base64.DEFAULT))
-        } catch (e: Exception) {
-            Log.e("kraptor_${this@Sinezy.name}", "Base64 decode hatası: ${e.message}")
-            this
-        }
-    }
-
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         try {
             val document = app.get("${request.data}page/$page/").document
@@ -77,7 +67,7 @@ class Sinezy : MainAPI() {
                 this.score = Score.from10(puan)
             }
         } catch (e: Exception) {
-            Log.e("kraptor_${this.name}", "toMainPageResult hatası: ${e.message}")
+            Log.e("kraptor_Sinezy", "toMainPageResult hatası: ${e.message}")
             return null
         }
     }
@@ -87,7 +77,7 @@ class Sinezy : MainAPI() {
             val document = app.get("${mainUrl}/arama/?s=${query}").document
             return document.select("div.movie_box.move_k").mapNotNull { it.toSearchResult() }
         } catch (e: Exception) {
-            Log.e("kraptor_${this.name}", "search hatası: ${e.message}")
+            Log.e("kraptor_Sinezy", "search hatası: ${e.message}")
             return listOf()
         }
     }
@@ -104,7 +94,7 @@ class Sinezy : MainAPI() {
                 this.score = Score.from10(puan)
             }
         } catch (e: Exception) {
-            Log.e("kraptor_${this.name}", "toSearchResult hatası: ${e.message}")
+            Log.e("kraptor_Sinezy", "toSearchResult hatası: ${e.message}")
             return null
         }
     }
@@ -145,8 +135,18 @@ class Sinezy : MainAPI() {
                 addTrailer(trailer)
             }
         } catch (e: Exception) {
-            Log.e("kraptor_${this.name}", "load hatası: ${e.message}")
+            Log.e("kraptor_Sinezy", "load hatası: ${e.message}")
             return null
+        }
+    }
+
+    // Base64 decode fonksiyonu - doğrudan sınıf içinde
+    private fun decodeBase64(encoded: String): String {
+        return try {
+            String(Base64.decode(encoded, Base64.DEFAULT))
+        } catch (e: Exception) {
+            Log.e("kraptor_Sinezy", "Base64 decode hatası: ${e.message}")
+            encoded
         }
     }
 
@@ -157,31 +157,31 @@ class Sinezy : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         try {
-            Log.d("kraptor_${this.name}", "loadLinks başladı - data: $data")
+            Log.d("kraptor_Sinezy", "loadLinks başladı - data: $data")
             
             val htmlContent = app.get(data).text
-            Log.d("kraptor_${this.name}", "HTML içeriği alındı, uzunluk: ${htmlContent.length}")
+            Log.d("kraptor_Sinezy", "HTML içeriği alındı, uzunluk: ${htmlContent.length}")
             
             // 1. Yöntem: ilkpartkod ile iframe bulma
             val regex = Regex(pattern = """ilkpartkod = '([^']*)';""", options = setOf(RegexOption.IGNORE_CASE))
             val findreg = regex.find(htmlContent)?.groupValues?.get(1).toString()
             
             if (findreg.isNotEmpty()) {
-                Log.d("kraptor_${this.name}", "ilkpartkod bulundu: $findreg")
+                Log.d("kraptor_Sinezy", "ilkpartkod bulundu: $findreg")
                 
                 try {
-                    val reqCoz = findreg.base64Decode()
-                    Log.d("kraptor_${this.name}", "ilkpartkod decode edildi: $reqCoz")
+                    val reqCoz = decodeBase64(findreg)
+                    Log.d("kraptor_Sinezy", "ilkpartkod decode edildi: $reqCoz")
                     
                     val iframe = reqCoz.substringAfter("src=").substringBefore(" ").replace("\"", "")
-                    Log.d("kraptor_${this.name}", "iframe URL: $iframe")
+                    Log.d("kraptor_Sinezy", "iframe URL: $iframe")
                     
                     if (iframe.isNotEmpty() && iframe.startsWith("http")) {
                         loadExtractor(iframe, mainUrl, subtitleCallback, callback)
                         return true
                     }
                 } catch (e: Exception) {
-                    Log.e("kraptor_${this.name}", "ilkpartkod işlenirken hata: ${e.message}")
+                    Log.e("kraptor_Sinezy", "ilkpartkod işlenirken hata: ${e.message}")
                 }
             }
             
@@ -193,7 +193,7 @@ class Sinezy : MainAPI() {
                 for (match in iframeMatches) {
                     val iframeUrl = match.groupValues[1]
                     if (iframeUrl.isNotEmpty() && iframeUrl.startsWith("http")) {
-                        Log.d("kraptor_${this.name}", "iframe bulundu: $iframeUrl")
+                        Log.d("kraptor_Sinezy", "iframe bulundu: $iframeUrl")
                         loadExtractor(iframeUrl, mainUrl, subtitleCallback, callback)
                         return true
                     }
@@ -206,7 +206,7 @@ class Sinezy : MainAPI() {
             
             if (videoMatch != null) {
                 val videoUrl = videoMatch.groupValues[1]
-                Log.d("kraptor_${this.name}", "Doğrudan video bulundu: $videoUrl")
+                Log.d("kraptor_Sinezy", "Doğrudan video bulundu: $videoUrl")
                 
                 callback.invoke(
                     newExtractorLink(
@@ -229,7 +229,7 @@ class Sinezy : MainAPI() {
             if (m3u8Matches.isNotEmpty()) {
                 for (match in m3u8Matches) {
                     val m3u8Url = match.value
-                    Log.d("kraptor_${this.name}", "M3U8 link bulundu: $m3u8Url")
+                    Log.d("kraptor_Sinezy", "M3U8 link bulundu: $m3u8Url")
                     
                     callback.invoke(
                         newExtractorLink(
@@ -246,11 +246,11 @@ class Sinezy : MainAPI() {
                 }
             }
             
-            Log.e("kraptor_${this.name}", "Hiçbir video linki bulunamadı!")
+            Log.e("kraptor_Sinezy", "Hiçbir video linki bulunamadı!")
             return false
             
         } catch (e: Exception) {
-            Log.e("kraptor_${this.name}", "loadLinks hatası: ${e.message}", e)
+            Log.e("kraptor_Sinezy", "loadLinks hatası: ${e.message}", e)
             return false
         }
     }
