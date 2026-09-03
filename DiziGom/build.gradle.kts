@@ -1,9 +1,9 @@
-version = 10
+version = 88
 
 cloudstream {
-    authors     = listOf("nikyokki")
+    authors     = listOf("kraptor", "ByAyzen", "inatchii", "JustRelaxable")
     language    = "tr"
-    description = "Türkçe altyazılı yabancı dizi izle, Tüm yabancı, kore, netflix dizilerin yeni ve eski sezonlarını orijinal dilinde dizigom1 alt yazılı film izleyebilir, sadece türkçe altyazılı en iyi yabancı diziler ve filmler hakkında yorum yapabilirsiniz."
+    description = "AnimeciX, animeleri keşfedebileceğiniz ve animeler hakkında her şeyi öğrenebileceğiniz bir paylaşım platformudur."
 
     /**
      * Status int as the following:
@@ -11,8 +11,8 @@ cloudstream {
      * 1: Ok
      * 2: Slow
      * 3: Beta only
-    **/
-    status  = 1 // will be 3 if unspecified
-    tvTypes = listOf("Movie","TvSeries")
-    iconUrl = "https://www.google.com/s2/favicons?domain=dizigom1.co&sz=%size%"
+     **/
+    status  = 1
+    tvTypes = listOf("Anime")
+    iconUrl = "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://animecix.net&size=16"
 }
