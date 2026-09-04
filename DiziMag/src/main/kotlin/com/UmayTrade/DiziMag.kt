@@ -24,9 +24,9 @@ class DiziMag : MainAPI() {
     override var sequentialMainPageScrollDelay = 50L
 
     override val mainPage = mainPageOf(
-        "${mainUrl}/trendler" to "Trendler",
+        "${mainUrl}/kesfet/eyJ0eXBlIjoic2VyaWVzIn0=" to "Yeni Eklenenler",
         "${mainUrl}/kategori/aile" to "Aile",
-        "${mainUrl}/kategori/aksiyon" to "Aksiyon-Macera",
+        "${mainUrl}/kategori/aksiyon-macera" to "Aksiyon-Macera",
         "${mainUrl}/kategori/animasyon" to "Animasyon",
         "${mainUrl}/kategori/belgesel" to "Belgesel",
         "${mainUrl}/kategori/bilim-kurgu-fantazi" to "Bilim Kurgu",
@@ -35,6 +35,9 @@ class DiziMag : MainAPI() {
         "${mainUrl}/kategori/komedi" to "Komedi",
         "${mainUrl}/kategori/savas-politik" to "Savaş Politik",
         "${mainUrl}/kategori/suc" to "Suç",
+        "${mainUrl}/dil/altyazi" to "Altyazi Film",
+        "${mainUrl}/dil/dublaj" to "Dublajli Film",
+        "${mainUrl}/dil/yerli" to "Yerli Film",
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -211,7 +214,6 @@ class DiziMag : MainAPI() {
             ?.substringAfterLast(" ")?.toIntOrNull()
             ?: document.selectFirst("h1 span")?.text()?.substringAfter("(")?.substringBefore(")")?.toIntOrNull()
         
-        // IMDb puanını al ve Score'a çevir
         val ratingText = document.selectFirst("div.custom_fields:has(b:contains(IMDb)) span.valor strong")?.text()?.trim()
             ?: document.selectFirst("span.color-imdb")?.text()?.trim()
         val score = ratingText?.toDoubleOrNull()?.let { Score.from10(it) }
@@ -228,6 +230,9 @@ class DiziMag : MainAPI() {
             val img = fixUrlNull(it.selectFirst("img")?.attr("src"))
             actors.add(Actor(name, img))
         }
+        
+        // Trailer varsa ekle
+        val trailer = document.selectFirst("div.series-profile-trailer")?.attr("data-yt")
         
         if (url.contains("/dizi/") || document.select("div.pag_episodes").isNotEmpty()) {
             val episodeses = mutableListOf<Episode>()
@@ -301,6 +306,7 @@ class DiziMag : MainAPI() {
                 this.tags = tags
                 this.score = score
                 addActors(actors)
+                trailer?.let { addTrailer("https://www.youtube.com/embed/${it}") }
             }
         } else {
             return newMovieLoadResponse(title, url, TvType.Movie, url) {
@@ -311,6 +317,7 @@ class DiziMag : MainAPI() {
                 this.score = score
                 this.duration = duration
                 addActors(actors)
+                trailer?.let { addTrailer("https://www.youtube.com/embed/${it}") }
             }
         }
     }
@@ -329,87 +336,124 @@ class DiziMag : MainAPI() {
 
         android.util.Log.d("dzmg", "loadLinks: Starting with data URL - $data")
 
+        // Önce ci_session cookie'sini al
         val aa = app.get(mainUrl)
         val ciSession = aa.cookies["ci_session"].toString()
-        android.util.Log.d("dzmg", "ci_session cookie obtained")
+        android.util.Log.d("dzmg", "ci_session cookie obtained: ${ciSession.take(10)}...")
 
+        // Bölüm sayfasını getir
         val document = app.get(
             data, 
             headers = headers, 
             cookies = mapOf("ci_session" to ciSession)
         ).document
 
-        val iframe = fixUrlNull(
-            document.selectFirst("div#tv-spoox2 iframe")?.attr("src")
-            ?: document.selectFirst("iframe[src*='epikplayer']")?.attr("src")
-            ?: document.selectFirst("iframe[src*='player']")?.attr("src")
-            ?: document.selectFirst("div.playerembed iframe")?.attr("src")
-        ) ?: run {
-            android.util.Log.e("dzmg", "iframe src not found")
+        // Sayfanın HTML'ini logla (debug için)
+        android.util.Log.d("dzmg", "Document HTML length: ${document.html().length}")
+
+        // Önce dooplay_player içindeki iframe'i ara
+        var iframe = fixUrlNull(
+            document.selectFirst("div.dooplay_player iframe")?.attr("src")
+        )
+
+        // Eğer bulunamazsa diğer seçicileri dene
+        if (iframe == null) {
+            iframe = fixUrlNull(
+                document.selectFirst("div#tv-spoox2 iframe")?.attr("src")
+                ?: document.selectFirst("iframe[src*='epikplayer']")?.attr("src")
+                ?: document.selectFirst("iframe[src*='player']")?.attr("src")
+                ?: document.selectFirst("div.playerembed iframe")?.attr("src")
+                ?: document.selectFirst("iframe[src*='dizimag']")?.attr("src")
+            )
+        }
+
+        android.util.Log.d("dzmg", "iframe found: $iframe")
+
+        // Eğer iframe bulunamadıysa ve data bir URL ise, direkt loadExtractor dene
+        if (iframe == null) {
+            android.util.Log.e("dzmg", "iframe src not found, trying loadExtractor with data: $data")
             return loadExtractor(data, "$mainUrl/", subtitleCallback, callback)
         }
-        
-        android.util.Log.d("dzmg", "iframe URL found: $iframe")
 
-        val docum = app.get(iframe, headers = headers, referer = "$mainUrl/").document
+        // iframe içeriğini getir
+        try {
+            val docum = app.get(iframe, headers = headers, referer = "$mainUrl/").document
+            android.util.Log.d("dzmg", "iframe content fetched, scanning scripts...")
 
-        docum.select("script").forEach { sc ->
-            if (sc.toString().contains("bePlayer")) {
-                android.util.Log.d("dzmg", "bePlayer script found")
-                val pattern = Pattern.compile("bePlayer\\('(.*?)', '(.*?)'\\)")
-                val matcher = pattern.matcher(sc.toString().trimIndent())
-                if (matcher.find()) {
-                    val key = matcher.group(1)
-                    val jsonCipher = matcher.group(2)
+            // bePlayer script'ini ara
+            docum.select("script").forEach { sc ->
+                val scriptContent = sc.toString()
+                if (scriptContent.contains("bePlayer")) {
+                    android.util.Log.d("dzmg", "bePlayer script found")
+                    val pattern = Pattern.compile("bePlayer\\('(.*?)', '(.*?)'\\)")
+                    val matcher = pattern.matcher(scriptContent.trimIndent())
+                    if (matcher.find()) {
+                        val key = matcher.group(1)
+                        val jsonCipher = matcher.group(2)
+                        android.util.Log.d("dzmg", "bePlayer matched - key: ${key?.take(5)}..., cipher: ${jsonCipher?.take(10)}...")
 
-                    try {
-                        val cipherData = ObjectMapper().readValue(
-                            jsonCipher?.replace("\\/", "/"),
-                            Cipher::class.java
-                        )
-
-                        val decrypt = key?.let { 
-                            CryptoJS.decrypt(it, cipherData.ct, cipherData.iv, cipherData.s) 
-                        }
-
-                        val jsonData = ObjectMapper().readValue(decrypt, JsonData::class.java)
-
-                        jsonData.strSubtitles?.forEach { sub ->
-                            subtitleCallback.invoke(
-                                SubtitleFile(
-                                    lang = sub.label ?: "Unknown",
-                                    url = "https://epikplayer.xyz${sub.file}"
-                                )
+                        try {
+                            val cipherData = ObjectMapper().readValue(
+                                jsonCipher?.replace("\\/", "/"),
+                                Cipher::class.java
                             )
-                        }
 
-                        val myHeaders = mapOf(
-                            "Accept" to "*/*", 
-                            "Referer" to iframe,
-                            "User-Agent" to headers["User-Agent"].toString()
-                        )
-
-                        callback.invoke(
-                            newExtractorLink(
-                                source = this.name,
-                                name = this.name,
-                                url = jsonData.videoLocation,
-                                type = ExtractorLinkType.M3U8
-                            ) {
-                                this.headers = myHeaders
-                                quality = Qualities.Unknown.value
+                            val decrypt = key?.let { 
+                                CryptoJS.decrypt(it, cipherData.ct, cipherData.iv, cipherData.s) 
                             }
-                        )
+                            android.util.Log.d("dzmg", "Decrypted data: ${decrypt?.take(50)}...")
 
-                    } catch (e: Exception) {
-                        android.util.Log.e("dzmg", "decryption error: ${e.message}")
+                            val jsonData = ObjectMapper().readValue(decrypt, JsonData::class.java)
+                            android.util.Log.d("dzmg", "JSON parsed, videoLocation: ${jsonData.videoLocation}")
+
+                            // Altyazıları ekle
+                            jsonData.strSubtitles?.forEach { sub ->
+                                subtitleCallback.invoke(
+                                    SubtitleFile(
+                                        lang = sub.label ?: "Unknown",
+                                        url = "https://epikplayer.xyz${sub.file}"
+                                    )
+                                )
+                            }
+
+                            val myHeaders = mapOf(
+                                "Accept" to "*/*", 
+                                "Referer" to iframe,
+                                "User-Agent" to headers["User-Agent"].toString()
+                            )
+
+                            // Video linkini callback ile gönder
+                            callback.invoke(
+                                newExtractorLink(
+                                    source = this.name,
+                                    name = this.name,
+                                    url = jsonData.videoLocation,
+                                    type = ExtractorLinkType.M3U8
+                                ) {
+                                    this.headers = myHeaders
+                                    quality = Qualities.Unknown.value
+                                }
+                            )
+
+                            return true
+
+                        } catch (e: Exception) {
+                            android.util.Log.e("dzmg", "decryption error: ${e.message}")
+                            android.util.Log.e("dzmg", "Stack trace: ${e.stackTraceToString()}")
+                        }
+                    } else {
+                        android.util.Log.w("dzmg", "bePlayer pattern not matched")
                     }
                 }
             }
+
+            // bePlayer bulunamadıysa, iframe içinde başka player var mı kontrol et
+            android.util.Log.d("dzmg", "bePlayer not found, trying loadExtractor with iframe: $iframe")
+            return loadExtractor(iframe, "$mainUrl/", subtitleCallback, callback)
+
+        } catch (e: Exception) {
+            android.util.Log.e("dzmg", "Error fetching iframe content: ${e.message}")
+            return loadExtractor(iframe, "$mainUrl/", subtitleCallback, callback)
         }
-
-        loadExtractor(iframe, "$mainUrl/", subtitleCallback, callback)
-
-        return true
     }
 }
