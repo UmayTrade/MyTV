@@ -1,5 +1,4 @@
-
-
+package com.UmayTrade
 
 import android.util.Base64
 import java.security.MessageDigest
@@ -41,12 +40,9 @@ object CryptoJS {
     fun decrypt(password: String, cipherText: String, iv: String, s:String): String {
         val ctBytes         = Base64.decode(cipherText.toByteArray(), Base64.DEFAULT)
         val saltBytes       = hexToBytes2(s)
-        println(saltBytes.size)
-        //val cipherTextBytes = Arrays.copyOfRange(ctBytes, 16, ctBytes.size)
 
         val key = ByteArray(KEY_SIZE / 8)
         val ivb  = hexToBytes2(iv)
-        //val pass = hexToBytes2(password)
         evpkdf(password.toByteArray(), KEY_SIZE, IV_SIZE, saltBytes, key, ivb)
 
         val cipher = Cipher.getInstance(HASH_CIPHER)
