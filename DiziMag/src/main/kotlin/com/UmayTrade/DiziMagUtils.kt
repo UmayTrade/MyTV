@@ -11,7 +11,6 @@ import kotlin.math.min
 /**
  * Conforming with CryptoJS AES method
  */
-// see https://gist.github.com/thackerronak/554c985c3001b16810af5fc0eb5c358f
 @Suppress("unused", "FunctionName", "SameParameterValue")
 object CryptoJS {
 
@@ -21,22 +20,6 @@ object CryptoJS {
     private const val AES         = "AES"
     private const val KDF_DIGEST  = "MD5"
 
-    // Seriously crypto-js, what's wrong with you?
-    private const val APPEND      = "Salted__"
-
-    /**
-     * Encrypt
-     * @param password passphrase
-     * @param plainText plain string
-     */
-
-
-    /**
-     * Decrypt
-     * Thanks Artjom B. for this: http://stackoverflow.com/a/29152379/4405051
-     * @param password passphrase
-     * @param cipherText encrypted string
-     */
     fun decrypt(password: String, cipherText: String, iv: String, s:String): String {
         val ctBytes         = Base64.decode(cipherText.toByteArray(), Base64.DEFAULT)
         val saltBytes       = hexToBytes2(s)
@@ -76,7 +59,6 @@ object CryptoJS {
             block = hash.digest(salt)
             hash.reset()
 
-            // Iterations
             for (i in 1 until iterations) {
                 block = hash.digest(block!!)
                 hash.reset()
@@ -93,7 +75,7 @@ object CryptoJS {
         System.arraycopy(derivedBytes, 0, resultKey, 0, keySize * 4)
         System.arraycopy(derivedBytes, keySize * 4, resultIv, 0, ivSize * 4)
 
-        return derivedBytes // key + iv
+        return derivedBytes
     }
 
     private fun generateSalt(length: Int): ByteArray {
