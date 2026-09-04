@@ -425,7 +425,7 @@ class DiziMag : MainAPI() {
                         }
                     }
                     
-                    // MP4 URL'lerini ara
+                    // MP4 URL'lerini ara - M3U8 olarak gönder
                     val mp4Pattern = Regex("(https?://[^\\s'\"]+\\.mp4[^\\s'\"]*)")
                     val mp4Matches = mp4Pattern.findAll(content)
                     for (match in mp4Matches) {
@@ -437,7 +437,7 @@ class DiziMag : MainAPI() {
                                     source = this.name,
                                     name = "DiziMag",
                                     url = url,
-                                    type = ExtractorLinkType.DIRECT
+                                    type = ExtractorLinkType.M3U8
                                 ) {
                                     this.headers = mapOf(
                                         "Accept" to "*/*",
@@ -462,23 +462,18 @@ class DiziMag : MainAPI() {
             // 5. Player tipine göre işlem yap
             when (playerType) {
                 "dsplay", "epikplayer" -> {
-                    // DSPlay / EpikPlayer - bePlayer ile şifreli
                     return handleDSPlay(playerUrl, headers, subtitleCallback, callback)
                 }
                 "vidmoly" -> {
-                    // VidMoly player
                     return handleVidMoly(playerUrl, headers, subtitleCallback, callback)
                 }
                 "vidguard" -> {
-                    // VidGuard player
                     return handleVidGuard(playerUrl, headers, subtitleCallback, callback)
                 }
                 "streamwish" -> {
-                    // StreamWish player
                     return handleStreamWish(playerUrl, headers, subtitleCallback, callback)
                 }
                 else -> {
-                    // Bilinmeyen player - loadExtractor dene
                     android.util.Log.w("dzmg", "Unknown player type, trying loadExtractor")
                     return loadExtractor(playerUrl, "$mainUrl/", subtitleCallback, callback)
                 }
@@ -570,7 +565,6 @@ class DiziMag : MainAPI() {
                 }
             }
             
-            // bePlayer bulunamadıysa loadExtractor dene
             return loadExtractor(playerUrl, "$mainUrl/", subtitleCallback, callback)
             
         } catch (e: Exception) {
@@ -591,7 +585,6 @@ class DiziMag : MainAPI() {
         try {
             val playerDoc = app.get(playerUrl, headers = headers, referer = mainUrl).document
             
-            // VidMoly genellikle iframe içinde iframe kullanır
             val innerIframe = playerDoc.selectFirst("iframe")
             if (innerIframe != null) {
                 val innerUrl = fixUrlNull(innerIframe.attr("src"))
@@ -601,11 +594,9 @@ class DiziMag : MainAPI() {
                 }
             }
             
-            // Script içinde video URL'lerini ara
             playerDoc.select("script").forEach { script ->
                 val content = script.html()
                 
-                // M3U8 URL'lerini ara
                 val m3u8Pattern = Regex("(https?://[^\\s'\"]+\\.m3u8[^\\s'\"]*)")
                 val matches = m3u8Pattern.findAll(content)
                 for (match in matches) {
@@ -651,11 +642,9 @@ class DiziMag : MainAPI() {
         try {
             val playerDoc = app.get(playerUrl, headers = headers, referer = mainUrl).document
             
-            // VidGuard genellikle doğrudan video URL'si verir
             playerDoc.select("script").forEach { script ->
                 val content = script.html()
                 
-                // Video URL'lerini ara
                 val videoPatterns = listOf(
                     Regex("file\\s*:\\s*['\"]([^'\"]+?)['\"]"),
                     Regex("src\\s*:\\s*['\"]([^'\"]+?)['\"]"),
@@ -675,7 +664,7 @@ class DiziMag : MainAPI() {
                                     source = this.name,
                                     name = "VidGuard",
                                     url = url,
-                                    type = if (url.contains("m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.DIRECT
+                                    type = ExtractorLinkType.M3U8
                                 ) {
                                     this.headers = mapOf(
                                         "Accept" to "*/*",
@@ -711,7 +700,6 @@ class DiziMag : MainAPI() {
         try {
             val playerDoc = app.get(playerUrl, headers = headers, referer = mainUrl).document
             
-            // StreamWish genellikle iframe içinde içerik gösterir
             val iframe = playerDoc.selectFirst("iframe")
             if (iframe != null) {
                 val iframeUrl = fixUrlNull(iframe.attr("src"))
@@ -721,7 +709,6 @@ class DiziMag : MainAPI() {
                 }
             }
             
-            // Script içinde video URL'lerini ara
             playerDoc.select("script").forEach { script ->
                 val content = script.html()
                 
