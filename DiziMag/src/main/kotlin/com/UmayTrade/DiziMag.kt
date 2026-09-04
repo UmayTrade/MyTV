@@ -69,7 +69,6 @@ class DiziMag : MainAPI() {
                 headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:139.0) Gecko/20100101 Firefox/139.0")
             )
         }
-        //val document = mainReq.document.body()
         val document = Jsoup.parse(mainReq.body.string())
         val home = if (request.name.contains("Yeni Eklenenler")) {
             document.select("div.filter-result-box").mapNotNull { it.diziler() }
@@ -279,7 +278,7 @@ class DiziMag : MainAPI() {
                         val jsonData = ObjectMapper().readValue(decrypt, JsonData::class.java)
                         android.util.Log.d("dzmg", "JSON data parsed with ${jsonData.strSubtitles?.size} subtitles")
 
-                        jsonData.strSubtitles?.let { subtitles -> // Null kontrolü ekledik
+                        jsonData.strSubtitles?.let { subtitles ->
                             for (sub in subtitles) {
                                 android.util.Log.d("dzmg", "adding subtitle: ${sub.label} (${sub.file})")
                                 subtitleCallback.invoke(
@@ -290,7 +289,6 @@ class DiziMag : MainAPI() {
                                 )
                             }
                         }
-
 
                         android.util.Log.d("dzmg", "fetching m3u8 content from ${jsonData.videoLocation}")
                         val m3u8Content = app.get(
@@ -312,7 +310,7 @@ class DiziMag : MainAPI() {
                                     source = this.name,
                                     name = this.name,
                                     url = jsonData.videoLocation,
-                                    type = ExtractorLinkType.M3U8 // isM3u8 = true yerine ExtractorLinkType belirtiliyor
+                                    type = ExtractorLinkType.M3U8
                                 ) {
                                     this.headers = myHeaders
                                     quality = Qualities.Unknown.value
@@ -328,7 +326,7 @@ class DiziMag : MainAPI() {
                                 source = this.name,
                                 name = this.name,
                                 url = jsonData.videoLocation,
-                                type = ExtractorLinkType.M3U8 // isM3u8 = true yerine ExtractorLinkType belirtiliyor
+                                type = ExtractorLinkType.M3U8
                             ) {
                                 this.headers = myHeaders
                                 quality = Qualities.Unknown.value
