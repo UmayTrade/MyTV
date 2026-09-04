@@ -233,47 +233,96 @@ class DiziMag : MainAPI() {
         
         val trailer = document.selectFirst("div.series-profile-trailer")?.attr("data-yt")
         
-        if (url.contains("/dizi/") || document.select("div.pag_episodes").isNotEmpty()) {
+        // DİZİ Mİ FİLM Mİ KONTROL ET
+        val isSeries = url.contains("/dizi/") || 
+                       document.select("div.pag_episodes").isNotEmpty() ||
+                       document.select("div#last_episodes_yabanci").isNotEmpty() ||
+                       document.select("div#dt-episodes").isNotEmpty()
+        
+        if (isSeries) {
             val episodeses = mutableListOf<Episode>()
             
-            document.select("div.episode-item, li.episode, div.pag_episodes a").forEach { element ->
-                val epName = element.selectFirst("h6.truncate a")?.text()?.trim()
-                    ?: element.selectFirst("a")?.text()?.trim()
-                    ?: return@forEach
+            // 1. YÖNTEM: Ana sayfadaki son bölümler listesinden dene
+            val episodeLinks = document.select("div#last_episodes_yabanci a, div#last_episodes_yabanci_sticky a, div#dt-episodes a")
+            
+            if (episodeLinks.isNotEmpty()) {
+                android.util.Log.d("dzmg", "Found episodes in last_episodes: ${episodeLinks.size}")
+                
+                episodeLinks.forEach { element ->
+                    val epHref = fixUrlNull(element.attr("href")) ?: return@forEach
                     
-                val epHref = fixUrlNull(element.selectFirst("a")?.attr("href"))
-                    ?: fixUrlNull(element.attr("href"))
-                    ?: return@forEach
-                
-                var season = 1
-                var episode = episodeses.size + 1
-                
-                val seasonMatch = Regex("(\\d+)\\.\\s*Sezon").find(epName)
-                val episodeMatch = Regex("(\\d+)\\.\\s*Bölüm").find(epName)
-                
-                if (seasonMatch != null) {
-                    season = seasonMatch.groupValues[1].toIntOrNull() ?: 1
-                }
-                if (episodeMatch != null) {
-                    episode = episodeMatch.groupValues[1].toIntOrNull() ?: (episodeses.size + 1)
-                }
-                
-                episodeses.add(
-                    newEpisode(epHref) {
-                        this.name = epName
-                        this.season = season
-                        this.episode = episode
+                    // Sadece bu dizinin bölümlerini filtrele
+                    if (epHref.contains(url.substringAfterLast("/"))) {
+                        val epName = element.selectFirst("span h1")?.text()?.trim()
+                            ?: element.selectFirst("h1")?.text()?.trim()
+                            ?: element.text().trim()
+                            ?: return@forEach
+                        
+                        var season = 1
+                        var episode = episodeses.size + 1
+                        
+                        val seasonMatch = Regex("(\\d+)\\.\\s*Sezon").find(epName)
+                        val episodeMatch = Regex("(\\d+)\\.\\s*Bölüm").find(epName)
+                        
+                        if (seasonMatch != null) {
+                            season = seasonMatch.groupValues[1].toIntOrNull() ?: 1
+                        }
+                        if (episodeMatch != null) {
+                            episode = episodeMatch.groupValues[1].toIntOrNull() ?: (episodeses.size + 1)
+                        }
+                        
+                        episodeses.add(
+                            newEpisode(epHref) {
+                                this.name = epName
+                                this.season = season
+                                this.episode = episode
+                            }
+                        )
                     }
-                )
+                }
             }
             
+            // 2. YÖNTEM: Sayfadaki bölüm listesinden dene
             if (episodeses.isEmpty()) {
-                document.select("div#last_episodes_yabanci a, div#last_episodes_yabanci_sticky a").forEach { element ->
-                    val epName = element.selectFirst("span h1")?.text()?.trim()
-                        ?: element.text().trim()
-                        ?: return@forEach
-                        
+                android.util.Log.d("dzmg", "Trying episode list from page")
+                
+                val seasonElements = document.select("div.series-profile-episode-list, div.season-list, div.episode-list, div#seasons")
+                
+                if (seasonElements.isNotEmpty()) {
+                    var szn = 1
+                    for (sezon in seasonElements) {
+                        var blm = 1
+                        for (bolum in sezon.select("li, div.episode-item, div.episode")) {
+                            val epName = bolum.selectFirst("h6.truncate a, a.episode-title, h6 a")?.text()?.trim()
+                                ?: bolum.selectFirst("a")?.text()?.trim()
+                                ?: continue
+                                
+                            val epHref = fixUrlNull(bolum.selectFirst("a")?.attr("href"))
+                                ?: fixUrlNull(bolum.attr("href"))
+                                ?: continue
+                            
+                            episodeses.add(
+                                newEpisode(epHref) {
+                                    this.name = epName
+                                    this.season = szn
+                                    this.episode = blm++
+                                }
+                            )
+                        }
+                        szn++
+                    }
+                }
+            }
+            
+            // 3. YÖNTEM: Sayfadaki tüm linkleri tara
+            if (episodeses.isEmpty()) {
+                android.util.Log.d("dzmg", "Trying all links on page")
+                
+                document.select("a[href*=/bolum/]").forEach { element ->
                     val epHref = fixUrlNull(element.attr("href")) ?: return@forEach
+                    val epName = element.text().trim()
+                        ?: element.attr("title")?.trim()
+                        ?: return@forEach
                     
                     var season = 1
                     var episode = episodeses.size + 1
@@ -297,8 +346,56 @@ class DiziMag : MainAPI() {
                     )
                 }
             }
+            
+            // 4. YÖNTEM: Eğer hiç bölüm bulunamadıysa, ana sayfadaki tüm bölümleri dene
+            if (episodeses.isEmpty()) {
+                android.util.Log.d("dzmg", "Trying to fetch episodes from main page")
+                
+                try {
+                    val mainPageDoc = app.get(mainUrl, headers = headers).document
+                    val allEpisodes = mainPageDoc.select("div#last_episodes_yabanci a, div#last_episodes_yabanci_sticky a")
+                    
+                    allEpisodes.forEach { element ->
+                        val epHref = fixUrlNull(element.attr("href")) ?: return@forEach
+                        val epName = element.selectFirst("span h1")?.text()?.trim()
+                            ?: element.text().trim()
+                            ?: return@forEach
+                        
+                        // Bu dizinin bölümü mü kontrol et
+                        if (epName.contains(title.substringBefore(" ")) || epName.contains(title.substringAfter(" "))) {
+                            var season = 1
+                            var episode = episodeses.size + 1
+                            
+                            val seasonMatch = Regex("(\\d+)\\.\\s*Sezon").find(epName)
+                            val episodeMatch = Regex("(\\d+)\\.\\s*Bölüm").find(epName)
+                            
+                            if (seasonMatch != null) {
+                                season = seasonMatch.groupValues[1].toIntOrNull() ?: 1
+                            }
+                            if (episodeMatch != null) {
+                                episode = episodeMatch.groupValues[1].toIntOrNull() ?: (episodeses.size + 1)
+                            }
+                            
+                            episodeses.add(
+                                newEpisode(epHref) {
+                                    this.name = epName
+                                    this.season = season
+                                    this.episode = episode
+                                }
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("dzmg", "Error fetching main page episodes: ${e.message}")
+                }
+            }
 
-            return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeses) {
+            // Benzersiz bölümleri filtrele
+            val uniqueEpisodes = episodeses.distinctBy { it.url }
+            
+            android.util.Log.d("dzmg", "Total episodes found: ${uniqueEpisodes.size}")
+
+            return newTvSeriesLoadResponse(title, url, TvType.TvSeries, uniqueEpisodes) {
                 this.posterUrl = poster
                 this.year = year
                 this.plot = description
@@ -308,6 +405,7 @@ class DiziMag : MainAPI() {
                 trailer?.let { addTrailer("https://www.youtube.com/embed/${it}") }
             }
         } else {
+            // Film
             return newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster
                 this.year = year
@@ -338,12 +436,10 @@ class DiziMag : MainAPI() {
         android.util.Log.d("dzmg", "data URL: $data")
 
         try {
-            // 1. Önce ci_session cookie'sini al
             val mainPage = app.get(mainUrl, headers = headers)
             val ciSession = mainPage.cookies["ci_session"] ?: ""
             android.util.Log.d("dzmg", "ci_session: ${ciSession.take(20)}...")
 
-            // 2. Bölüm sayfasını getir
             val document = app.get(
                 data, 
                 headers = headers,
@@ -352,11 +448,9 @@ class DiziMag : MainAPI() {
 
             android.util.Log.d("dzmg", "Document title: ${document.title()}")
 
-            // 3. Player URL'ini bul
             var playerUrl: String? = null
             var playerType: String = "unknown"
 
-            // Tüm iframe seçicilerini dene
             val iframeSelectors = listOf(
                 "div.dooplay_player iframe",
                 "div#tv-spoox2 iframe",
@@ -378,7 +472,6 @@ class DiziMag : MainAPI() {
                     playerUrl = fixUrlNull(iframe.attr("src"))
                     android.util.Log.d("dzmg", "Found iframe with selector '$selector': $playerUrl")
                     
-                    // Player tipini belirle
                     when {
                         playerUrl?.contains("vidmoly") == true -> playerType = "vidmoly"
                         playerUrl?.contains("vidguard") == true -> playerType = "vidguard"
@@ -391,15 +484,12 @@ class DiziMag : MainAPI() {
                 }
             }
 
-            // 4. Eğer iframe bulunamadıysa, direkt video URL'lerini ara
             if (playerUrl == null) {
                 android.util.Log.w("dzmg", "No iframe found, searching for direct video URLs")
                 
-                // Sayfadaki tüm script'leri tara
                 document.select("script").forEach { script ->
                     val content = script.html()
                     
-                    // M3U8 URL'lerini ara
                     val m3u8Pattern = Regex("(https?://[^\\s'\"]+\\.m3u8[^\\s'\"]*)")
                     val matches = m3u8Pattern.findAll(content)
                     for (match in matches) {
@@ -424,42 +514,14 @@ class DiziMag : MainAPI() {
                             return true
                         }
                     }
-                    
-                    // MP4 URL'lerini ara - M3U8 olarak gönder
-                    val mp4Pattern = Regex("(https?://[^\\s'\"]+\\.mp4[^\\s'\"]*)")
-                    val mp4Matches = mp4Pattern.findAll(content)
-                    for (match in mp4Matches) {
-                        val url = match.groupValues[1]
-                        if (url.isNotEmpty()) {
-                            android.util.Log.d("dzmg", "Found direct mp4 URL: $url")
-                            callback.invoke(
-                                newExtractorLink(
-                                    source = this.name,
-                                    name = "DiziMag",
-                                    url = url,
-                                    type = ExtractorLinkType.M3U8
-                                ) {
-                                    this.headers = mapOf(
-                                        "Accept" to "*/*",
-                                        "Referer" to data,
-                                        "User-Agent" to headers["User-Agent"].toString()
-                                    )
-                                    quality = Qualities.Unknown.value
-                                }
-                            )
-                            return true
-                        }
-                    }
                 }
                 
-                // Hiçbir şey bulunamadıysa loadExtractor dene
                 android.util.Log.w("dzmg", "No direct video URL found, trying loadExtractor")
                 return loadExtractor(data, "$mainUrl/", subtitleCallback, callback)
             }
 
             android.util.Log.d("dzmg", "Final player URL: $playerUrl (type: $playerType)")
 
-            // 5. Player tipine göre işlem yap
             when (playerType) {
                 "dsplay", "epikplayer" -> {
                     return handleDSPlay(playerUrl, headers, subtitleCallback, callback)
@@ -492,7 +554,6 @@ class DiziMag : MainAPI() {
         }
     }
 
-    // DSPlay / EpikPlayer için özel handler
     private suspend fun handleDSPlay(
         playerUrl: String,
         headers: Map<String, String>,
@@ -530,7 +591,6 @@ class DiziMag : MainAPI() {
                                 val jsonData = ObjectMapper().readValue(decrypted, JsonData::class.java)
                                 android.util.Log.d("dzmg", "videoLocation: ${jsonData.videoLocation}")
 
-                                // Altyazıları ekle
                                 jsonData.strSubtitles?.forEach { sub ->
                                     subtitleCallback.invoke(
                                         SubtitleFile(
@@ -540,7 +600,6 @@ class DiziMag : MainAPI() {
                                     )
                                 }
 
-                                // Video linkini callback ile gönder
                                 callback.invoke(
                                     newExtractorLink(
                                         source = this.name,
@@ -573,7 +632,6 @@ class DiziMag : MainAPI() {
         }
     }
 
-    // VidMoly için özel handler
     private suspend fun handleVidMoly(
         playerUrl: String,
         headers: Map<String, String>,
@@ -630,7 +688,6 @@ class DiziMag : MainAPI() {
         }
     }
 
-    // VidGuard için özel handler
     private suspend fun handleVidGuard(
         playerUrl: String,
         headers: Map<String, String>,
@@ -688,7 +745,6 @@ class DiziMag : MainAPI() {
         }
     }
 
-    // StreamWish için özel handler
     private suspend fun handleStreamWish(
         playerUrl: String,
         headers: Map<String, String>,
