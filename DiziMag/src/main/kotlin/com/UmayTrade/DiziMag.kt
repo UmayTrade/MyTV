@@ -1,6 +1,5 @@
 package com.UmayTrade
 
-import CryptoJS
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
