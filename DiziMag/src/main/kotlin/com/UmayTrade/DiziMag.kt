@@ -352,75 +352,176 @@ class DiziMag : MainAPI() {
 
             android.util.Log.d("dzmg", "Document title: ${document.title()}")
 
-            // 3. Player URL'ini bul - birden fazla seçenek
+            // 3. Player URL'ini bul
             var playerUrl: String? = null
+            var playerType: String = "unknown"
 
-            // Önce dooplay_player içindeki iframe
-            val playerIframe = document.selectFirst("div.dooplay_player iframe")
-            if (playerIframe != null) {
-                playerUrl = fixUrlNull(playerIframe.attr("src"))
-                android.util.Log.d("dzmg", "Found player iframe: $playerUrl")
-            }
+            // Tüm iframe seçicilerini dene
+            val iframeSelectors = listOf(
+                "div.dooplay_player iframe",
+                "div#tv-spoox2 iframe",
+                "iframe[src*='epikplayer']",
+                "iframe[src*='vidmoly']",
+                "iframe[src*='vidguard']",
+                "iframe[src*='dsplay']",
+                "iframe[src*='streamwish']",
+                "iframe[src*='player']",
+                "div.playerembed iframe",
+                "iframe[src*='dizimag']",
+                "iframe[src*='embed']",
+                "iframe[src*='video']"
+            )
 
-            // Eğer bulunamadıysa, diğer seçicileri dene
-            if (playerUrl == null) {
-                val iframeSelectors = listOf(
-                    "div#tv-spoox2 iframe",
-                    "iframe[src*='epikplayer']",
-                    "iframe[src*='player']",
-                    "div.playerembed iframe",
-                    "iframe[src*='dizimag']",
-                    "iframe[src*='embed']"
-                )
-
-                for (selector in iframeSelectors) {
-                    val iframe = document.selectFirst(selector)
-                    if (iframe != null) {
-                        playerUrl = fixUrlNull(iframe.attr("src"))
-                        android.util.Log.d("dzmg", "Found iframe with selector '$selector': $playerUrl")
-                        break
+            for (selector in iframeSelectors) {
+                val iframe = document.selectFirst(selector)
+                if (iframe != null) {
+                    playerUrl = fixUrlNull(iframe.attr("src"))
+                    android.util.Log.d("dzmg", "Found iframe with selector '$selector': $playerUrl")
+                    
+                    // Player tipini belirle
+                    when {
+                        playerUrl?.contains("vidmoly") == true -> playerType = "vidmoly"
+                        playerUrl?.contains("vidguard") == true -> playerType = "vidguard"
+                        playerUrl?.contains("dsplay") == true -> playerType = "dsplay"
+                        playerUrl?.contains("streamwish") == true -> playerType = "streamwish"
+                        playerUrl?.contains("epikplayer") == true -> playerType = "epikplayer"
+                        playerUrl?.contains("m3u8") == true -> playerType = "m3u8"
                     }
+                    break
                 }
             }
 
-            // 4. Eğer player URL'i bulunamadıysa, direkt loadExtractor dene
+            // 4. Eğer iframe bulunamadıysa, direkt video URL'lerini ara
             if (playerUrl == null) {
-                android.util.Log.w("dzmg", "No player URL found, trying loadExtractor with data")
+                android.util.Log.w("dzmg", "No iframe found, searching for direct video URLs")
+                
+                // Sayfadaki tüm script'leri tara
+                document.select("script").forEach { script ->
+                    val content = script.html()
+                    
+                    // M3U8 URL'lerini ara
+                    val m3u8Pattern = Regex("(https?://[^\\s'\"]+\\.m3u8[^\\s'\"]*)")
+                    val matches = m3u8Pattern.findAll(content)
+                    for (match in matches) {
+                        val url = match.groupValues[1]
+                        if (url.isNotEmpty()) {
+                            android.util.Log.d("dzmg", "Found direct m3u8 URL: $url")
+                            callback.invoke(
+                                newExtractorLink(
+                                    source = this.name,
+                                    name = "DiziMag",
+                                    url = url,
+                                    type = ExtractorLinkType.M3U8
+                                ) {
+                                    this.headers = mapOf(
+                                        "Accept" to "*/*",
+                                        "Referer" to data,
+                                        "User-Agent" to headers["User-Agent"].toString()
+                                    )
+                                    quality = Qualities.Unknown.value
+                                }
+                            )
+                            return true
+                        }
+                    }
+                    
+                    // MP4 URL'lerini ara
+                    val mp4Pattern = Regex("(https?://[^\\s'\"]+\\.mp4[^\\s'\"]*)")
+                    val mp4Matches = mp4Pattern.findAll(content)
+                    for (match in mp4Matches) {
+                        val url = match.groupValues[1]
+                        if (url.isNotEmpty()) {
+                            android.util.Log.d("dzmg", "Found direct mp4 URL: $url")
+                            callback.invoke(
+                                newExtractorLink(
+                                    source = this.name,
+                                    name = "DiziMag",
+                                    url = url,
+                                    type = ExtractorLinkType.DIRECT
+                                ) {
+                                    this.headers = mapOf(
+                                        "Accept" to "*/*",
+                                        "Referer" to data,
+                                        "User-Agent" to headers["User-Agent"].toString()
+                                    )
+                                    quality = Qualities.Unknown.value
+                                }
+                            )
+                            return true
+                        }
+                    }
+                }
+                
+                // Hiçbir şey bulunamadıysa loadExtractor dene
+                android.util.Log.w("dzmg", "No direct video URL found, trying loadExtractor")
                 return loadExtractor(data, "$mainUrl/", subtitleCallback, callback)
             }
 
-            android.util.Log.d("dzmg", "Final player URL: $playerUrl")
+            android.util.Log.d("dzmg", "Final player URL: $playerUrl (type: $playerType)")
 
-            // 5. Player sayfasını getir
-            val playerDoc = app.get(
-                playerUrl,
-                headers = headers,
-                referer = mainUrl
-            ).document
+            // 5. Player tipine göre işlem yap
+            when (playerType) {
+                "dsplay", "epikplayer" -> {
+                    // DSPlay / EpikPlayer - bePlayer ile şifreli
+                    return handleDSPlay(playerUrl, headers, subtitleCallback, callback)
+                }
+                "vidmoly" -> {
+                    // VidMoly player
+                    return handleVidMoly(playerUrl, headers, subtitleCallback, callback)
+                }
+                "vidguard" -> {
+                    // VidGuard player
+                    return handleVidGuard(playerUrl, headers, subtitleCallback, callback)
+                }
+                "streamwish" -> {
+                    // StreamWish player
+                    return handleStreamWish(playerUrl, headers, subtitleCallback, callback)
+                }
+                else -> {
+                    // Bilinmeyen player - loadExtractor dene
+                    android.util.Log.w("dzmg", "Unknown player type, trying loadExtractor")
+                    return loadExtractor(playerUrl, "$mainUrl/", subtitleCallback, callback)
+                }
+            }
 
-            android.util.Log.d("dzmg", "Player document title: ${playerDoc.title()}")
+        } catch (e: Exception) {
+            android.util.Log.e("dzmg", "loadLinks error: ${e.message}")
+            android.util.Log.e("dzmg", "Stack: ${e.stackTraceToString()}")
+            
+            try {
+                return loadExtractor(data, "$mainUrl/", subtitleCallback, callback)
+            } catch (e2: Exception) {
+                android.util.Log.e("dzmg", "loadExtractor fallback failed: ${e2.message}")
+                return false
+            }
+        }
+    }
 
-            // 6. Player sayfasındaki script'leri tara
-            var foundLink = false
-            val scripts = playerDoc.select("script")
-            android.util.Log.d("dzmg", "Found ${scripts.size} scripts")
-
-            for (script in scripts) {
-                val scriptContent = script.html()
+    // DSPlay / EpikPlayer için özel handler
+    private suspend fun handleDSPlay(
+        playerUrl: String,
+        headers: Map<String, String>,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        android.util.Log.d("dzmg", "=== handleDSPlay START ===")
+        
+        try {
+            val playerDoc = app.get(playerUrl, headers = headers, referer = mainUrl).document
+            
+            playerDoc.select("script").forEach { script ->
+                val content = script.html()
                 
-                // bePlayer kontrolü
-                if (scriptContent.contains("bePlayer")) {
+                if (content.contains("bePlayer")) {
                     android.util.Log.d("dzmg", "bePlayer script found")
                     val pattern = Pattern.compile("bePlayer\\('(.*?)', '(.*?)'\\)")
-                    val matcher = pattern.matcher(scriptContent)
+                    val matcher = pattern.matcher(content)
                     
                     if (matcher.find()) {
                         val key = matcher.group(1)
                         val jsonCipher = matcher.group(2)
-                        android.util.Log.d("dzmg", "bePlayer matched")
-
+                        
                         try {
-                            // Şifreyi çöz
                             val cipherData = ObjectMapper().readValue(
                                 jsonCipher?.replace("\\/", "/"),
                                 Cipher::class.java
@@ -431,8 +532,6 @@ class DiziMag : MainAPI() {
                             }
 
                             if (decrypted != null) {
-                                android.util.Log.d("dzmg", "Decrypted: ${decrypted.take(100)}...")
-                                
                                 val jsonData = ObjectMapper().readValue(decrypted, JsonData::class.java)
                                 android.util.Log.d("dzmg", "videoLocation: ${jsonData.videoLocation}")
 
@@ -450,7 +549,7 @@ class DiziMag : MainAPI() {
                                 callback.invoke(
                                     newExtractorLink(
                                         source = this.name,
-                                        name = "DiziMag",
+                                        name = "DSPlay",
                                         url = jsonData.videoLocation,
                                         type = ExtractorLinkType.M3U8
                                     ) {
@@ -462,34 +561,61 @@ class DiziMag : MainAPI() {
                                         quality = Qualities.Unknown.value
                                     }
                                 )
-
-                                foundLink = true
-                                android.util.Log.d("dzmg", "Video link sent successfully")
-                                break
+                                return true
                             }
-
                         } catch (e: Exception) {
-                            android.util.Log.e("dzmg", "Decryption error: ${e.message}")
-                            android.util.Log.e("dzmg", "Stack: ${e.stackTraceToString()}")
+                            android.util.Log.e("dzmg", "DSPlay decryption error: ${e.message}")
                         }
                     }
                 }
+            }
+            
+            // bePlayer bulunamadıysa loadExtractor dene
+            return loadExtractor(playerUrl, "$mainUrl/", subtitleCallback, callback)
+            
+        } catch (e: Exception) {
+            android.util.Log.e("dzmg", "handleDSPlay error: ${e.message}")
+            return false
+        }
+    }
+
+    // VidMoly için özel handler
+    private suspend fun handleVidMoly(
+        playerUrl: String,
+        headers: Map<String, String>,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        android.util.Log.d("dzmg", "=== handleVidMoly START ===")
+        
+        try {
+            val playerDoc = app.get(playerUrl, headers = headers, referer = mainUrl).document
+            
+            // VidMoly genellikle iframe içinde iframe kullanır
+            val innerIframe = playerDoc.selectFirst("iframe")
+            if (innerIframe != null) {
+                val innerUrl = fixUrlNull(innerIframe.attr("src"))
+                if (innerUrl != null) {
+                    android.util.Log.d("dzmg", "VidMoly inner iframe: $innerUrl")
+                    return loadExtractor(innerUrl, playerUrl, subtitleCallback, callback)
+                }
+            }
+            
+            // Script içinde video URL'lerini ara
+            playerDoc.select("script").forEach { script ->
+                val content = script.html()
                 
-                // Vimeo benzeri player kontrolü
-                if (!foundLink && scriptContent.contains("player") && scriptContent.contains("video")) {
-                    android.util.Log.d("dzmg", "Found player script without bePlayer")
-                    // video URL'lerini bulmaya çalış
-                    val videoUrlPattern = Regex("(https?://[^\\s'\"]+\\.m3u8[^\\s'\"]*)")
-                    val videoMatch = videoUrlPattern.find(scriptContent)
-                    if (videoMatch != null) {
-                        val videoUrl = videoMatch.groupValues[1]
-                        android.util.Log.d("dzmg", "Found m3u8 URL in script: $videoUrl")
-                        
+                // M3U8 URL'lerini ara
+                val m3u8Pattern = Regex("(https?://[^\\s'\"]+\\.m3u8[^\\s'\"]*)")
+                val matches = m3u8Pattern.findAll(content)
+                for (match in matches) {
+                    val url = match.groupValues[1]
+                    if (url.isNotEmpty()) {
                         callback.invoke(
                             newExtractorLink(
                                 source = this.name,
-                                name = "DiziMag",
-                                url = videoUrl,
+                                name = "VidMoly",
+                                url = url,
                                 type = ExtractorLinkType.M3U8
                             ) {
                                 this.headers = mapOf(
@@ -500,31 +626,135 @@ class DiziMag : MainAPI() {
                                 quality = Qualities.Unknown.value
                             }
                         )
-                        foundLink = true
+                        return true
                     }
                 }
             }
-
-            // 7. Eğer hala link bulunamadıysa, fallback olarak loadExtractor dene
-            if (!foundLink) {
-                android.util.Log.w("dzmg", "No video link found, trying loadExtractor with player URL")
-                return loadExtractor(playerUrl, "$mainUrl/", subtitleCallback, callback)
-            }
-
-            android.util.Log.d("dzmg", "=== loadLinks END (success) ===")
-            return true
-
-        } catch (e: Exception) {
-            android.util.Log.e("dzmg", "loadLinks error: ${e.message}")
-            android.util.Log.e("dzmg", "Stack: ${e.stackTraceToString()}")
             
-            // Son çare olarak loadExtractor dene
-            try {
-                return loadExtractor(data, "$mainUrl/", subtitleCallback, callback)
-            } catch (e2: Exception) {
-                android.util.Log.e("dzmg", "loadExtractor fallback also failed: ${e2.message}")
-                return false
+            return loadExtractor(playerUrl, "$mainUrl/", subtitleCallback, callback)
+            
+        } catch (e: Exception) {
+            android.util.Log.e("dzmg", "handleVidMoly error: ${e.message}")
+            return false
+        }
+    }
+
+    // VidGuard için özel handler
+    private suspend fun handleVidGuard(
+        playerUrl: String,
+        headers: Map<String, String>,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        android.util.Log.d("dzmg", "=== handleVidGuard START ===")
+        
+        try {
+            val playerDoc = app.get(playerUrl, headers = headers, referer = mainUrl).document
+            
+            // VidGuard genellikle doğrudan video URL'si verir
+            playerDoc.select("script").forEach { script ->
+                val content = script.html()
+                
+                // Video URL'lerini ara
+                val videoPatterns = listOf(
+                    Regex("file\\s*:\\s*['\"]([^'\"]+?)['\"]"),
+                    Regex("src\\s*:\\s*['\"]([^'\"]+?)['\"]"),
+                    Regex("video\\s*:\\s*['\"]([^'\"]+?)['\"]"),
+                    Regex("(https?://[^\\s'\"]+\\.m3u8[^\\s'\"]*)"),
+                    Regex("(https?://[^\\s'\"]+\\.mp4[^\\s'\"]*)")
+                )
+                
+                for (pattern in videoPatterns) {
+                    val matches = pattern.findAll(content)
+                    for (match in matches) {
+                        val url = match.groupValues[1]
+                        if (url.isNotEmpty() && (url.contains("m3u8") || url.contains("mp4") || url.contains("video"))) {
+                            android.util.Log.d("dzmg", "VidGuard found video URL: $url")
+                            callback.invoke(
+                                newExtractorLink(
+                                    source = this.name,
+                                    name = "VidGuard",
+                                    url = url,
+                                    type = if (url.contains("m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.DIRECT
+                                ) {
+                                    this.headers = mapOf(
+                                        "Accept" to "*/*",
+                                        "Referer" to playerUrl,
+                                        "User-Agent" to headers["User-Agent"].toString()
+                                    )
+                                    quality = Qualities.Unknown.value
+                                }
+                            )
+                            return true
+                        }
+                    }
+                }
             }
+            
+            return loadExtractor(playerUrl, "$mainUrl/", subtitleCallback, callback)
+            
+        } catch (e: Exception) {
+            android.util.Log.e("dzmg", "handleVidGuard error: ${e.message}")
+            return false
+        }
+    }
+
+    // StreamWish için özel handler
+    private suspend fun handleStreamWish(
+        playerUrl: String,
+        headers: Map<String, String>,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        android.util.Log.d("dzmg", "=== handleStreamWish START ===")
+        
+        try {
+            val playerDoc = app.get(playerUrl, headers = headers, referer = mainUrl).document
+            
+            // StreamWish genellikle iframe içinde içerik gösterir
+            val iframe = playerDoc.selectFirst("iframe")
+            if (iframe != null) {
+                val iframeUrl = fixUrlNull(iframe.attr("src"))
+                if (iframeUrl != null) {
+                    android.util.Log.d("dzmg", "StreamWish iframe: $iframeUrl")
+                    return loadExtractor(iframeUrl, playerUrl, subtitleCallback, callback)
+                }
+            }
+            
+            // Script içinde video URL'lerini ara
+            playerDoc.select("script").forEach { script ->
+                val content = script.html()
+                
+                val m3u8Pattern = Regex("(https?://[^\\s'\"]+\\.m3u8[^\\s'\"]*)")
+                val matches = m3u8Pattern.findAll(content)
+                for (match in matches) {
+                    val url = match.groupValues[1]
+                    if (url.isNotEmpty()) {
+                        callback.invoke(
+                            newExtractorLink(
+                                source = this.name,
+                                name = "StreamWish",
+                                url = url,
+                                type = ExtractorLinkType.M3U8
+                            ) {
+                                this.headers = mapOf(
+                                    "Accept" to "*/*",
+                                    "Referer" to playerUrl,
+                                    "User-Agent" to headers["User-Agent"].toString()
+                                )
+                                quality = Qualities.Unknown.value
+                            }
+                        )
+                        return true
+                    }
+                }
+            }
+            
+            return loadExtractor(playerUrl, "$mainUrl/", subtitleCallback, callback)
+            
+        } catch (e: Exception) {
+            android.util.Log.e("dzmg", "handleStreamWish error: ${e.message}")
+            return false
         }
     }
 }
