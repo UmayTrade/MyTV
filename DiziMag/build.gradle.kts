@@ -1,7 +1,7 @@
 version = 18
 
 cloudstream {
-    authors     = listOf("nikyokki")
+    authors     = listOf("UmayTrade")
     language    = "tr"
     description = "En son çıkan yabancı dizi ve filmleri DiziMag farkıyla full hd 1080p kalitede izle. Dizimag Geniş ve güncel arşiviyle dizi ve filmlerin tadını çıkartın."
 
