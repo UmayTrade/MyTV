@@ -8,9 +8,6 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import kotlin.math.min
 
-/**
- * Conforming with CryptoJS AES method
- */
 @Suppress("unused", "FunctionName", "SameParameterValue")
 object CryptoJS {
 
