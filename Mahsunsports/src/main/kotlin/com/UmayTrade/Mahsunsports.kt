@@ -6,7 +6,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
-import org.jsoup.nodes.Element
 import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -107,7 +106,6 @@ class MahsunSports : MainAPI() {
                 )
             }
 
-            // Gruplama
             val grouped = channels.groupBy { category(it.title) }
 
             val order = listOf(
@@ -134,7 +132,6 @@ class MahsunSports : MainAPI() {
                 homePageList.add(HomePageList(groupName, searchResponses))
             }
 
-            // Eğer hiç grup yoksa tüm kanalları tek listede göster
             if (homePageList.isEmpty()) {
                 val searchResponses = channels.map {
                     newLiveSearchResponse(
@@ -214,7 +211,6 @@ class MahsunSports : MainAPI() {
         try {
             val channel = parser.parseChannelUrl(data) ?: return false
 
-            // HTML'den doğrudan iframe URL'sini al
             val document = withContext(Dispatchers.IO) {
                 Jsoup.connect(mainUrl)
                     .userAgent(USER_AGENT)
@@ -223,7 +219,6 @@ class MahsunSports : MainAPI() {
                     .get()
             }
 
-            // script4.js'den kanal bilgilerini al
             val scriptUrl = document.select("script[src]").map { it.absUrl("src") }
                 .firstOrNull { it.contains("script4.js") }
             
@@ -232,7 +227,6 @@ class MahsunSports : MainAPI() {
                     app.get(scriptUrl, timeout = 15).text
                 }
                 
-                // script4.js'den stream URL'lerini al
                 val streamUrls = parser.parseStreamUrlsFromScript(scriptContent, channel.id)
                 if (streamUrls.isNotEmpty()) {
                     val headers = mapOf(
@@ -251,15 +245,16 @@ class MahsunSports : MainAPI() {
 
                             for (variant in variants) {
                                 callback(
-                                    ExtractorLink(
+                                    newExtractorLink(
                                         source = name,
                                         name = "${variant.height}p",
                                         url = variant.url,
-                                        referer = mainUrl,
-                                        quality = variant.height,
-                                        type = ExtractorLinkType.M3U8,
-                                        headers = headers
-                                    )
+                                        type = ExtractorLinkType.M3U8
+                                    ) {
+                                        this.referer = mainUrl
+                                        this.quality = variant.height
+                                        this.headers = headers
+                                    }
                                 )
                             }
                             return true
@@ -270,44 +265,72 @@ class MahsunSports : MainAPI() {
                 }
             }
 
-            // Alternatif: HTML'den doğrudan iframe URL'sini bul
-            val iframeUrl = document.select("iframe#customIframe").firstOrNull()?.attr("src")
+            // Alternatif: Doğrudan kanal URL'si dene
+            val directUrls = listOf(
+                "https://mahsunsports.com/hls/${channel.id}.m3u8",
+                "https://mahsunsports80.xyz/hls/${channel.id}.m3u8",
+                "https://mahsunsports.com/stream/${channel.id}.m3u8"
+            )
+
+            val headers = mapOf(
+                "User-Agent" to USER_AGENT,
+                "Referer" to mainUrl,
+                "Connection" to "keep-alive"
+            )
+
+            for (directUrl in directUrls) {
+                try {
+                    val response = withContext(Dispatchers.IO) {
+                        app.get(directUrl, headers = headers, timeout = 10)
+                    }
+                    if (response.isSuccessful) {
+                        val content = response.text
+                        val variants = parseHlsVariants(content, directUrl)
+                        for (variant in variants) {
+                            callback(
+                                newExtractorLink(
+                                    source = name,
+                                    name = "${variant.height}p",
+                                    url = variant.url,
+                                    type = ExtractorLinkType.M3U8
+                                ) {
+                                    this.referer = mainUrl
+                                    this.quality = variant.height
+                                    this.headers = headers
+                                }
+                            )
+                        }
+                        return true
+                    }
+                } catch (e: Exception) {
+                    continue
+                }
+            }
+
+            // Son çare: HTML'den iframe URL'sini bul
+            val iframeElement = document.select("iframe#customIframe, iframe[src*=\"event.html\"]").firstOrNull()
+            val iframeUrl = iframeElement?.attr("src")
             if (!iframeUrl.isNullOrEmpty()) {
                 val fullUrl = if (iframeUrl.startsWith("/")) mainUrl + iframeUrl.substring(1) else iframeUrl
                 callback(
-                    ExtractorLink(
+                    newExtractorLink(
                         source = name,
                         name = "Yayın",
                         url = fullUrl,
-                        referer = mainUrl,
-                        quality = 720,
-                        type = ExtractorLinkType.IFRAME,
-                        headers = mapOf(
+                        type = ExtractorLinkType.DIRECT
+                    ) {
+                        this.referer = mainUrl
+                        this.quality = 720
+                        this.headers = mapOf(
                             "User-Agent" to USER_AGENT,
                             "Referer" to mainUrl
                         )
-                    )
+                    }
                 )
                 return true
             }
 
-            // Son çare: doğrudan kanal URL'sini dene
-            val directUrl = "https://mahsunsports.com/hls/${channel.id}.m3u8"
-            callback(
-                ExtractorLink(
-                    source = name,
-                    name = "Yayın",
-                    url = directUrl,
-                    referer = mainUrl,
-                    quality = 720,
-                    type = ExtractorLinkType.M3U8,
-                    headers = mapOf(
-                        "User-Agent" to USER_AGENT,
-                        "Referer" to mainUrl
-                    )
-                )
-            )
-            return true
+            return false
 
         } catch (e: Exception) {
             return false
@@ -387,7 +410,6 @@ class MahsunSports : MainAPI() {
         }
 
         suspend fun channels(document: Document, base: String): List<SportsChannel> {
-            // 1. script4.js'den kanalları al
             val scriptUrl = document.select("script[src]").map { it.absUrl("src") }
                 .firstOrNull { it.contains("script4.js") }
             
@@ -401,7 +423,6 @@ class MahsunSports : MainAPI() {
                 } catch (_: Exception) { }
             }
 
-            // 2. HTML'den doğrudan kanalları al
             val htmlChannels = parseChannelsFromHtml(document, base)
             if (htmlChannels.isNotEmpty()) {
                 return htmlChannels
@@ -439,7 +460,6 @@ class MahsunSports : MainAPI() {
         private fun parseChannelsFromHtml(document: Document, base: String): List<SportsChannel> {
             val channels = mutableListOf<SportsChannel>()
 
-            // Mac listesindeki linkler
             for (link in document.select(".mac.iframeYayin")) {
                 val href = link.attr("data-url")
                 if (href.isBlank()) continue
@@ -451,14 +471,12 @@ class MahsunSports : MainAPI() {
                 channels.add(SportsChannel(id, title, "Spor Kanalları", href))
             }
 
-            // Kanal listesindeki linkler
             for (link in document.select("a[href*=\"id=\"]")) {
                 val href = link.absUrl("href")
                 val id = queryParam(href, "id") ?: continue
                 val title = link.text().trim()
                 if (title.isBlank() || id.isBlank()) continue
                 
-                // Zaten eklenmiş mi kontrol et
                 if (channels.none { it.id == id }) {
                     channels.add(SportsChannel(id, title, "Spor Kanalları", href))
                 }
