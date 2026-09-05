@@ -9,7 +9,7 @@ import org.jsoup.Jsoup
 import java.net.URI
 import java.net.URLDecoder
 
-class MahsunSportsStream : MainAPI() {
+class MahsunSports : MainAPI() {
     override var mainUrl = "https://mahsunsports80.xyz/"
     override var name = "MahsunSports"
     override var lang = "tr"
@@ -19,14 +19,14 @@ class MahsunSportsStream : MainAPI() {
 
     // Ana sayfa kategorileri
     override val mainPage = mainPageOf(
-        Pair("${mainUrl}", "📺 Tüm Kanallar"),
-        Pair("${mainUrl}?category=bein", "beIN Sports"),
-        Pair("${mainUrl}?category=ssport", "S Sport"),
-        Pair("${mainUrl}?category=tivibu", "Tivibu"),
-        Pair("${mainUrl}?category=tabii", "tabii"),
-        Pair("${mainUrl}?category=exxen", "Exxen"),
-        Pair("${mainUrl}?category=ulusal", "Ulusal"),
-        Pair("${mainUrl}?category=yabancı", "Yabancı Spor")
+        "${mainUrl}" to "📺 Tüm Kanallar",
+        "${mainUrl}?category=bein" to "beIN Sports",
+        "${mainUrl}?category=ssport" to "S Sport",
+        "${mainUrl}?category=tivibu" to "Tivibu",
+        "${mainUrl}?category=tabii" to "tabii",
+        "${mainUrl}?category=exxen" to "Exxen",
+        "${mainUrl}?category=ulusal" to "Ulusal",
+        "${mainUrl}?category=yabancı" to "Yabancı Spor"
     )
 
     companion object {
@@ -37,7 +37,6 @@ class MahsunSportsStream : MainAPI() {
             if (LOG) Log.d(TAG, message)
         }
 
-        // Kanal gruplama fonksiyonu
         private fun key(s: String) = Regex("[^a-z0-9]").replace(
             java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD),
             ""
@@ -59,10 +58,8 @@ class MahsunSportsStream : MainAPI() {
             }
         }
 
-        // Poster URL'leri
         fun getPosterUrl(id: String): String? {
             return when {
-                // beIN Sports
                 id.startsWith("bs") -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/international/beinsports/old/horizontal/bein-sports-${id.substring(2)}-hz-int.png"
                 id == "ss1" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/s-sport-tr.png"
                 id == "ss2" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/s-sport-2-tr.png"
@@ -118,7 +115,11 @@ class MahsunSportsStream : MainAPI() {
 
             val scriptUrl = document.select("script[src]").map { it.absUrl("src") }
                 .firstOrNull { it.contains("script4.js") || it.contains("main.js") }
-                ?: return errorResponse("script4.js bulunamadı", request.data)
+                ?: return newHomePageResponse(request.data, listOf(
+                    HomePageList("⚠️ Hata", listOf(
+                        newLiveSearchResponse("❌ script4.js bulunamadı", "", TvType.Live)
+                    ))
+                ))
 
             log("Script URL: $scriptUrl")
 
@@ -133,7 +134,11 @@ class MahsunSportsStream : MainAPI() {
             val channels = parser.channels(scriptContent, mainUrl)
             
             if (channels.isEmpty()) {
-                return errorResponse("Kanal bulunamadı", request.data)
+                return newHomePageResponse(request.data, listOf(
+                    HomePageList("⚠️ Hata", listOf(
+                        newLiveSearchResponse("❌ Kanal bulunamadı", "", TvType.Live)
+                    ))
+                ))
             }
 
             val filteredChannels = if (category != null) {
@@ -143,7 +148,11 @@ class MahsunSportsStream : MainAPI() {
             }
 
             if (filteredChannels.isEmpty()) {
-                return errorResponse("Bu kategoride kanal bulunamadı", request.data)
+                return newHomePageResponse(request.data, listOf(
+                    HomePageList("⚠️ Hata", listOf(
+                        newLiveSearchResponse("❌ Bu kategoride kanal bulunamadı", "", TvType.Live)
+                    ))
+                ))
             }
 
             val grouped = filteredChannels.groupBy { category(it.title) }
@@ -185,10 +194,14 @@ class MahsunSportsStream : MainAPI() {
                 homePageList.add(HomePageList("Tüm Kanallar", searchResponses))
             }
 
-            return HomePageResponse(request.data, homePageList)
+            return newHomePageResponse(request.data, homePageList)
         } catch (e: Exception) {
             log("getMainPage error: ${e.message}")
-            return errorResponse("Hata: ${e.message}", request.data)
+            return newHomePageResponse(request.data, listOf(
+                HomePageList("⚠️ Hata", listOf(
+                    newLiveSearchResponse("❌ Hata: ${e.message}", "", TvType.Live)
+                ))
+            ))
         }
     }
 
@@ -295,15 +308,16 @@ class MahsunSportsStream : MainAPI() {
 
                     for (variant in variants) {
                         callback(
-                            ExtractorLink(
+                            newExtractorLink(
                                 source = name,
                                 name = "${variant.height}p",
                                 url = variant.url,
                                 referer = mainUrl,
                                 quality = variant.height,
-                                headers = headers,
                                 isM3u8 = true
-                            )
+                            ) {
+                                this.headers = headers
+                            }
                         )
                         found = true
                     }
@@ -343,15 +357,16 @@ class MahsunSportsStream : MainAPI() {
                     val variants = parseHlsVariants(content, url)
                     for (variant in variants) {
                         callback(
-                            ExtractorLink(
+                            newExtractorLink(
                                 source = name,
                                 name = "${variant.height}p",
                                 url = variant.url,
                                 referer = mainUrl,
                                 quality = variant.height,
-                                headers = headers,
                                 isM3u8 = true
-                            )
+                            ) {
+                                this.headers = headers
+                            }
                         )
                     }
                     return true
@@ -406,19 +421,6 @@ class MahsunSportsStream : MainAPI() {
         return variants.distinctBy { it.url }
             .sortedWith(compareByDescending<HlsVariant> { it.height }
             .thenByDescending { it.bandwidth })
-    }
-
-    private fun errorResponse(message: String, request: String): HomePageResponse {
-        val items = listOf(
-            newLiveSearchResponse(
-                "❌ $message",
-                "",
-                TvType.Live
-            ).apply {
-                posterUrl = ""
-            }
-        )
-        return HomePageResponse(request, listOf(HomePageList("⚠️ Hata", items)))
     }
 
     data class HlsVariant(val url: String, val height: Int, val bandwidth: Long = 0L)
