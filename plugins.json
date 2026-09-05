@@ -582,16 +582,16 @@
         "fileHash": "sha256-ad83d9d1de5f119020795cc4045f85cb336ccd8b90d5b19793aec8bc06dec1a1"
     },
   {
-    "url": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/builds/ee7ff979ad1b936b287b07a84f75c95900266ed8/MacKeyfi.cs3",
+    "url": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/builds/ee7ff979ad1b936b287b07a84f75c95900266ed8/MahsunSports.cs3",
     "status": 3,
-    "version": 9,
-    "name": "MacKeyfi",
-    "internalName": "MacKeyfi",
+    "version": 8,
+    "name": "MahsunSports",
+    "internalName": "MahsunSports",
     "authors": [
       "Wiojelt"
     ],
-    "description": "🔴 Kaynak: MaçKeyfi / Canlımaçlar · Emeği için teşekkürler ♥ · @wiojelt · WARP gerekebilir.",
-    "fileSize": 78313,
+    "description": "🟢 Kaynak: MahsunSports · Emeği için teşekkürler ♥ · @wiojelt",
+    "fileSize": 56349,
     "repositoryUrl": "https://github.com/Wiojelt/TurkSpor",
     "language": "tr",
     "tvTypes": [
@@ -599,7 +599,7 @@
     ],
     "iconUrl": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/main/assets/logo.png",
     "apiVersion": 1,
-    "fileHash": "sha256-0a3d6a1a780a2b5161adba6e0ab0a3b274b64201a1d2eebaab35915fc2967f6f"
+    "fileHash": "sha256-50bbe0c8d872ae942de44bb241cefc148f4f2ae50fcd618949b602fef7a3ad77"
   },
     {
         "url": "https://raw.githubusercontent.com/UmayTrade/Mytv/builds/RareFilmm.cs3",
