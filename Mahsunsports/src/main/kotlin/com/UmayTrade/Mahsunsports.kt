@@ -371,10 +371,10 @@ class MahsunSports : MainAPI() {
 
         if (variants.isEmpty()) {
             val hint = when {
-                Regex("(?i)\b(4k|uhd|2160p?)\b").containsMatchIn(text) -> 2160
-                Regex("(?i)\b(1920|1080p?|fhd|full\s*hd)\b").containsMatchIn(text) -> 1080
-                Regex("(?i)\b(1280|720p?|hd)\b").containsMatchIn(text) -> 720
-                Regex("(?i)\b(576p?|sd)\b").containsMatchIn(text) -> 576
+                Regex("(?i)\\b(4k|uhd|2160p?)\\b").containsMatchIn(text) -> 2160
+                Regex("(?i)\\b(1920|1080p?|fhd|full\\s*hd)\\b").containsMatchIn(text) -> 1080
+                Regex("(?i)\\b(1280|720p?|hd)\\b").containsMatchIn(text) -> 720
+                Regex("(?i)\\b(576p?|sd)\\b").containsMatchIn(text) -> 576
                 else -> 480
             }
             return listOf(HlsVariant(baseUrl, hint, 0L))
@@ -475,13 +475,13 @@ class MahsunSports : MainAPI() {
 
         private fun parseChannelsFromText(script: String, base: String): List<SportsChannel> {
             val patterns = listOf(
-                Regex("const\s+channels\s*=\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
-                Regex("var\s+channels\s*=\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
-                Regex("let\s+channels\s*=\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
-                Regex("channels\s*=\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
-                Regex("window\.channels\s*=\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
-                Regex("'channels':\s*(\[.*?\])", RegexOption.DOT_MATCHES_ALL),
-                Regex("\"channels\":\s*(\[.*?\])", RegexOption.DOT_MATCHES_ALL),
+                Regex("const\\s+channels\\s*=\\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
+                Regex("var\\s+channels\\s*=\\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
+                Regex("let\\s+channels\\s*=\\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
+                Regex("channels\\s*=\\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
+                Regex("window\\.channels\\s*=\\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
+                Regex("'channels':\\s*(\[.*?\])", RegexOption.DOT_MATCHES_ALL),
+                Regex("\"channels\":\\s*(\[.*?\])", RegexOption.DOT_MATCHES_ALL),
             )
 
             for (pattern in patterns) {
@@ -562,11 +562,11 @@ class MahsunSports : MainAPI() {
 
         private fun parseBaseUrlsFromText(html: String, id: String): List<String> {
             val patterns = listOf(
-                Regex("const\s+baseurls\s*=\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
-                Regex("var\s+baseurls\s*=\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
-                Regex("let\s+baseurls\s*=\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
-                Regex("baseurls\s*=\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
-                Regex("window\.baseurls\s*=\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
+                Regex("const\\s+baseurls\\s*=\\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
+                Regex("var\\s+baseurls\\s*=\\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
+                Regex("let\\s+baseurls\\s*=\\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
+                Regex("baseurls\\s*=\\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
+                Regex("window\\.baseurls\\s*=\\s*(\[.*?\]);", RegexOption.DOT_MATCHES_ALL),
             )
 
             for (pattern in patterns) {
