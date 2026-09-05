@@ -1,10 +1,10 @@
-// ! Bu araç @Kraptor123 tarafından | @kekikanime için yazılmıştır.
-version = 8
+// ! Bu araç @SAKLImavi tarafından | @UmayTrade için yazılmıştır.
+version = 1
 
 cloudstream {
-    authors     = listOf("kraptor")
+    authors     = listOf("UmayTrade")
     language    = "tr"
-    description = "Anime izle, Anime türkce altyazılı , birbirinden farklı ve güzel en güncel animeleri keyifle seyredebileceğiniz Animex.com.tr anime severlerin en popüler türkçe anime izleme sitesidir."
+    description = "AnimeciX, animeleri keşfedebileceğiniz ve animeler hakkında her şeyi öğrenebileceğiniz bir paylaşım platformudur."
 
     /**
      * Status int as the following:
@@ -15,5 +15,5 @@ cloudstream {
     **/
     status  = 1 // will be 3 if unspecified
     tvTypes = listOf("Anime")
-    iconUrl = "https://animex.tr/wp-content/uploads/2024/06/favicon.ico"
+    iconUrl = "https://anm.cx/favicon.ico"
 }
