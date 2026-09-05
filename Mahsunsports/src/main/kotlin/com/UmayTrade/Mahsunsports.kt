@@ -219,6 +219,7 @@ class MahsunSports : MainAPI() {
                     .get()
             }
 
+            // 1. script4.js'den stream URL'lerini al
             val scriptUrl = document.select("script[src]").map { it.absUrl("src") }
                 .firstOrNull { it.contains("script4.js") }
             
@@ -265,7 +266,7 @@ class MahsunSports : MainAPI() {
                 }
             }
 
-            // Alternatif: Doğrudan kanal URL'si dene
+            // 2. Doğrudan kanal URL'lerini dene
             val directUrls = listOf(
                 "https://mahsunsports.com/hls/${channel.id}.m3u8",
                 "https://mahsunsports80.xyz/hls/${channel.id}.m3u8",
@@ -307,7 +308,7 @@ class MahsunSports : MainAPI() {
                 }
             }
 
-            // Son çare: HTML'den iframe URL'sini bul
+            // 3. HTML'den iframe URL'sini bul (son çare)
             val iframeElement = document.select("iframe#customIframe, iframe[src*=\"event.html\"]").firstOrNull()
             val iframeUrl = iframeElement?.attr("src")
             if (!iframeUrl.isNullOrEmpty()) {
@@ -317,7 +318,7 @@ class MahsunSports : MainAPI() {
                         source = name,
                         name = "Yayın",
                         url = fullUrl,
-                        type = ExtractorLinkType.DIRECT
+                        type = ExtractorLinkType.M3U8
                     ) {
                         this.referer = mainUrl
                         this.quality = 720
@@ -410,6 +411,7 @@ class MahsunSports : MainAPI() {
         }
 
         suspend fun channels(document: Document, base: String): List<SportsChannel> {
+            // 1. script4.js'den kanalları al
             val scriptUrl = document.select("script[src]").map { it.absUrl("src") }
                 .firstOrNull { it.contains("script4.js") }
             
@@ -423,6 +425,7 @@ class MahsunSports : MainAPI() {
                 } catch (_: Exception) { }
             }
 
+            // 2. HTML'den kanalları al
             val htmlChannels = parseChannelsFromHtml(document, base)
             if (htmlChannels.isNotEmpty()) {
                 return htmlChannels
@@ -460,6 +463,7 @@ class MahsunSports : MainAPI() {
         private fun parseChannelsFromHtml(document: Document, base: String): List<SportsChannel> {
             val channels = mutableListOf<SportsChannel>()
 
+            // .mac.iframeYayin sınıfındaki linkler
             for (link in document.select(".mac.iframeYayin")) {
                 val href = link.attr("data-url")
                 if (href.isBlank()) continue
@@ -471,6 +475,7 @@ class MahsunSports : MainAPI() {
                 channels.add(SportsChannel(id, title, "Spor Kanalları", href))
             }
 
+            // a[href*="id="] linkleri
             for (link in document.select("a[href*=\"id=\"]")) {
                 val href = link.absUrl("href")
                 val id = queryParam(href, "id") ?: continue
