@@ -21,6 +21,66 @@
         "fileHash": "sha256-585972ea1c96ce22137dc91543e6c944b529879b644dbcd362b58fa2b2b53cc5"
     },
     {
+    "url": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/builds/ee7ff979ad1b936b287b07a84f75c95900266ed8/SelcukSports.cs3",
+    "status": 3,
+    "version": 11,
+    "name": "SelcukSports",
+    "internalName": "SelcukSports",
+    "authors": [
+      "Wiojelt"
+    ],
+    "description": "🟢 Kaynak: SelçukSports · Emeği için teşekkürler ♥ · @wiojelt",
+    "fileSize": 52784,
+    "repositoryUrl": "https://github.com/Wiojelt/TurkSpor",
+    "language": "tr",
+    "tvTypes": [
+      "Live"
+    ],
+    "iconUrl": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/main/assets/logo.png",
+    "apiVersion": 1,
+    "fileHash": "sha256-9b32e366e2d773a7e21f77c1c34f3926893f8f328818c2ff6397ab47ed57d695"
+  },
+      {
+    "url": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/builds/ee7ff979ad1b936b287b07a84f75c95900266ed8/VivoXSpor.cs3",
+    "status": 3,
+    "version": 2,
+    "name": "VivoXSpor",
+    "internalName": "VivoXSpor",
+    "authors": [
+      "Wiojelt"
+    ],
+    "description": "VivoX uyumlu dinamik spor listesi",
+    "fileSize": 38052,
+    "repositoryUrl": "https://github.com/Wiojelt/TurkSpor",
+    "language": "tr",
+    "tvTypes": [
+      "Live"
+    ],
+    "iconUrl": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/main/assets/logo.png",
+    "apiVersion": 1,
+    "fileHash": "sha256-31e5e01334d05cfb3f0687f6d0232fab37d3599f00cb54ce4c5676486f11ac99"
+  },
+      {
+    "url": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/builds/ee7ff979ad1b936b287b07a84f75c95900266ed8/ArdaSpor.cs3",
+    "status": 3,
+    "version": 10,
+    "name": "ArdaSpor",
+    "internalName": "ArdaSpor",
+    "authors": [
+      "Wiojelt"
+    ],
+    "description": "🟢 Kaynak: ArdaSpor · Emeği için teşekkürler ♥ · @wiojelt",
+    "fileSize": 56704,
+    "repositoryUrl": "https://github.com/Wiojelt/TurkSpor",
+    "language": "tr",
+    "tvTypes": [
+      "Live"
+    ],
+    "iconUrl": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/main/assets/logo.png",
+    "apiVersion": 1,
+    "fileHash": "sha256-7ff975e13719fb976ef984f8d5aa9a25c48f9316b957eba5a2a6ceed44de3097"
+  },
+    {
         "url": "https://raw.githubusercontent.com/UmayTrade/Mytv/builds/AnimeciX.cs3",
         "status": 1,
         "version": 1,
