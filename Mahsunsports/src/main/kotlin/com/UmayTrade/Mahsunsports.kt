@@ -316,15 +316,16 @@ class MahsunSports : MainAPI() {
 
                     for (variant in variants) {
                         callback(
-                            ExtractorLink(
+                            newExtractorLink(
                                 source = name,
                                 name = "${variant.height}p",
                                 url = variant.url,
-                                referer = mainUrl,
-                                quality = variant.height,
-                                headers = headers,
-                                isM3u8 = true
-                            )
+                                type = ExtractorLinkType.M3U8
+                            ) {
+                                this.referer = mainUrl
+                                this.quality = variant.height
+                                this.headers = headers
+                            }
                         )
                         found = true
                     }
@@ -365,15 +366,16 @@ class MahsunSports : MainAPI() {
                     val variants = parseHlsVariants(content, url)
                     for (variant in variants) {
                         callback(
-                            ExtractorLink(
+                            newExtractorLink(
                                 source = name,
                                 name = "${variant.height}p",
                                 url = variant.url,
-                                referer = mainUrl,
-                                quality = variant.height,
-                                headers = headers,
-                                isM3u8 = true
-                            )
+                                type = ExtractorLinkType.M3U8
+                            ) {
+                                this.referer = mainUrl
+                                this.quality = variant.height
+                                this.headers = headers
+                            }
                         )
                     }
                     return true
