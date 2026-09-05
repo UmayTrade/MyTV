@@ -9,7 +9,7 @@ import org.jsoup.Jsoup
 import java.net.URI
 import java.net.URLDecoder
 
-class MahsunSports : MainAPI() {
+class MahsunSportsStream : MainAPI() {
     override var mainUrl = "https://mahsunsports80.xyz/"
     override var name = "MahsunSports"
     override var lang = "tr"
@@ -19,14 +19,14 @@ class MahsunSports : MainAPI() {
 
     // Ana sayfa kategorileri
     override val mainPage = mainPageOf(
-        "${mainUrl}" to "📺 Tüm Kanallar",
-        "${mainUrl}?category=bein" to "beIN Sports",
-        "${mainUrl}?category=ssport" to "S Sport",
-        "${mainUrl}?category=tivibu" to "Tivibu",
-        "${mainUrl}?category=tabii" to "tabii",
-        "${mainUrl}?category=exxen" to "Exxen",
-        "${mainUrl}?category=ulusal" to "Ulusal",
-        "${mainUrl}?category=yabancı" to "Yabancı Spor"
+        Pair("${mainUrl}", "📺 Tüm Kanallar"),
+        Pair("${mainUrl}?category=bein", "beIN Sports"),
+        Pair("${mainUrl}?category=ssport", "S Sport"),
+        Pair("${mainUrl}?category=tivibu", "Tivibu"),
+        Pair("${mainUrl}?category=tabii", "tabii"),
+        Pair("${mainUrl}?category=exxen", "Exxen"),
+        Pair("${mainUrl}?category=ulusal", "Ulusal"),
+        Pair("${mainUrl}?category=yabancı", "Yabancı Spor")
     )
 
     companion object {
@@ -64,18 +64,14 @@ class MahsunSports : MainAPI() {
             return when {
                 // beIN Sports
                 id.startsWith("bs") -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/international/beinsports/old/horizontal/bein-sports-${id.substring(2)}-hz-int.png"
-                // S Sport
                 id == "ss1" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/s-sport-tr.png"
                 id == "ss2" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/s-sport-2-tr.png"
                 id == "ssplus1" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/s-sport-plus-tr.png"
-                // Spor Smart
                 id == "sm1" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/spor-smart-hd-tr.png"
                 id == "sm2" -> "https://i.imgur.com/qyUKCUa.png"
-                // TRT
                 id == "trt1" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/trt-1-tr.png"
                 id == "trts" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/trt-spor-tr.png"
                 id == "trtsy" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/trt-spor-yildiz-tr.png"
-                // Ulusal
                 id == "as" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/a-spor-tr.png"
                 id == "atv" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/atv-tr.png"
                 id == "a2" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/a2-tr.png"
@@ -84,7 +80,6 @@ class MahsunSports : MainAPI() {
                 id == "tv8" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/tv8-tr.png"
                 id == "tv85" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/tv85-tr.png"
                 id == "sptstv" -> "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/turkey/sports-tv-tr.png"
-                // Yabancı
                 id == "es1" -> "https://i.imgur.com/olQJgm7.png"
                 id == "es2" -> "https://i.imgur.com/f56dHgR.png"
                 id == "idm" -> "https://i.imgur.com/fM9FOrZ.png"
@@ -92,10 +87,8 @@ class MahsunSports : MainAPI() {
                 id == "nba" -> "https://upload.wikimedia.org/wikipedia/en/thumb/d/d2/NBA_TV.svg/960px-NBA_TV.svg.png"
                 id == "fb" -> "https://i.imgur.com/qBVqtYd.png"
                 id == "gs" -> "https://i.imgur.com/fC3KuwT.jpg"
-                // tabii ve Exxen
                 id.startsWith("tb") -> "https://cdn.prod.website-files.com/658da28123ee3a39812a40fd/65b199f7f21447f8e9e76a47_tabii-wc.png"
                 id.startsWith("exn") -> "https://upload.wikimedia.org/wikipedia/commons/d/db/Exxen.png"
-                // Tivibu
                 id.startsWith("ts") -> {
                     val index = if (id.length > 2) id.substring(2).toIntOrNull() ?: 0 else 0
                     val images = listOf("qvrKQY3", "qvrKQY3", "fZMSjNE", "xLrgt2O", "LgGxe7z")
@@ -112,7 +105,6 @@ class MahsunSports : MainAPI() {
         try {
             log("getMainPage: ${request.data}")
             
-            // Eğer kategori filtresi varsa, tüm kanalları çekip filtrele
             val category = when {
                 request.data.contains("?category=") -> {
                     request.data.substringAfter("?category=")
@@ -124,7 +116,6 @@ class MahsunSports : MainAPI() {
                 Jsoup.connect(mainUrl).ignoreContentType(true).get()
             }
 
-            // script4.js dosyasını bul
             val scriptUrl = document.select("script[src]").map { it.absUrl("src") }
                 .firstOrNull { it.contains("script4.js") || it.contains("main.js") }
                 ?: return errorResponse("script4.js bulunamadı", request.data)
@@ -135,7 +126,6 @@ class MahsunSports : MainAPI() {
                 try {
                     app.get(scriptUrl).text
                 } catch (e: Exception) {
-                    // Alternatif olarak doğrudan HTML içinde ara
                     document.html()
                 }
             }
@@ -146,7 +136,6 @@ class MahsunSports : MainAPI() {
                 return errorResponse("Kanal bulunamadı", request.data)
             }
 
-            // Kategori filtresi varsa uygula
             val filteredChannels = if (category != null) {
                 channels.filter { category(it.title) == category || it.category == category }
             } else {
@@ -159,53 +148,44 @@ class MahsunSports : MainAPI() {
 
             val grouped = filteredChannels.groupBy { category(it.title) }
             
-            // Sıralı kategoriler
             val order = listOf(
                 "beIN Sports", "S Sport", "S Plus", "Tivibu", "tabii",
                 "Exxen", "Spor Smart", "Ulusal", "Yabancı Spor", "Diğer Spor"
             )
 
-            val homePageList = order.mapNotNull { groupName ->
+            val homePageList = mutableListOf<HomePageList>()
+            
+            for (groupName in order) {
                 val items = grouped[groupName]
-                if (items.isNullOrEmpty()) null
-                else HomePageList(
-                    groupName,
-                    items.map {
-                        newLiveSearchResponse(
-                            it.title,
-                            parser.buildChannelUrl(it.id, it.title),
-                            TvType.Live
-                        ).apply {
-                            posterUrl = getPosterUrl(it.id) ?: ""
-                            // Kanal durumu için plot
-                            plot = "📺 ${it.title}\n🟢 Yayında"
-                        }
+                if (items.isNullOrEmpty()) continue
+                
+                val searchResponses = items.map {
+                    newLiveSearchResponse(
+                        it.title,
+                        parser.buildChannelUrl(it.id, it.title),
+                        TvType.Live
+                    ).apply {
+                        posterUrl = getPosterUrl(it.id) ?: ""
                     }
-                )
+                }
+                
+                homePageList.add(HomePageList(groupName, searchResponses))
             }
 
-            // Eğer hiç grup yoksa tüm kanalları tek listede göster
             if (homePageList.isEmpty()) {
-                return newHomePageResponse(
-                    request.data,
-                    listOf(
-                        HomePageList(
-                            "Tüm Kanallar",
-                            filteredChannels.map {
-                                newLiveSearchResponse(
-                                    it.title,
-                                    parser.buildChannelUrl(it.id, it.title),
-                                    TvType.Live
-                                ).apply {
-                                    posterUrl = getPosterUrl(it.id) ?: ""
-                                }
-                            }
-                        )
-                    )
-                )
+                val searchResponses = filteredChannels.map {
+                    newLiveSearchResponse(
+                        it.title,
+                        parser.buildChannelUrl(it.id, it.title),
+                        TvType.Live
+                    ).apply {
+                        posterUrl = getPosterUrl(it.id) ?: ""
+                    }
+                }
+                homePageList.add(HomePageList("Tüm Kanallar", searchResponses))
             }
 
-            return newHomePageResponse(request.data, homePageList)
+            return HomePageResponse(request.data, homePageList)
         } catch (e: Exception) {
             log("getMainPage error: ${e.message}")
             return errorResponse("Hata: ${e.message}", request.data)
@@ -260,7 +240,6 @@ class MahsunSports : MainAPI() {
             ) {
                 posterUrl = getPosterUrl(channel.id) ?: ""
                 plot = "📺 ${channel.title} canlı yayını\n🔗 Kaynak: MahsunSports\n\n💡 Yayın açılmazsa:\n• WARP (1.1.1.1) kullanın\n• Tarayıcıdan dene"
-                addSubtitle("Türkçe", mainUrl)
             }
         } catch (e: Exception) {
             return null
@@ -276,12 +255,10 @@ class MahsunSports : MainAPI() {
         try {
             val channel = parser.parseChannelUrl(data) ?: return false
 
-            // Ana sayfayı çek
             val document = withContext(Dispatchers.IO) {
                 Jsoup.connect(mainUrl).ignoreContentType(true).get()
             }
 
-            // script4.js'i bul
             val scriptUrl = document.select("script[src]").map { it.absUrl("src") }
                 .firstOrNull { it.contains("script4.js") || it.contains("main.js") }
                 ?: return false
@@ -294,12 +271,10 @@ class MahsunSports : MainAPI() {
                 }
             }
 
-            // Stream URL'lerini al
             val streamUrls = parser.getStreamUrls(scriptContent, channel.player)
             log("Stream URLs: $streamUrls")
 
             if (streamUrls.isEmpty()) {
-                // Alternatif URL'leri dene
                 return tryAlternativeUrls(channel.id, callback)
             }
 
@@ -345,7 +320,6 @@ class MahsunSports : MainAPI() {
         }
     }
 
-    // --- Alternatif URL Dene ---
     private suspend fun tryAlternativeUrls(channelId: String, callback: (ExtractorLink) -> Unit): Boolean {
         val altUrls = listOf(
             "https://mahsunsports.com/hls/$channelId.m3u8",
@@ -389,7 +363,6 @@ class MahsunSports : MainAPI() {
         return false
     }
 
-    // --- HLS Parser ---
     private fun parseHlsVariants(text: String, baseUrl: String): List<HlsVariant> {
         val variants = mutableListOf<HlsVariant>()
         var pending = false
@@ -435,26 +408,19 @@ class MahsunSports : MainAPI() {
             .thenByDescending { it.bandwidth })
     }
 
-    // --- Hata Yanıtı ---
     private fun errorResponse(message: String, request: String): HomePageResponse {
-        return newHomePageResponse(
-            request,
-            listOf(
-                HomePageList(
-                    "⚠️ Hata",
-                    listOf(
-                        newMainPageItem(
-                            "❌ $message",
-                            "",
-                            TvType.Live
-                        ).apply { posterUrl = "" }
-                    )
-                )
-            )
+        val items = listOf(
+            newLiveSearchResponse(
+                "❌ $message",
+                "",
+                TvType.Live
+            ).apply {
+                posterUrl = ""
+            }
         )
+        return HomePageResponse(request, listOf(HomePageList("⚠️ Hata", items)))
     }
 
-    // --- Veri Sınıfları ---
     data class HlsVariant(val url: String, val height: Int, val bandwidth: Long = 0L)
 
     data class SportsChannel(
@@ -465,7 +431,6 @@ class MahsunSports : MainAPI() {
         val time: String = ""
     )
 
-    // --- Parser ---
     inner class SportsParser {
         fun buildChannelUrl(id: String, title: String): String {
             return "https://mahsunsports.com/turkspor?id=${java.net.URLEncoder.encode(id, "UTF-8")}&title=${java.net.URLEncoder.encode(title, "UTF-8")}"
@@ -484,11 +449,9 @@ class MahsunSports : MainAPI() {
         }
 
         fun channels(script: String, base: String): List<SportsChannel> {
-            // Önce script içinde ara
             var match = Regex("const\\s+channels\\s*=\\s*(\\[.*?\\]);", RegexOption.DOT_MATCHES_ALL)
                 .find(script)
             
-            // Bulunamazsa HTML içinde ara
             if (match == null) {
                 match = Regex("channels\\s*=\\s*(\\[.*?\\]);", RegexOption.DOT_MATCHES_ALL)
                     .find(script)
@@ -497,7 +460,6 @@ class MahsunSports : MainAPI() {
             val array = match?.groupValues?.getOrNull(1) ?: return emptyList()
 
             return runCatching {
-                // Basit JSON parse - Jackson olmadan
                 parseJsonArray(array).mapNotNull { row ->
                     val title = row["title"]?.trim() ?: return@mapNotNull null
                     val url = row["url"] ?: return@mapNotNull null
@@ -519,7 +481,6 @@ class MahsunSports : MainAPI() {
             if (!Regex("(androstreamlive|facebooklive)[a-zA-Z0-9]{1,30}").matches(id))
                 return emptyList()
 
-            // HTML içinde baseurls ara
             var match = Regex("const\\s+baseurls\\s*=\\s*(\\[.*?\\]);", RegexOption.DOT_MATCHES_ALL)
                 .find(html)
             
@@ -539,7 +500,6 @@ class MahsunSports : MainAPI() {
         }
 
         private fun parseJsonArray(json: String): List<Map<String, String>> {
-            // Basit JSON array parse
             val result = mutableListOf<Map<String, String>>()
             var current = mutableMapOf<String, String>()
             var key = ""
@@ -584,7 +544,7 @@ class MahsunSports : MainAPI() {
                         value = ""
                     }
                     !inString && c in " \t\n\r" -> {
-                        // Skip whitespace
+                        // Skip
                     }
                     else -> {
                         if (inString || !inObject) {
