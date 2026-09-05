@@ -514,31 +514,26 @@
         "apiVersion": 1,
         "fileHash": "sha256-47761199f454eedb77c205836dc95a274267ba162cce8945cdcdc1af9eb2961e"
     },
-    {
-        "url": "https://raw.githubusercontent.com/UmayTrade/Mytv/builds/InatBox.cs3",
-        "status": 1,
-        "version": 53,
-        "name": "InatBox",
-        "internalName": "InatBox",
-        "authors": [
-            "murattunc05",
-            "feroxx",
-            "JustRelaxable",
-            "keyiflerolsun"
-        ],
-        "description": "\u0130natBox cloudstream eklentisidir. Sevdi\u011finiz yay\u0131n platformlar\u0131n\u0131 ve canl\u0131 ma\u00e7lar\u0131 burada bulabilirsiniz.",
-        "fileSize": 48735,
-        "repositoryUrl": "https://github.com/UmayTrade/Mytv",
-        "language": "tr",
-        "tvTypes": [
-            "Movie",
-            "TvSeries",
-            "Live"
-        ],
-        "iconUrl": "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEh3vCp6N1K4bECoYRQD-cisJF2_6V_Hk01ZhDmoPR2JuM8O5qr4MqrPO1munM9cRlleBBSK6odYhLtDBWv4E3vhPhynlmS5hVVtJZShHoGA5REQ8_3v8SIlccTEqzVQu2UJyNYQdJNrKIfWy66RQeT0D-CcmFCbHPz5023H6p2v5fv4NVloZ5Rqo_yGrIY/s320/iNat-Box-App.png",
-        "apiVersion": 1,
-        "fileHash": "sha256-ebc45991f4fbf0ddddc704a8286a6b9bf3809b92e86bbccfc1360b2593202b61"
-    },
+  {
+    "url": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/builds/ee7ff979ad1b936b287b07a84f75c95900266ed8/InatTV.cs3",
+    "status": 3,
+    "version": 9,
+    "name": "InatTV",
+    "internalName": "InatTV",
+    "authors": [
+      "Wiojelt"
+    ],
+    "description": "🟢 Kaynak: İnat TV · Emeği için teşekkürler ♥ · @wiojelt",
+    "fileSize": 54559,
+    "repositoryUrl": "https://github.com/Wiojelt/TurkSpor",
+    "language": "tr",
+    "tvTypes": [
+      "Live"
+    ],
+    "iconUrl": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/main/assets/logo.png",
+    "apiVersion": 1,
+    "fileHash": "sha256-4fbe7f228e1bcb41501ee6f6243fec49d53b5e1c8d2bb0824d11e72cf0c2e9a7"
+  },
     {
         "url": "https://raw.githubusercontent.com/UmayTrade/Mytv/builds/JetFilmizle.cs3",
         "status": 1,
