@@ -7,6 +7,6 @@ import android.content.Context
 @CloudstreamPlugin
 class MahsunSportsPlugin : Plugin() {
     override fun load(context: Context) {
-        registerMainAPI(MahsunSports())
+        registerMainAPI(MahsunSportsStream())
     }
 }
