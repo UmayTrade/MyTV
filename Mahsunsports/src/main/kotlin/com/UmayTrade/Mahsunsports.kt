@@ -1,14 +1,15 @@
 package com.UmayTrade
 
-import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 import java.net.URI
 import java.net.URLDecoder
+import java.net.URLEncoder
 
 class MahsunSports : MainAPI() {
     override var mainUrl = "https://mahsunsports80.xyz/"
@@ -19,24 +20,10 @@ class MahsunSports : MainAPI() {
     override val supportedTypes = setOf(TvType.Live)
 
     override val mainPage = mainPageOf(
-        "${mainUrl}" to "📺 Tüm Kanallar",
-        "${mainUrl}?category=bein" to "beIN Sports",
-        "${mainUrl}?category=ssport" to "S Sport",
-        "${mainUrl}?category=tivibu" to "Tivibu",
-        "${mainUrl}?category=tabii" to "tabii",
-        "${mainUrl}?category=exxen" to "Exxen",
-        "${mainUrl}?category=ulusal" to "Ulusal",
-        "${mainUrl}?category=yabancı" to "Yabancı Spor"
+        "${mainUrl}" to "📺 Tüm Kanallar"
     )
 
     companion object {
-        private const val TAG = "MahsunSports"
-        private val LOG = false
-
-        private fun log(message: String) {
-            if (LOG) Log.d(TAG, message)
-        }
-
         private fun key(s: String) = Regex("[^a-z0-9]").replace(
             java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD),
             ""
@@ -100,13 +87,6 @@ class MahsunSports : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         try {
-            log("getMainPage: ${request.data}")
-
-            val category = when {
-                request.data.contains("?category=") -> request.data.substringAfter("?category=")
-                else -> null
-            }
-
             val document = withContext(Dispatchers.IO) {
                 Jsoup.connect(mainUrl)
                     .userAgent(USER_AGENT)
@@ -116,70 +96,67 @@ class MahsunSports : MainAPI() {
             }
 
             val channels = parser.channels(document, mainUrl)
-            log("Found ${channels.size} channels total")
-
+            
             if (channels.isEmpty()) {
-                return errorResponse("Kanal bulunamadı", request.data)
+                return newHomePageResponse(
+                    listOf(
+                        HomePageList("Hata", listOf(
+                            newLiveSearchResponse("Kanal bulunamadı", "", TvType.Live)
+                        ))
+                    )
+                )
             }
 
-            val filteredChannels = if (category != null) {
-                channels.filter { category(it.title) == category || it.category == category }
-            } else {
-                channels
-            }
-
-            if (filteredChannels.isEmpty()) {
-                return errorResponse("Bu kategoride kanal bulunamadı", request.data)
-            }
-
-            val grouped = filteredChannels.groupBy { category(it.title) }
+            // Gruplama
+            val grouped = channels.groupBy { category(it.title) }
 
             val order = listOf(
                 "beIN Sports", "S Sport", "S Plus", "Tivibu", "tabii",
                 "Exxen", "Spor Smart", "Ulusal", "Yabancı Spor", "Diğer Spor"
             )
 
-            val homePageList = order.mapNotNull { groupName ->
+            val homePageList = mutableListOf<HomePageList>()
+
+            for (groupName in order) {
                 val items = grouped[groupName]
-                if (items.isNullOrEmpty()) null
-                else HomePageList(
-                    groupName,
-                    items.map {
-                        newLiveSearchResponse(
-                            it.title,
-                            parser.buildChannelUrl(it.id, it.title),
-                            TvType.Live
-                        ) {
-                            posterUrl = getPosterUrl(it.id) ?: ""
-                        }
+                if (items.isNullOrEmpty()) continue
+
+                val searchResponses = items.map {
+                    newLiveSearchResponse(
+                        it.title,
+                        parser.buildChannelUrl(it.id, it.title),
+                        TvType.Live
+                    ).apply {
+                        posterUrl = getPosterUrl(it.id) ?: ""
                     }
-                )
+                }
+
+                homePageList.add(HomePageList(groupName, searchResponses))
             }
 
+            // Eğer hiç grup yoksa tüm kanalları tek listede göster
             if (homePageList.isEmpty()) {
-                return newHomePageResponse(
-                    listOf(
-                        HomePageList(
-                            "Tüm Kanallar",
-                            filteredChannels.map {
-                                newLiveSearchResponse(
-                                    it.title,
-                                    parser.buildChannelUrl(it.id, it.title),
-                                    TvType.Live
-                                ) {
-                                    posterUrl = getPosterUrl(it.id) ?: ""
-                                }
-                            }
-                        )
-                    )
-                )
+                val searchResponses = channels.map {
+                    newLiveSearchResponse(
+                        it.title,
+                        parser.buildChannelUrl(it.id, it.title),
+                        TvType.Live
+                    ).apply {
+                        posterUrl = getPosterUrl(it.id) ?: ""
+                    }
+                }
+                homePageList.add(HomePageList("Tüm Kanallar", searchResponses))
             }
 
             return newHomePageResponse(homePageList)
         } catch (e: Exception) {
-            log("getMainPage error: ${e.message}")
-            e.printStackTrace()
-            return errorResponse("Hata: ${e.message}", request.data)
+            return newHomePageResponse(
+                listOf(
+                    HomePageList("Hata", listOf(
+                        newLiveSearchResponse("Hata: ${e.message}", "", TvType.Live)
+                    ))
+                )
+            )
         }
     }
 
@@ -202,7 +179,7 @@ class MahsunSports : MainAPI() {
                     it.title,
                     parser.buildChannelUrl(it.id, it.title),
                     TvType.Live
-                ) {
+                ).apply {
                     posterUrl = getPosterUrl(it.id) ?: ""
                 }
             }
@@ -221,7 +198,7 @@ class MahsunSports : MainAPI() {
                 url
             ) {
                 posterUrl = getPosterUrl(channel.id) ?: ""
-                plot = "📺 ${channel.title} canlı yayını\n🔗 Kaynak: MahsunSports\n\n💡 Yayın açılmazsa:\n• WARP (1.1.1.1) kullanın\n• Tarayıcıdan dene"
+                plot = "📺 ${channel.title} canlı yayını"
             }
         } catch (e: Exception) {
             return null
@@ -237,6 +214,7 @@ class MahsunSports : MainAPI() {
         try {
             val channel = parser.parseChannelUrl(data) ?: return false
 
+            // HTML'den doğrudan iframe URL'sini al
             val document = withContext(Dispatchers.IO) {
                 Jsoup.connect(mainUrl)
                     .userAgent(USER_AGENT)
@@ -245,99 +223,95 @@ class MahsunSports : MainAPI() {
                     .get()
             }
 
-            val streamUrls = parser.getStreamUrls(document, channel.player)
-            log("Stream URLs found: ${streamUrls.size}")
+            // script4.js'den kanal bilgilerini al
+            val scriptUrl = document.select("script[src]").map { it.absUrl("src") }
+                .firstOrNull { it.contains("script4.js") }
+            
+            if (scriptUrl != null) {
+                val scriptContent = withContext(Dispatchers.IO) {
+                    app.get(scriptUrl, timeout = 15).text
+                }
+                
+                // script4.js'den stream URL'lerini al
+                val streamUrls = parser.parseStreamUrlsFromScript(scriptContent, channel.id)
+                if (streamUrls.isNotEmpty()) {
+                    val headers = mapOf(
+                        "User-Agent" to USER_AGENT,
+                        "Referer" to mainUrl,
+                        "Connection" to "keep-alive"
+                    )
 
-            if (streamUrls.isEmpty()) {
-                return tryAlternativeUrls(channel.id, callback)
-            }
-
-            val headers = mapOf(
-                "User-Agent" to USER_AGENT,
-                "Referer" to mainUrl,
-                "Connection" to "keep-alive"
-            )
-
-            var found = false
-            for (url in streamUrls) {
-                try {
-                    val masterContent = withContext(Dispatchers.IO) {
-                        app.get(url, headers = headers, timeout = 15).text
-                    }
-
-                    val variants = parseHlsVariants(masterContent, url)
-
-                    for (variant in variants) {
-                        callback(
-                            newExtractorLink(
-                                source = name,
-                                name = "${variant.height}p",
-                                url = variant.url,
-                                type = ExtractorLinkType.M3U8
-                            ) {
-                                this.referer = mainUrl
-                                this.quality = variant.height
-                                this.headers = headers
+                    for (url in streamUrls) {
+                        try {
+                            val masterContent = withContext(Dispatchers.IO) {
+                                app.get(url, headers = headers, timeout = 15).text
                             }
-                        )
-                        found = true
+
+                            val variants = parseHlsVariants(masterContent, url)
+
+                            for (variant in variants) {
+                                callback(
+                                    ExtractorLink(
+                                        source = name,
+                                        name = "${variant.height}p",
+                                        url = variant.url,
+                                        referer = mainUrl,
+                                        quality = variant.height,
+                                        type = ExtractorLinkType.M3U8,
+                                        headers = headers
+                                    )
+                                )
+                            }
+                            return true
+                        } catch (e: Exception) {
+                            continue
+                        }
                     }
-                } catch (e: Exception) {
-                    log("Stream error for $url: ${e.message}")
-                    continue
                 }
             }
 
-            return found
+            // Alternatif: HTML'den doğrudan iframe URL'sini bul
+            val iframeUrl = document.select("iframe#customIframe").firstOrNull()?.attr("src")
+            if (!iframeUrl.isNullOrEmpty()) {
+                val fullUrl = if (iframeUrl.startsWith("/")) mainUrl + iframeUrl.substring(1) else iframeUrl
+                callback(
+                    ExtractorLink(
+                        source = name,
+                        name = "Yayın",
+                        url = fullUrl,
+                        referer = mainUrl,
+                        quality = 720,
+                        type = ExtractorLinkType.IFRAME,
+                        headers = mapOf(
+                            "User-Agent" to USER_AGENT,
+                            "Referer" to mainUrl
+                        )
+                    )
+                )
+                return true
+            }
+
+            // Son çare: doğrudan kanal URL'sini dene
+            val directUrl = "https://mahsunsports.com/hls/${channel.id}.m3u8"
+            callback(
+                ExtractorLink(
+                    source = name,
+                    name = "Yayın",
+                    url = directUrl,
+                    referer = mainUrl,
+                    quality = 720,
+                    type = ExtractorLinkType.M3U8,
+                    headers = mapOf(
+                        "User-Agent" to USER_AGENT,
+                        "Referer" to mainUrl
+                    )
+                )
+            )
+            return true
+
         } catch (e: Exception) {
-            log("loadLinks error: ${e.message}")
             return false
         }
-    }
-
-    private suspend fun tryAlternativeUrls(channelId: String, callback: (ExtractorLink) -> Unit): Boolean {
-        val altUrls = listOf(
-            "https://mahsunsports.com/hls/$channelId.m3u8",
-            "https://mahsunsports.com/stream/$channelId.m3u8",
-            "https://mahsunsports80.xyz/hls/$channelId.m3u8",
-            "https://mahsunsports80.xyz/stream/$channelId.m3u8"
-        )
-
-        val headers = mapOf(
-            "User-Agent" to USER_AGENT,
-            "Referer" to mainUrl,
-            "Connection" to "keep-alive"
-        )
-
-        for (url in altUrls) {
-            try {
-                val response = withContext(Dispatchers.IO) {
-                    app.get(url, headers = headers, timeout = 10)
-                }
-                if (response.isSuccessful) {
-                    val content = response.text
-                    val variants = parseHlsVariants(content, url)
-                    for (variant in variants) {
-                        callback(
-                            newExtractorLink(
-                                source = name,
-                                name = "${variant.height}p",
-                                url = variant.url,
-                                type = ExtractorLinkType.M3U8
-                            ) {
-                                this.referer = mainUrl
-                                this.quality = variant.height
-                                this.headers = headers
-                            }
-                        )
-                    }
-                    return true
-                }
-            } catch (e: Exception) {
-                continue
-            }
-        }
-        return false
     }
 
     private fun parseHlsVariants(text: String, baseUrl: String): List<HlsVariant> {
@@ -385,38 +359,19 @@ class MahsunSports : MainAPI() {
             .thenByDescending { it.bandwidth })
     }
 
-    private fun errorResponse(message: String, request: String): HomePageResponse {
-        return newHomePageResponse(
-            listOf(
-                HomePageList(
-                    "⚠️ Hata",
-                    listOf(
-                        newLiveSearchResponse(
-                            "❌ $message",
-                            request,
-                            TvType.Live
-                        ) {
-                            posterUrl = ""
-                        }
-                    )
-                )
-            )
-        )
-    }
-
     data class HlsVariant(val url: String, val height: Int, val bandwidth: Long = 0L)
 
     data class SportsChannel(
         val id: String,
         val title: String,
-        val category: String,
-        val player: String,
+        val category: String = "Spor Kanalları",
+        val player: String = "",
         val time: String = ""
     )
 
     inner class SportsParser {
         fun buildChannelUrl(id: String, title: String): String {
-            return "https://mahsunsports.com/turkspor?id=${java.net.URLEncoder.encode(id, "UTF-8")}&title=${java.net.URLEncoder.encode(title, "UTF-8")}"
+            return "https://mahsunsports.com/turkspor?id=${URLEncoder.encode(id, "UTF-8")}&title=${URLEncoder.encode(title, "UTF-8")}"
         }
 
         fun parseChannelUrl(url: String): SportsChannel? {
@@ -428,73 +383,54 @@ class MahsunSports : MainAPI() {
 
             val id = params["id"] ?: return null
             val title = params["title"] ?: return null
-            return SportsChannel(id, title, "", "")
+            return SportsChannel(id, title)
         }
 
         suspend fun channels(document: Document, base: String): List<SportsChannel> {
-            // Strategy 1: Parse all inline scripts
-            for (script in document.select("script")) {
-                val data = script.data().ifBlank { null } ?: script.html()
-                val parsed = parseChannelsFromText(data, base)
-                if (parsed.isNotEmpty()) {
-                    log("Found ${parsed.size} channels from inline script")
-                    return parsed
-                }
-            }
-
-            // Strategy 2: Fetch and parse external scripts
-            val scriptUrls = document.select("script[src]").map { it.absUrl("src") }
-            for (scriptUrl in scriptUrls) {
+            // 1. script4.js'den kanalları al
+            val scriptUrl = document.select("script[src]").map { it.absUrl("src") }
+                .firstOrNull { it.contains("script4.js") }
+            
+            if (scriptUrl != null) {
                 try {
-                    val text = app.get(scriptUrl, timeout = 15).text
-                    val parsed = parseChannelsFromText(text, base)
+                    val scriptContent = app.get(scriptUrl, timeout = 15).text
+                    val parsed = parseChannelsFromScript(scriptContent, base)
                     if (parsed.isNotEmpty()) {
-                        log("Found ${parsed.size} channels from script: $scriptUrl")
                         return parsed
                     }
                 } catch (_: Exception) { }
             }
 
-            // Strategy 3: Parse HTML directly for channel links
-            val htmlParsed = parseChannelsFromHtml(document, base)
-            if (htmlParsed.isNotEmpty()) {
-                log("Found ${htmlParsed.size} channels from HTML")
-                return htmlParsed
-            }
-
-            // Strategy 4: Search entire HTML as text for JSON arrays
-            val htmlText = document.html()
-            val parsed = parseChannelsFromText(htmlText, base)
-            if (parsed.isNotEmpty()) {
-                log("Found ${parsed.size} channels from full HTML")
-                return parsed
+            // 2. HTML'den doğrudan kanalları al
+            val htmlChannels = parseChannelsFromHtml(document, base)
+            if (htmlChannels.isNotEmpty()) {
+                return htmlChannels
             }
 
             return emptyList()
         }
 
-        private fun parseChannelsFromText(script: String, base: String): List<SportsChannel> {
+        private fun parseChannelsFromScript(script: String, base: String): List<SportsChannel> {
             val patterns = listOf(
                 Regex("""const\s+channels\s*=\s*(\[.*?\]);""", RegexOption.DOT_MATCHES_ALL),
                 Regex("""var\s+channels\s*=\s*(\[.*?\]);""", RegexOption.DOT_MATCHES_ALL),
                 Regex("""let\s+channels\s*=\s*(\[.*?\]);""", RegexOption.DOT_MATCHES_ALL),
                 Regex("""channels\s*=\s*(\[.*?\]);""", RegexOption.DOT_MATCHES_ALL),
-                Regex("""window\.channels\s*=\s*(\[.*?\]);""", RegexOption.DOT_MATCHES_ALL),
-                Regex("""'channels':\s*(\[.*?\])""", RegexOption.DOT_MATCHES_ALL),
-                Regex(""""channels":\s*(\[.*?\])""", RegexOption.DOT_MATCHES_ALL),
             )
 
             for (pattern in patterns) {
                 val match = pattern.find(script) ?: continue
                 val array = match.groupValues.getOrNull(1) ?: continue
+                
                 val parsed = parseJsonArray(array).mapNotNull { row ->
-                    val title = row["title"]?.trim() ?: row["name"]?.trim() ?: return@mapNotNull null
-                    val url = row["url"] ?: row["link"] ?: row["src"] ?: return@mapNotNull null
-                    val player = runCatching { URI(base).resolve(url) }.getOrNull()?.toString() ?: url
-                    val id = queryParam(player, "id") ?: row["id"] ?: return@mapNotNull null
-                    if (id.isBlank()) return@mapNotNull null
-                    SportsChannel(id, title, "Spor Kanalları", player)
+                    val title = row["title"]?.trim() ?: return@mapNotNull null
+                    val url = row["url"] ?: return@mapNotNull null
+                    val id = queryParam(url, "id") ?: return@mapNotNull null
+                    if (id.isBlank() || !Regex("(androstreamlive|facebooklive)[a-zA-Z0-9]{1,30}").matches(id)) 
+                        return@mapNotNull null
+                    SportsChannel(id, title, "Spor Kanalları", url)
                 }.distinctBy { it.id }
+                
                 if (parsed.isNotEmpty()) return parsed
             }
             return emptyList()
@@ -503,81 +439,56 @@ class MahsunSports : MainAPI() {
         private fun parseChannelsFromHtml(document: Document, base: String): List<SportsChannel> {
             val channels = mutableListOf<SportsChannel>()
 
-            // Look for links with id parameter
+            // Mac listesindeki linkler
+            for (link in document.select(".mac.iframeYayin")) {
+                val href = link.attr("data-url")
+                if (href.isBlank()) continue
+                
+                val id = queryParam(href, "id") ?: continue
+                val title = link.select(".takimlar").text().trim()
+                if (title.isBlank()) continue
+                
+                channels.add(SportsChannel(id, title, "Spor Kanalları", href))
+            }
+
+            // Kanal listesindeki linkler
             for (link in document.select("a[href*=\"id=\"]")) {
-                val href = link.absUrl("href").ifEmpty { link.attr("href") }
+                val href = link.absUrl("href")
                 val id = queryParam(href, "id") ?: continue
-                val title = link.text().trim().ifEmpty { link.attr("title") } ?: continue
-                if (title.isBlank()) continue
-                channels.add(SportsChannel(id, title, "Spor Kanalları", href))
-            }
-
-            // Look for elements with data-id
-            for (elem in document.select("[data-id]")) {
-                val id = elem.attr("data-id")
-                val title = elem.text().trim().ifEmpty { elem.attr("title") } ?: continue
-                val href = elem.select("a").firstOrNull()?.absUrl("href") ?: continue
+                val title = link.text().trim()
                 if (title.isBlank() || id.isBlank()) continue
-                channels.add(SportsChannel(id, title, "Spor Kanalları", href))
-            }
-
-            // Look for common channel list patterns
-            for (item in document.select(".channel, .kanal, [class*=channel], [class*=kanal]")) {
-                val link = item.select("a").firstOrNull()
-                val href = link?.absUrl("href") ?: continue
-                val id = queryParam(href, "id") ?: continue
-                val title = link.text().trim().ifEmpty { item.text().trim() } ?: continue
-                if (title.isBlank()) continue
-                channels.add(SportsChannel(id, title, "Spor Kanalları", href))
+                
+                // Zaten eklenmiş mi kontrol et
+                if (channels.none { it.id == id }) {
+                    channels.add(SportsChannel(id, title, "Spor Kanalları", href))
+                }
             }
 
             return channels.distinctBy { it.id }
         }
 
-        suspend fun getStreamUrls(document: Document, player: String): List<String> {
-            val id = queryParam(player, "id") ?: return emptyList()
-
-            // Strategy 1: Look for baseurls in all inline scripts
-            for (script in document.select("script")) {
-                val data = script.data().ifBlank { null } ?: script.html()
-                val urls = parseBaseUrlsFromText(data, id)
-                if (urls.isNotEmpty()) return urls
-            }
-
-            // Strategy 2: Look in external scripts
-            for (scriptUrl in document.select("script[src]").map { it.absUrl("src") }) {
-                try {
-                    val text = app.get(scriptUrl, timeout = 15).text
-                    val urls = parseBaseUrlsFromText(text, id)
-                    if (urls.isNotEmpty()) return urls
-                } catch (_: Exception) { }
-            }
-
-            // Strategy 3: Search entire HTML
-            val urls = parseBaseUrlsFromText(document.html(), id)
-            if (urls.isNotEmpty()) return urls
-
-            return emptyList()
-        }
-
-        private fun parseBaseUrlsFromText(html: String, id: String): List<String> {
+        fun parseStreamUrlsFromScript(script: String, channelId: String): List<String> {
             val patterns = listOf(
                 Regex("""const\s+baseurls\s*=\s*(\[.*?\]);""", RegexOption.DOT_MATCHES_ALL),
                 Regex("""var\s+baseurls\s*=\s*(\[.*?\]);""", RegexOption.DOT_MATCHES_ALL),
                 Regex("""let\s+baseurls\s*=\s*(\[.*?\]);""", RegexOption.DOT_MATCHES_ALL),
                 Regex("""baseurls\s*=\s*(\[.*?\]);""", RegexOption.DOT_MATCHES_ALL),
-                Regex("""window\.baseurls\s*=\s*(\[.*?\]);""", RegexOption.DOT_MATCHES_ALL),
             )
 
             for (pattern in patterns) {
-                val match = pattern.find(html) ?: continue
+                val match = pattern.find(script) ?: continue
                 val array = match.groupValues.getOrNull(1) ?: continue
-                return runCatching {
+                
+                val urls = runCatching {
                     parseJsonArray(array).mapNotNull { baseNode ->
-                        val baseUrl = httpsUrl(baseNode.toString()) ?: return@mapNotNull null
-                        "${baseUrl.trimEnd('/')}/$id.m3u8"
+                        val baseUrl = baseNode.toString().trim().trim('"')
+                        if (baseUrl.isNotEmpty() && baseUrl.startsWith("https://")) {
+                            "${baseUrl.trimEnd('/')}/$channelId.m3u8"
+                        } else null
                     }.distinct()
                 }.getOrDefault(emptyList())
+                
+                if (urls.isNotEmpty()) return urls
             }
             return emptyList()
         }
@@ -627,7 +538,7 @@ class MahsunSports : MainAPI() {
                         value = ""
                     }
                     !inString && c in " \t\n\r" -> {
-                        // Skip whitespace
+                        // Skip
                     }
                     else -> {
                         if (inString || !inObject) {
@@ -643,17 +554,6 @@ class MahsunSports : MainAPI() {
             }
 
             return result
-        }
-
-        private fun httpsUrl(value: String): String? {
-            return runCatching {
-                val clean = value.trim().trim('"').trim()
-                val uri = URI(clean)
-                if (uri.scheme == "https" && uri.host != null) {
-                    return clean
-                }
-                null
-            }.getOrNull()
         }
 
         private fun queryParam(url: String, key: String): String? {
