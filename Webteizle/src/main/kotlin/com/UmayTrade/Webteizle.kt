@@ -12,7 +12,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 
 class Webteizle : MainAPI() {
-    override var mainUrl = "https://webteizle3.xyz"
+    override var mainUrl = "https://webteizle.info"
     override var name = "Webteizle"
     override val hasMainPage = true
     override var lang = "tr"
