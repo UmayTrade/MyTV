@@ -132,7 +132,7 @@ class AsyaKing : MainAPI() {
         return newTvSeriesLoadResponse(title, url, TvType.AsianDrama, episodes) {
             this.posterUrl = poster
             this.plot = description
-            this.score = rating
+            this.score = rating?.let { Score.from100(it) }
             this.year = year
             this.tags = tags
         }
