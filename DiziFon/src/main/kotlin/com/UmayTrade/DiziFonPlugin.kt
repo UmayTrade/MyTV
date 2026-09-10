@@ -6,7 +6,7 @@ import com.lagradost.cloudstream3.plugins.BasePlugin
 @CloudstreamPlugin
 class DiziFonPlugin: BasePlugin() {
     override fun load() {
-        registerMainAPI(DiziFun())
+        registerMainAPI(DiziFon())          // DiziFun -> DiziFon
         registerExtractorAPI(PlayHouse())
     }
 }
