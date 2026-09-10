@@ -4,6 +4,6 @@
   "description": "Plugins Across All Categories and Languages.",
   "manifestVersion": 1,
   "pluginLists": [
-    "https://raw.githubusercontent.com/UmayTrade/MyTV/refs/heads/master/plugins.json"
+    "https://raw.githubusercontent.com/UmayTrade/MyTV/refs/heads/builds/plugins.json"
   ]
 }
