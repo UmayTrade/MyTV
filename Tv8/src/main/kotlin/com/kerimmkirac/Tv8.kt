@@ -34,21 +34,15 @@ class Tv8 : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(mainUrl).document
-        val sections = mutableListOf<HomePageList>()
-
 
         val categoryElement = document.select("li.dropdown")
             .firstOrNull { it.selectFirst("a[title]")?.attr("title")?.equals(request.name, ignoreCase = true) == true }
-            ?: return HomePageResponse(emptyList())
+            ?: return newHomePageResponse(request.name, emptyList(), false)
 
         val items = categoryElement.select("ul.clearfix li")
         val results = items.mapNotNull { it.toMainPageResult() }
 
-        if (results.isNotEmpty()) {
-            sections.add(HomePageList(request.name, results))
-        }
-
-        return HomePageResponse(sections)
+        return newHomePageResponse(request.name, results, hasNext = false)
     }
 
     private fun Element.toMainPageResult(): SearchResponse? {
@@ -240,11 +234,11 @@ class Tv8 : MainAPI() {
 
             val finalEpisodes = allEpisodes.mapIndexed { index, episode ->
                 newEpisode(episode.data) {
-    name = episode.name
-    this.episode = index + 1
-    this.posterUrl = episode.posterUrl
-    date = episode.date
-}
+                    name = episode.name
+                    this.episode = index + 1
+                    this.posterUrl = episode.posterUrl
+                    date = episode.date
+                }
 
             }
 
@@ -262,13 +256,13 @@ class Tv8 : MainAPI() {
             if (allEpisodes.isNotEmpty()) {
                 allEpisodes.sortBy { it.date }
                 val finalEpisodes = allEpisodes.mapIndexed { index, episode ->
-    newEpisode(episode.data) {
-        name = episode.name
-        this.episode = index + 1
-        this.posterUrl = episode.posterUrl
-        date = episode.date
-    }
-}
+                    newEpisode(episode.data) {
+                        name = episode.name
+                        this.episode = index + 1
+                        this.posterUrl = episode.posterUrl
+                        date = episode.date
+                    }
+                }
 
                 Log.d("TV8", "Hata rağmen ${finalEpisodes.size} episode döndürülüyor")
                 return finalEpisodes
@@ -348,11 +342,11 @@ class Tv8 : MainAPI() {
             }
 
             val episode = newEpisode(videoUrl) {
-    name = episodeTitle
-    episode = episodeNumber
-    this.posterUrl = posterUrl
-    date = dateTimestamp
-}
+                name = episodeTitle
+                episode = episodeNumber
+                this.posterUrl = posterUrl
+                date = dateTimestamp
+            }
 
 
             Log.d("TV8", "Episode oluşturuldu: ${episode.name}")
