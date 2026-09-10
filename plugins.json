@@ -19,7 +19,7 @@
         "iconUrl": "https://www.google.com/s2/favicons?sz=64&domain=animeav1.com",
         "apiVersion": 1,
         "fileHash": "sha256-fcf47ba472388c30843a5878f370987f58ceea462597afcadf913dd0ad1d6798"
-    },
+    },    
     {
         "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/AnimeciX.cs3",
         "status": 1,
@@ -40,6 +40,46 @@
         "apiVersion": 1,
         "fileHash": "sha256-f163e34854c77ac97df1291a58161e6418d7b5a4d53ea4f8b581e6e85bb16943"
     },
+        {
+    "url": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/builds/ee7ff979ad1b936b287b07a84f75c95900266ed8/SelcukSports.cs3",
+    "status": 3,
+    "version": 11,
+    "name": "SelcukSports",
+    "internalName": "SelcukSports",
+    "authors": [
+      "Wiojelt"
+    ],
+    "description": "🟢 Kaynak: SelçukSports · Emeği için teşekkürler ♥ · @wiojelt",
+    "fileSize": 52784,
+    "repositoryUrl": "https://github.com/Wiojelt/TurkSpor",
+    "language": "tr",
+    "tvTypes": [
+      "Live"
+    ],
+    "iconUrl": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/main/assets/logo.png",
+    "apiVersion": 1,
+    "fileHash": "sha256-9b32e366e2d773a7e21f77c1c34f3926893f8f328818c2ff6397ab47ed57d695"
+  },
+          {
+    "url": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/builds/ee7ff979ad1b936b287b07a84f75c95900266ed8/ArdaSpor.cs3",
+    "status": 3,
+    "version": 10,
+    "name": "ArdaSpor",
+    "internalName": "ArdaSpor",
+    "authors": [
+      "Wiojelt"
+    ],
+    "description": "🟢 Kaynak: ArdaSpor · Emeği için teşekkürler ♥ · @wiojelt",
+    "fileSize": 56704,
+    "repositoryUrl": "https://github.com/Wiojelt/TurkSpor",
+    "language": "tr",
+    "tvTypes": [
+      "Live"
+    ],
+    "iconUrl": "https://raw.githubusercontent.com/Wiojelt/TurkSpor/main/assets/logo.png",
+    "apiVersion": 1,
+    "fileHash": "sha256-7ff975e13719fb976ef984f8d5aa9a25c48f9316b957eba5a2a6ceed44de3097"
+  },
     {
         "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/Animejara.cs3",
         "status": 1,
