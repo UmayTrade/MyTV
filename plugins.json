@@ -1011,6 +1011,27 @@
         "apiVersion": 1,
         "fileHash": "sha256-85049256a470e8f0dd0ef6c4d02b79a1c70d1ccbb9b227a2aa6df142c9c32ca9"
     },
+        {
+        "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/YabanciDizi.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "YabanciDizi",
+        "internalName": "YabanciDizi",
+        "authors": [
+            "NeO"
+        ],
+        "description": "Yabanc\u0131Dizi - Yabanc\u0131 dizi ve film izleme.",
+        "fileSize": 21800,
+        "repositoryUrl": "https://github.com/UmayTrade/MyTV",
+        "language": "tr",
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "iconUrl": "https://www.google.com/s2/favicons?domain=yabancidizi.news&sz=%size%",
+        "apiVersion": 1,
+        "fileHash": "sha256-8f4527bce7b7be903670deacf4c86506db8bd6d41d5365beecdef099ebd63207"
+    },
     {
         "url": "https://raw.githubusercontent.com/UmayTrade/MyTV/builds/YoTurkish.cs3",
         "status": 1,
