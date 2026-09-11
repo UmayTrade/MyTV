@@ -1,12 +1,12 @@
-package com.kerimmkirac
+package com.UmayTrade
 
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import android.content.Context
 
 @CloudstreamPlugin
-class KanalDPlugin: Plugin() {
+class AtvPlugin : Plugin() {
     override fun load(context: Context) {
-        registerMainAPI(KanalD())
+        registerMainAPI(Atv())
     }
 }
