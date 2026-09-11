@@ -13,7 +13,7 @@ import java.util.*
 
 class KanalD : MainAPI() {
     override var mainUrl              = "https://www.kanald.com.tr"
-    override var name                 = "KanalD"
+    override var name                 = "Kanal D"
     override val hasMainPage          = true
     override var lang                 = "tr"
     override val hasQuickSearch       = false
@@ -21,7 +21,7 @@ class KanalD : MainAPI() {
 
     private var allContentCache: List<SearchResponse> = emptyList()
     private var cacheTime: Long = 0
-    private val cacheValidityDuration = 30 * 60 * 1000 // 30 dakika
+    private val cacheValidityDuration = 30 * 60 * 1000
 
     override val mainPage = mainPageOf(
         "${mainUrl}/diziler" to "Diziler",
@@ -31,11 +31,9 @@ class KanalD : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
+        val items = document.select("div.card, div.item, li.item, article, a[href*='/dizi/'], a[href*='/program/']")
+        val results = items.mapNotNull { it.toMainPageResult() }.distinctBy { it.url }
 
-        val items = document.select("div.card, div.item, li.item, article")
-        val results = items.mapNotNull { it.toMainPageResult() }
-
-        // Deprecated HomePageResponse constructor yerine newHomePageResponse kullanılıyor
         return newHomePageResponse(
             listOf(HomePageList(request.name, results))
         )
@@ -45,8 +43,15 @@ class KanalD : MainAPI() {
         val link = this.selectFirst("a") ?: return null
         val href = fixUrlNull(link.attr("href")) ?: return null
 
-        val title = this.selectFirst("h3, h2, .title, .card-title")?.text()?.trim()
-            ?: link.attr("title").trim()
+        // 改进的标题提取策略
+        val title = link.attr("title").ifEmpty {
+            this.selectFirst("img")?.attr("alt") ?: ""
+        }.ifEmpty {
+            this.selectFirst("h3, h2, .title, .card-title, .name")?.text() ?: ""
+        }.trim()
+
+        if (title.isEmpty()) return null
+
         val poster = this.selectFirst("img")?.let { img ->
             fixUrlNull(img.attr("data-src").ifEmpty { img.attr("src") })
         }
@@ -58,7 +63,6 @@ class KanalD : MainAPI() {
 
     private suspend fun getAllContent(): List<SearchResponse> {
         val currentTime = System.currentTimeMillis()
-
         if (allContentCache.isNotEmpty() && (currentTime - cacheTime) < cacheValidityDuration) {
             return allContentCache
         }
@@ -66,10 +70,9 @@ class KanalD : MainAPI() {
         val allContent = mutableListOf<SearchResponse>()
         try {
             val pagesToScan = listOf("${mainUrl}/diziler", "${mainUrl}/programlar")
-
             for (pageUrl in pagesToScan) {
                 val document = app.get(pageUrl).document
-                val items = document.select("div.card, div.item, li.item, article")
+                val items = document.select("div.card, div.item, li.item, article, a[href*='/dizi/'], a[href*='/program/']")
                 items.forEach { element ->
                     element.toMainPageResult()?.let { allContent.add(it) }
                 }
@@ -87,10 +90,8 @@ class KanalD : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         if (query.isBlank()) return emptyList()
-
         val allContent = getAllContent()
         val searchQuery = query.lowercase(Locale.getDefault())
-
         return allContent.filter {
             it.name.lowercase(Locale.getDefault()).contains(searchQuery)
         }
@@ -100,51 +101,39 @@ class KanalD : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
-
         val title = document.selectFirst("h1")?.text()?.trim() ?: return null
         val poster = fixUrlNull(document.selectFirst("meta[property=og:image]")?.attr("content"))
         val description = document.selectFirst("meta[name=description]")?.attr("content")?.trim()
-        val year = document.selectFirst("span.year, .year")?.text()?.trim()?.toIntOrNull()
 
         val episodes = getEpisodes(document, url)
 
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
             this.posterUrl = poster
             this.plot = description
-            this.year = year
         }
     }
 
     private suspend fun getEpisodes(document: org.jsoup.nodes.Document, baseUrl: String): List<Episode> {
         val allEpisodes = mutableListOf<Episode>()
-
         try {
-            val episodeLinks = document.select("a[href*='/bolumler/'], a[href*='/bolum/']")
+            // 从当前页面和 bölümler 子页面查找
+            val episodeLinks = document.select("a[href*='/bolum/'], a[href*='/bolumler/']")
+            
+            val items = if (episodeLinks.isEmpty()) {
+                val episodePageUrl = if (baseUrl.contains("/bolumler")) baseUrl else "$baseUrl/bolumler"
+                app.get(episodePageUrl).document.select("a[href*='/bolum/'], a[href*='/bolumler/']")
+            } else episodeLinks
 
-            val episodePageUrl = if (episodeLinks.isEmpty()) {
-                if (baseUrl.contains("/bolumler")) baseUrl else "$baseUrl/bolumler"
-            } else {
-                null
-            }
-
-            val docToParse = if (episodePageUrl != null) {
-                app.get(episodePageUrl).document
-            } else {
-                document
-            }
-
-            val items = docToParse.select("a[href*='/bolum/'], a[href*='/bolumler/']").distinctBy { it.attr("href") }
-
-            items.forEachIndexed { index, element ->
+            items.distinctBy { it.attr("href") }.forEachIndexed { index, element ->
                 val href = fixUrlNull(element.attr("href")) ?: return@forEachIndexed
-                val epName = element.text().trim().ifEmpty { "Bölüm ${index + 1}" }
+                val epName = element.attr("title").ifEmpty { element.text() }.trim()
+                    .ifEmpty { "Bölüm ${index + 1}" }
 
                 newEpisode(href) {
                     this.name = epName
                     this.episode = index + 1
                 }?.let { allEpisodes.add(it) }
             }
-
             return allEpisodes.sortedBy { it.episode }
         } catch (e: Exception) {
             Log.e("KanalD", "Bölüm çekme hatası: ${e.message}")
@@ -154,50 +143,53 @@ class KanalD : MainAPI() {
 
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         Log.d("KanalD", "Video data: $data")
-
         try {
             if (data.isBlank()) return false
 
             val document = app.get(data).document
-            val scripts = document.select("script")
             var found = false
 
-            for (script in scripts) {
-                val content = script.data()
-                val patterns = listOf(
-                    Regex("\"videoUrl\"\\s*:\\s*\"([^\"]+)\""),
-                    Regex("\"file\"\\s*:\\s*\"([^\"]+)\""),
-                    Regex("src\\s*=\\s*\"([^\"]+\\.m3u8[^\"]*)\""),
-                    Regex("src\\s*=\\s*\"([^\"]+\\.mp4[^\"]*)\"")
-                )
-
-                for (pattern in patterns) {
-                    val match = pattern.find(content)
-                    if (match != null) {
-                        val videoUrl = match.groupValues[1].replace("\\/", "/")
-                        Log.d("KanalD", "Bulunan video URL: $videoUrl")
-
-                        callback.invoke(
-                            newExtractorLink(
-                                name = this.name,
-                                source = this.name,
-                                url = fixUrl(videoUrl),
-                                type = if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                            ) {
-                                this.referer = mainUrl
-                                this.quality = Qualities.Unknown.value
-                            }
-                        )
-                        found = true
-                    }
+            // 1. 优先尝试 iframe（Kanal D 常用嵌入播放器）
+            val iframe = document.selectFirst("iframe[src]")
+            if (iframe != null) {
+                val embedUrl = fixUrl(iframe.attr("src"))
+                Log.d("KanalD", "Found iframe: $embedUrl")
+                // 交给 Cloudstream 的 extractor 系统处理
+                if (loadExtractor(embedUrl, data, subtitleCallback, callback)) {
+                    found = true
                 }
             }
 
-            val iframe = document.selectFirst("iframe[src*='youtube'], iframe[src*='dailymotion']")
-            if (iframe != null && !found) {
-                val embedUrl = iframe.attr("src")
-                loadExtractor(embedUrl, data, subtitleCallback, callback)
-                found = true
+            // 2. 如果 iframe 没找到或失败，尝试从 script 中提取
+            if (!found) {
+                val scripts = document.select("script")
+                val patterns = listOf(
+                    Regex("\"videoUrl\"\\s*:\\s*\"([^\"]+)\""),
+                    Regex("\"file\"\\s*:\\s*\"([^\"]+)\""),
+                    Regex("src\\s*=\\s*[\"']([^\"']+\\.m3u8[^\"']*)[\"']"),
+                    Regex("src\\s*=\\s*[\"']([^\"']+\\.mp4[^\"']*)[\"']")
+                )
+
+                for (script in scripts) {
+                    val content = script.data()
+                    for (pattern in patterns) {
+                        pattern.find(content)?.let { match ->
+                            val videoUrl = match.groupValues[1].replace("\\/", "/")
+                            Log.d("KanalD", "Found video URL: $videoUrl")
+                            callback.invoke(
+                                newExtractorLink(
+                                    name = this.name,
+                                    source = this.name,
+                                    url = fixUrl(videoUrl),
+                                    type = if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                                ) {
+                                    this.referer = mainUrl
+                                }
+                            )
+                            found = true
+                        }
+                    }
+                }
             }
 
             return found
