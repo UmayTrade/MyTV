@@ -8,7 +8,6 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.json.JSONArray
 import org.json.JSONObject
-import java.text.SimpleDateFormat
 import java.util.*
 
 class KanalD : MainAPI() {
@@ -24,14 +23,15 @@ class KanalD : MainAPI() {
     private val cacheValidityDuration = 30 * 60 * 1000
 
     override val mainPage = mainPageOf(
-        "${mainUrl}/diziler" to "Diziler",
-        "${mainUrl}/programlar" to "Programlar",
-        "${mainUrl}/canli-yayin" to "Canlı Yayın"
+        "${mainUrl}/diziler"    to "Diziler",
+        "${mainUrl}/programlar" to "Programlar"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
-        val items = document.select("div.card, div.item, li.item, article, a[href*='/dizi/'], a[href*='/program/']")
+
+        // Kanal D liste sayfalarında içerikler ".story-card" veya ".item" içindeki <a> linklerinde
+        val items = document.select("section.listing-holder .item, section.listing-holder .story-card, div.listing-holder > div")
         val results = items.mapNotNull { it.toMainPageResult() }.distinctBy { it.url }
 
         return newHomePageResponse(
@@ -40,18 +40,24 @@ class KanalD : MainAPI() {
     }
 
     private fun Element.toMainPageResult(): SearchResponse? {
-        val link = this.selectFirst("a") ?: return null
+        // Bazen <a> kendisi item olabilir, bazen içinde olabilir
+        val link = if (this.tagName() == "a") this else this.selectFirst("a") ?: return null
         val href = fixUrlNull(link.attr("href")) ?: return null
 
-        // 改进的标题提取策略
-        val title = link.attr("title").ifEmpty {
-            this.selectFirst("img")?.attr("alt") ?: ""
-        }.ifEmpty {
-            this.selectFirst("h3, h2, .title, .card-title, .name")?.text() ?: ""
-        }.trim()
+        // Sadece dizi/program sayfalarını al (bolumler/fragmanlar vb. değil)
+        if (!href.matches(Regex(".*kanald\\.com\\.tr/[^/]+$"))) return null
+        if (href.contains("/bolumler") || href.contains("/fragmanlar") ||
+            href.contains("/ozetler") || href.contains("/foto-galeri") ||
+            href.contains("/haber") || href.contains("/oyuncular")) return null
 
-        if (title.isEmpty()) return null
+        // Başlık: önce figcaption > p, sonra h3.title, sonra img alt, sonra link title
+        val title = this.selectFirst("figcaption p, figcaption .title, h3.title, .caption .title")?.text()?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: this.selectFirst("img")?.attr("alt")?.trim()?.takeIf { it.isNotEmpty() }
+            ?: link.attr("title").trim().takeIf { it.isNotEmpty() }
+            ?: return null
 
+        // Poster: data-src veya src
         val poster = this.selectFirst("img")?.let { img ->
             fixUrlNull(img.attr("data-src").ifEmpty { img.attr("src") })
         }
@@ -72,7 +78,7 @@ class KanalD : MainAPI() {
             val pagesToScan = listOf("${mainUrl}/diziler", "${mainUrl}/programlar")
             for (pageUrl in pagesToScan) {
                 val document = app.get(pageUrl).document
-                val items = document.select("div.card, div.item, li.item, article, a[href*='/dizi/'], a[href*='/program/']")
+                val items = document.select("section.listing-holder .item, section.listing-holder .story-card, div.listing-holder > div")
                 items.forEach { element ->
                     element.toMainPageResult()?.let { allContent.add(it) }
                 }
@@ -101,6 +107,7 @@ class KanalD : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
+
         val title = document.selectFirst("h1")?.text()?.trim() ?: return null
         val poster = fixUrlNull(document.selectFirst("meta[property=og:image]")?.attr("content"))
         val description = document.selectFirst("meta[name=description]")?.attr("content")?.trim()
@@ -116,32 +123,47 @@ class KanalD : MainAPI() {
     private suspend fun getEpisodes(document: org.jsoup.nodes.Document, baseUrl: String): List<Episode> {
         val allEpisodes = mutableListOf<Episode>()
         try {
-            // 从当前页面和 bölümler 子页面查找
-            val episodeLinks = document.select("a[href*='/bolum/'], a[href*='/bolumler/']")
-            
+            // Bölümler sayfasında ".story-card" içindeki linkler
+            val episodeLinks = document.select("section.listing-holder a.story-card, section.listing-holder a[href*='/bolumler/']")
+
             val items = if (episodeLinks.isEmpty()) {
+                // Bölümler alt sayfasına git
                 val episodePageUrl = if (baseUrl.contains("/bolumler")) baseUrl else "$baseUrl/bolumler"
-                app.get(episodePageUrl).document.select("a[href*='/bolum/'], a[href*='/bolumler/']")
+                try {
+                    app.get(episodePageUrl).document
+                        .select("section.listing-holder a.story-card, section.listing-holder a[href*='/bolumler/']")
+                } catch (e: Exception) {
+                    emptyList()
+                }
             } else episodeLinks
 
             items.distinctBy { it.attr("href") }.forEachIndexed { index, element ->
                 val href = fixUrlNull(element.attr("href")) ?: return@forEachIndexed
-                val epName = element.attr("title").ifEmpty { element.text() }.trim()
-                    .ifEmpty { "Bölüm ${index + 1}" }
+                // Aynı sayfaya link veriyorsa atla
+                if (href == baseUrl) return@forEachIndexed
+
+                val epName = element.selectFirst("figcaption .title, figcaption p, h3.title")?.text()?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: "Bölüm ${index + 1}"
 
                 newEpisode(href) {
                     this.name = epName
                     this.episode = index + 1
                 }?.let { allEpisodes.add(it) }
             }
-            return allEpisodes.sortedBy { it.episode }
+            return allEpisodes
         } catch (e: Exception) {
             Log.e("KanalD", "Bölüm çekme hatası: ${e.message}")
             return emptyList()
         }
     }
 
-    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
         Log.d("KanalD", "Video data: $data")
         try {
             if (data.isBlank()) return false
@@ -149,38 +171,54 @@ class KanalD : MainAPI() {
             val document = app.get(data).document
             var found = false
 
-            // 1. 优先尝试 iframe（Kanal D 常用嵌入播放器）
-            val iframe = document.selectFirst("iframe[src]")
-            if (iframe != null) {
-                val embedUrl = fixUrl(iframe.attr("src"))
-                Log.d("KanalD", "Found iframe: $embedUrl")
-                // 交给 Cloudstream 的 extractor 系统处理
-                if (loadExtractor(embedUrl, data, subtitleCallback, callback)) {
-                    found = true
-                }
-            }
-
-            // 2. 如果 iframe 没找到或失败，尝试从 script 中提取
-            if (!found) {
-                val scripts = document.select("script")
-                val patterns = listOf(
-                    Regex("\"videoUrl\"\\s*:\\s*\"([^\"]+)\""),
-                    Regex("\"file\"\\s*:\\s*\"([^\"]+)\""),
-                    Regex("src\\s*=\\s*[\"']([^\"']+\\.m3u8[^\"']*)[\"']"),
-                    Regex("src\\s*=\\s*[\"']([^\"']+\\.mp4[^\"']*)[\"']")
-                )
-
-                for (script in scripts) {
-                    val content = script.data()
-                    for (pattern in patterns) {
-                        pattern.find(content)?.let { match ->
-                            val videoUrl = match.groupValues[1].replace("\\/", "/")
-                            Log.d("KanalD", "Found video URL: $videoUrl")
+            // ★ Öncelik 1: JSON-LD içindeki VideoObject > contentUrl (Kanal D'nin asıl yöntemi)
+            val ldJsonScripts = document.select("script[type=application/ld+json]")
+            for (script in ldJsonScripts) {
+                val content = script.data()
+                if (!content.contains("VideoObject") && !content.contains("contentUrl")) continue
+                try {
+                    val json = JSONObject(content)
+                    if (json.optString("@type").contains("VideoObject")) {
+                        val contentUrl = json.optString("contentUrl", "")
+                        if (contentUrl.isNotEmpty()) {
+                            Log.d("KanalD", "JSON-LD contentUrl bulundu: $contentUrl")
                             callback.invoke(
                                 newExtractorLink(
                                     name = this.name,
                                     source = this.name,
-                                    url = fixUrl(videoUrl),
+                                    url = contentUrl,
+                                    type = if (contentUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                                ) {
+                                    this.referer = mainUrl
+                                    this.quality = Qualities.Unknown.value
+                                }
+                            )
+                            found = true
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("KanalD", "JSON-LD parse hatası: ${e.message}")
+                }
+            }
+
+            // ★ Öncelik 2: Regex ile contentUrl / m3u8 arama (yedek)
+            if (!found) {
+                val patterns = listOf(
+                    Regex("\"contentUrl\"\\s*:\\s*\"([^\"]+\\.m3u8[^\"]*)\""),
+                    Regex("\"contentUrl\"\\s*:\\s*\"([^\"]+\\.mp4[^\"]*)\""),
+                    Regex("(https?://[^\"'\\s]+\\.m3u8[^\"'\\s]*)")
+                )
+                for (script in document.select("script")) {
+                    val content = script.data()
+                    for (pattern in patterns) {
+                        pattern.find(content)?.let { match ->
+                            val videoUrl = match.groupValues[1].replace("\\/", "/")
+                            Log.d("KanalD", "Regex ile bulundu: $videoUrl")
+                            callback.invoke(
+                                newExtractorLink(
+                                    name = this.name,
+                                    source = this.name,
+                                    url = videoUrl,
                                     type = if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                                 ) {
                                     this.referer = mainUrl
@@ -188,6 +226,18 @@ class KanalD : MainAPI() {
                             )
                             found = true
                         }
+                    }
+                }
+            }
+
+            // ★ Öncelik 3: iframe embed (Dailymotion vb.)
+            if (!found) {
+                val iframe = document.selectFirst("iframe[src]")
+                if (iframe != null) {
+                    val embedUrl = fixUrl(iframe.attr("src"))
+                    Log.d("KanalD", "iframe bulundu: $embedUrl")
+                    if (loadExtractor(embedUrl, data, subtitleCallback, callback)) {
+                        found = true
                     }
                 }
             }
