@@ -28,6 +28,15 @@ import javax.crypto.Mac
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
+data class ChContent(
+    val chName: String,
+    val chUrl: String,
+    val chImg: String,
+    val chHeaders: String,
+    val chReg: String,
+    val chType: String
+)
+
 class InatBox : MainAPI() {
     override var name = "İnatBox"
     override val hasMainPage = true
