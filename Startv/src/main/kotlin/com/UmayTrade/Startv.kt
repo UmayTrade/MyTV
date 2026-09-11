@@ -6,6 +6,7 @@ import android.util.Log
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.*
 
@@ -21,7 +22,6 @@ class StarTv : MainAPI() {
     private var cacheTime: Long = 0
     private val cacheValidityDuration = 30 * 60 * 1000
 
-    // Star TV'de kullanılan header'lar (403 almamak için)
     private val headers = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -29,48 +29,61 @@ class StarTv : MainAPI() {
         "Referer" to "https://www.startv.com.tr/"
     )
 
-    // Sistem sayfaları - dizi/program olarak gösterilmemeli
+    // Sistem sayfaları
     private val systemPages = setOf(
         "diziler", "programlar", "yayin-akisi", "canli-yayin",
         "haberler", "haber", "arama", "kunye", "iletisim",
         "gizlilik-bildirimi", "veri-politikasi", "site-haritasi",
         "rss-bilgi", "filmler", "fragmanlar", "ekstralar",
-        "foto-galeriler", "oyuncular", "kadro", "bolumler"
+        "foto-galeriler", "oyuncular", "kadro", "bolumler",
+        "fragman", "ozel-videolar", "benzer-diziler"
     )
 
+    // ★ DÜZELTME: /dizi ve /program (diziler/programlar değil)
     override val mainPage = mainPageOf(
-        "${mainUrl}/diziler"    to "Diziler",
-        "${mainUrl}/programlar" to "Programlar"
+        "${mainUrl}/dizi"    to "Diziler",
+        "${mainUrl}/program" to "Programlar"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val results = mutableListOf<SearchResponse>()
 
-        // ★ 1. Ana sayfadaki menüden linkleri al
-        try {
-            val mainDoc = app.get(mainUrl, headers = headers).document
-            val menuSelector = if (request.name == "Diziler") {
-                "div.series-drop .sub-menu-list li a[href], nav a[href*='/dizi/']"
-            } else {
-                "div.program-drop-menu .sub-menu-list li a[href], nav a[href*='/program/']"
-            }
-            mainDoc.select(menuSelector).forEach { element ->
-                element.toMenuItemResult()?.let { results.add(it) }
-            }
-            Log.d("StarTV", "Menüden ${results.size} öğe alındı")
-        } catch (e: Exception) {
-            Log.e("StarTV", "Menü çekme hatası: ${e.message}")
-        }
-
-        // ★ 2. Liste sayfasından da kart linklerini al
+        // ★ Liste sayfasından kart linklerini al
         try {
             val listDoc = app.get(request.data, headers = headers).document
-            listDoc.select("a[href*='/dizi/'], a[href*='/program/']").forEach { element ->
+
+            // HTML'deki poster-card yapısı: <div class="poster-card"> <a href="/dizi/..."> <figure> <img alt="..."/> </figure> </a> </div>
+            listDoc.select("div.poster-card a[href*='/dizi/'], div.poster-card a[href*='/program/']").forEach { element ->
                 element.toListPageResult()?.let { results.add(it) }
             }
-            Log.d("StarTV", "Liste sayfasından toplam ${results.size} öğe alındı")
+
+            // Alternatif selector
+            if (results.isEmpty()) {
+                listDoc.select("a[href*='/dizi/'], a[href*='/program/']").forEach { element ->
+                    element.toListPageResult()?.let { results.add(it) }
+                }
+            }
+
+            Log.d("StarTV", "Liste sayfasından ${results.size} öğe alındı")
         } catch (e: Exception) {
             Log.e("StarTV", "Liste sayfası hatası: ${e.message}")
+        }
+
+        // ★ Menüden de link al (yedek)
+        if (results.isEmpty()) {
+            try {
+                val mainDoc = app.get(mainUrl, headers = headers).document
+                val menuSelector = if (request.name == "Diziler") {
+                    "nav a[href*='/dizi/']"
+                } else {
+                    "nav a[href*='/program/']"
+                }
+                mainDoc.select(menuSelector).forEach { element ->
+                    element.toMenuItemResult()?.let { results.add(it) }
+                }
+            } catch (e: Exception) {
+                Log.e("StarTV", "Menü çekme hatası: ${e.message}")
+            }
         }
 
         val uniqueResults = results.distinctBy { it.url }
@@ -88,22 +101,18 @@ class StarTv : MainAPI() {
         val fullUrl = fixUrlNull(hrefRaw) ?: return null
         if (!fullUrl.contains("startv.com.tr")) return null
 
-        // ★ Star TV URL yapısı: /dizi/tuzlu-kahve veya /program/...
         val path = normalizePath(fullUrl) ?: return null
-        
-        // Path: dizi/tuzlu-kahve formatında olmalı
+
         if (!path.startsWith("dizi/") && !path.startsWith("program/")) return null
-        
-        // Alt sayfaları filtrele (fragmanlar, bolumler, ekstralar vb.)
+
         val segments = path.split("/")
-        if (segments.size != 2) return null  // Sadece /dizi/slug veya /program/slug
-        
+        if (segments.size != 2) return null
+
         val slug = segments[1]
         if (systemPages.contains(slug)) return null
 
         val title = this.text().trim().takeIf { it.isNotEmpty() } ?: return null
 
-        // Menüde poster genelde kardeş <img>'de
         val poster = this.parent()?.selectFirst("img")?.let { img ->
             fixUrlNull(img.attr("data-src").ifEmpty { img.attr("src") })
         }
@@ -122,25 +131,27 @@ class StarTv : MainAPI() {
 
         val path = normalizePath(fullUrl) ?: return null
 
-        // ★ SADECE /dizi/slug veya /program/slug formatında olmalı
+        // ★ SADECE /dizi/slug veya /program/slug
         val segments = path.split("/")
         if (segments.size != 2) return null
-        if (!segments[0].startsWith("dizi") && !segments[0].startsWith("program")) return null
-        
+        if (segments[0] != "dizi" && segments[0] != "program") return null
+
         val slug = segments[1]
         if (systemPages.contains(slug)) return null
 
-        // Resim şart (kart olduğunu doğrular)
-        val img = this.selectFirst("img") ?: return null
-
-        // Başlık
-        val title = this.selectFirst("figcaption p, figcaption .title, h2, h3, .title, .caption")
-            ?.text()?.trim()?.takeIf { it.isNotEmpty() }
-            ?: img.attr("alt")?.trim()?.takeIf { it.isNotEmpty() }
-            ?: this.attr("title").trim().takeIf { it.isNotEmpty() }
+        // ★ HTML yapısı: <div class="poster-card"> <a href="..."> <figure> <img alt="Başkalarının Hayatı" .../> </figure> </a> </div>
+        // img bu elementin içinde veya parent'ında
+        val img = this.selectFirst("img")
+            ?: this.parent()?.selectFirst("img")
             ?: return null
 
-        // Poster
+        // Başlık: img alt'ından veya figcaption'dan
+        val title = img.attr("alt").trim().takeIf { it.isNotEmpty() && it != "null" }
+            ?: this.selectFirst("figcaption, .title, .caption, h2, h3")
+                ?.text()?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return null
+
+        // ★ HTML'de src direkt kullanılıyor (lazy load yok gibi görünüyor)
         val poster = fixUrlNull(
             img.attr("data-src").ifEmpty {
                 img.attr("src").ifEmpty { img.attr("data-lazy-src") }
@@ -154,10 +165,6 @@ class StarTv : MainAPI() {
         }
     }
 
-    /**
-     * URL'yi normalize edip path döndürür.
-     * Örn: "https://www.startv.com.tr/dizi/tuzlu-kahve" -> "dizi/tuzlu-kahve"
-     */
     private fun normalizePath(url: String): String? {
         var path = url
         path = path.replace("https://www.startv.com.tr", "")
@@ -168,7 +175,7 @@ class StarTv : MainAPI() {
         path = path.trim('/')
 
         if (path.isEmpty()) return null
-        if (path.contains(".")) return null  // .jpg, .mp4 vs.
+        if (path.contains(".")) return null
         if (path.length < 2) return null
 
         return path
@@ -182,27 +189,23 @@ class StarTv : MainAPI() {
 
         val allContent = mutableListOf<SearchResponse>()
         try {
-            val pagesToScan = listOf("${mainUrl}/diziler", "${mainUrl}/programlar")
+            // ★ DÜZELTME: /dizi ve /program
+            val pagesToScan = listOf("${mainUrl}/dizi", "${mainUrl}/program")
             for (pageUrl in pagesToScan) {
                 try {
                     val document = app.get(pageUrl, headers = headers).document
-                    document.select("a[href*='/dizi/'], a[href*='/program/']").forEach { element ->
+                    document.select("div.poster-card a[href*='/dizi/'], div.poster-card a[href*='/program/']").forEach { element ->
                         element.toListPageResult()?.let { allContent.add(it) }
+                    }
+                    // Fallback
+                    if (allContent.isEmpty()) {
+                        document.select("a[href*='/dizi/'], a[href*='/program/']").forEach { element ->
+                            element.toListPageResult()?.let { allContent.add(it) }
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e("StarTV", "Sayfa çekme hatası ($pageUrl): ${e.message}")
                 }
-            }
-
-            // Menüden de ekle
-            try {
-                val mainDoc = app.get(mainUrl, headers = headers).document
-                mainDoc.select("nav a[href*='/dizi/'], nav a[href*='/program/']")
-                    .forEach { element ->
-                        element.toMenuItemResult()?.let { allContent.add(it) }
-                    }
-            } catch (e: Exception) {
-                Log.e("StarTV", "Menü çekme hatası: ${e.message}")
             }
 
             val uniqueContent = allContent.distinctBy { it.url }
@@ -230,13 +233,18 @@ class StarTv : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url, headers = headers).document
 
-        // ★ Star TV'de dizi/program sayfası mı yoksa video sayfası mı?
         val path = normalizePath(url) ?: return null
-        
-        // Dizi detay sayfası: /dizi/slug
-        if (path.startsWith("dizi/") && path.split("/").size == 2) {
-            val title = document.selectFirst("h1")?.text()?.trim() ?: return null
+
+        // ★ Dizi/Program detay sayfası: /dizi/slug veya /program/slug
+        if ((path.startsWith("dizi/") || path.startsWith("program/")) && path.split("/").size == 2) {
+            // ★ HTML'de başlık: <h1 class="...">Tuzlu Kahve</h1>
+            val title = document.selectFirst("h1")?.text()?.trim()
+                ?: document.selectFirst("meta[property=og:title]")?.attr("content")?.trim()?.substringBefore("|")
+                ?: return null
+
+            // ★ HTML'de poster: <meta property="og:image" content="https://media.startv.com.tr/star-tv/images/banner(2).jpg"/>
             val poster = fixUrlNull(document.selectFirst("meta[property=og:image]")?.attr("content"))
+
             val description = document.selectFirst("meta[name=description]")?.attr("content")?.trim()
 
             val episodes = getEpisodes(document, url)
@@ -246,8 +254,17 @@ class StarTv : MainAPI() {
                 this.plot = description
             }
         }
-        
-        // Video/bölüm sayfası - tek bölüm olarak işle
+
+        // ★ Bölüm sayfası: /dizi/slug/bolumler/N-bolum
+        // Bu durumda parent diziyi yükleyip bölümü bul
+        if (path.contains("/bolumler/")) {
+            val parentPath = path.substringBefore("/bolumler/")
+            val parentUrl = "$mainUrl/$parentPath"
+            Log.d("StarTV", "Bölüm sayfası, parent'a yönlendiriliyor: $parentUrl")
+            return load(parentUrl)
+        }
+
+        // Diğer - tek bölüm olarak işle
         val title = document.selectFirst("h1")?.text()?.trim()
             ?: document.selectFirst("meta[property=og:title]")?.attr("content")?.trim()
             ?: return null
@@ -269,12 +286,13 @@ class StarTv : MainAPI() {
     private suspend fun getEpisodes(document: org.jsoup.nodes.Document, baseUrl: String): List<Episode> {
         val allEpisodes = mutableListOf<Episode>()
         try {
-            // ★ Star TV bölüm linkleri: /dizi/tuzlu-kahve/1-bolum
-            val episodeLinks = document.select("a[href*='/bolum']")
+            // ★ DÜZELTME: Star TV bölüm linkleri: /dizi/tuzlu-kahve/bolumler/1-bolum
+            // HTML'de: <a href="/dizi/tuzlu-kahve/bolumler/1-bolum">
+            val episodeLinks = document.select("a[href*='/bolumler/']")
                 .filter { element ->
                     val href = element.attr("href")
-                    // "bolum" içermeli ve "-fragman" içermemeli
-                    href.contains("bolum") && !href.contains("fragman")
+                    // "bolumler" içermeli ve "-fragman" içermemeli
+                    href.contains("/bolumler/") && !href.contains("fragman")
                 }
 
             if (episodeLinks.isNotEmpty()) {
@@ -282,65 +300,36 @@ class StarTv : MainAPI() {
                 episodeLinks.distinctBy { it.attr("href") }.forEachIndexed { index, element ->
                     val href = fixUrlNull(element.attr("href")) ?: return@forEachIndexed
 
-                    // Bölüm adını al
-                    val epName = element.selectFirst(".style-01, .style-02, h3, .title, .date")
+                    // Bölüm adını al - HTML'de: <h4 class="video-card-title ...">1. Bölüm</h4>
+                    val epName = element.selectFirst(".video-card-title, h4, h3, .title")
                         ?.text()?.trim()?.takeIf { it.isNotEmpty() }
                         ?: element.text().trim().takeIf { it.isNotEmpty() }
                         ?: "Bölüm ${index + 1}"
 
-                    // Bölüm numarasını URL'den çıkarmaya çalış
+                    // ★ Bölüm numarasını URL'den çıkar: /1-bolum → 1
                     val epNum = Regex("/(\\d+)-bolum").find(href)?.groupValues?.get(1)?.toIntOrNull()
                         ?: (index + 1)
+
+                    // Bölüm posteri - HTML'de: <img alt="1. Bölüm" src="..."/>
+                    val epPoster = element.selectFirst("img")?.let { img ->
+                        fixUrlNull(img.attr("data-src").ifEmpty { img.attr("src") })
+                    }
 
                     newEpisode(href) {
                         this.name = epName
                         this.episode = epNum
+                        this.posterUrl = epPoster
                     }?.let { allEpisodes.add(it) }
                 }
 
-                // Bölüm numarasına göre sırala
                 return allEpisodes.sortedBy { it.episode }
             }
 
-            // ★ Alternatif: AJAX endpoint'lerini dene
-            val slug = baseUrl.substringAfter(mainUrl).trim('/').substringBefore("/")
-            val ajaxUrls = listOf(
-                "$mainUrl/ajax/series/$slug/episodes",
-                "$mainUrl/api/series/$slug/episodes"
-            )
+            // ★ Fragmanları da ekle (isteğe bağlı - "Fragman" kategorisi olarak)
+            val trailerLinks = document.select("a[href*='/fragmanlar/']")
+                .filter { !it.attr("href").contains("tanitim") }
 
-            for (ajaxUrl in ajaxUrls) {
-                try {
-                    val response = app.get(
-                        ajaxUrl,
-                        headers = headers + mapOf(
-                            "X-Requested-With" to "XMLHttpRequest"
-                        )
-                    )
-                    val doc = response.document
-                    val links = doc.select("a[href*='/bolum']")
-                        .filter { !it.attr("href").contains("fragman") }
-                    if (links.isNotEmpty()) {
-                        Log.d("StarTV", "AJAX'den ${links.size} bölüm bulundu: $ajaxUrl")
-                        links.distinctBy { it.attr("href") }.forEachIndexed { index, element ->
-                            val href = fixUrlNull(element.attr("href")) ?: return@forEachIndexed
-                            val epName = element.selectFirst(".style-01, .style-02, h3, .title")
-                                ?.text()?.trim()?.takeIf { it.isNotEmpty() }
-                                ?: "Bölüm ${index + 1}"
-                            val epNum = Regex("/(\\d+)-bolum").find(href)?.groupValues?.get(1)?.toIntOrNull()
-                                ?: (index + 1)
-
-                            newEpisode(href) {
-                                this.name = epName
-                                this.episode = epNum
-                            }?.let { allEpisodes.add(it) }
-                        }
-                        if (allEpisodes.isNotEmpty()) return allEpisodes.sortedBy { it.episode }
-                    }
-                } catch (e: Exception) {
-                    Log.d("StarTV", "AJAX denemesi başarısız ($ajaxUrl): ${e.message}")
-                }
-            }
+            // Not: Fragmanları ayrı bir sezon gibi ekleyebiliriz ama şimdilik atlıyoruz
 
             return emptyList()
         } catch (e: Exception) {
@@ -362,29 +351,25 @@ class StarTv : MainAPI() {
             val document = app.get(data, headers = headers).document
             var found = false
 
-            // ★ Öncelik 1: JSON-LD VideoObject > contentUrl
+            // ★ Öncelik 1: Sayfadaki JSON-LD'de VideoObject varsa (genelde yok)
             val ldJsonScripts = document.select("script[type=application/ld+json]")
             for (script in ldJsonScripts) {
                 val content = script.data()
-                if (!content.contains("VideoObject") && !content.contains("contentUrl")) continue
+                if (!content.contains("VideoObject")) continue
                 try {
+                    // @graph array içinde olabilir
                     val json = JSONObject(content)
-                    if (json.optString("@type").contains("VideoObject")) {
-                        val contentUrl = json.optString("contentUrl", "")
-                        if (contentUrl.isNotEmpty() && contentUrl.startsWith("http")) {
-                            Log.d("StarTV", "JSON-LD contentUrl bulundu: $contentUrl")
-                            callback.invoke(
-                                newExtractorLink(
-                                    name = this.name,
-                                    source = this.name,
-                                    url = contentUrl,
-                                    type = if (contentUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                                ) {
-                                    this.referer = mainUrl
-                                    this.quality = Qualities.Unknown.value
-                                }
-                            )
-                            found = true
+                    val graph = json.optJSONArray("@graph")
+                    if (graph != null) {
+                        for (i in 0 until graph.length()) {
+                            val item = graph.getJSONObject(i)
+                            if (item.optString("@type") == "VideoObject") {
+                                val contentUrl = item.optString("contentUrl", "")
+                                val embedUrl = item.optString("embedUrl", "")
+                                // contentUrl genelde sayfa URL'i, embedUrl de öyle
+                                // thumbnailUrl ve duration var ama video URL yok
+                                Log.d("StarTV", "VideoObject bulundu - contentUrl: $contentUrl, embedUrl: $embedUrl")
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -392,11 +377,51 @@ class StarTv : MainAPI() {
                 }
             }
 
-            // ★ Öncelik 2: Regex ile m3u8 / mp4 ara
+            // ★ Öncelik 2: Player script'lerinde video ID ara
+            // HTML'de: "videoId":"1033394"
+            val videoIdRegex = Regex("\"videoId\"\\s*:\\s*\"?(\\d+)\"?")
+            var videoId: String? = null
+            for (script in document.select("script")) {
+                val content = script.data()
+                videoIdRegex.find(content)?.let { match ->
+                    videoId = match.groupValues[1]
+                    Log.d("StarTV", "Video ID bulundu: $videoId")
+                }
+                // Ayrıca embedded player URL'i ara
+                val playerUrlRegex = Regex("(https?://[^\"'\\s]*(?:player|embed)[^\"'\\s]*)")
+                playerUrlRegex.find(content)?.let { match ->
+                    val playerUrl = match.groupValues[1].replace("\\/", "/")
+                    Log.d("StarTV", "Player URL bulundu: $playerUrl")
+                    // Player'ı extract et
+                    if (loadExtractor(playerUrl, data, subtitleCallback, callback)) {
+                        found = true
+                    }
+                }
+            }
+
+            // ★ Öncelik 3: DygDigital player varsa
+            // HTML'de player: <div id="dyg-player"> ve player-assets.dygdigital.com/prod/js/bundle.js
+            if (!found) {
+                // Player bundle URL'i
+                val playerBundle = "https://player-assets.dygdigital.com/prod/js/bundle.js"
+                // Genelde video kaynağı: https://dygvideo.dygdigital.com/...
+                // Bu kısım API'ye bağlı, doğrudan iframe yoksa zor
+                Log.d("StarTV", "DygDigital player tespit edildi, doğrudan video kaynağı yok")
+            }
+
+            // ★ Öncelik 4: iframe embed
+            val iframe = document.selectFirst("iframe[src]")
+            if (iframe != null && !found) {
+                val embedUrl = fixUrl(iframe.attr("src"))
+                Log.d("StarTV", "iframe bulundu: $embedUrl")
+                if (loadExtractor(embedUrl, data, subtitleCallback, callback)) {
+                    found = true
+                }
+            }
+
+            // ★ Öncelik 5: m3u8/mp4 doğrudan arama (fallback)
             if (!found) {
                 val patterns = listOf(
-                    Regex("\"contentUrl\"\\s*:\\s*\"([^\"]+\\.m3u8[^\"]*)\""),
-                    Regex("\"contentUrl\"\\s*:\\s*\"([^\"]+\\.mp4[^\"]*)\""),
                     Regex("(https?://[^\"'\\s]+\\.m3u8[^\"'\\s]*)"),
                     Regex("(https?://[^\"'\\s]+\\.mp4[^\"'\\s]*)")
                 )
@@ -422,16 +447,8 @@ class StarTv : MainAPI() {
                 }
             }
 
-            // ★ Öncelik 3: iframe embed
             if (!found) {
-                val iframe = document.selectFirst("iframe[src]")
-                if (iframe != null) {
-                    val embedUrl = fixUrl(iframe.attr("src"))
-                    Log.d("StarTV", "iframe bulundu: $embedUrl")
-                    if (loadExtractor(embedUrl, data, subtitleCallback, callback)) {
-                        found = true
-                    }
-                }
+                Log.w("StarTV", "Hiçbir video kaynağı bulunamadı: $data")
             }
 
             return found
