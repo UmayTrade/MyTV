@@ -14,5 +14,5 @@ cloudstream {
     **/
     status  = 1 // will be 3 if unspecified
     tvTypes = listOf("TvSeries")
-    iconUrl = "https://www.google.com/s2/favicons?domain=www.tv8.com.tr&sz=%size%"
+    iconUrl = "https://w1.pngwing.com/pngs/291/105/png-transparent-cartoon-network-logo-kanal-d-television-television-channel-kanal-7-serial-live-television-blue-thumbnail.png"
 }
