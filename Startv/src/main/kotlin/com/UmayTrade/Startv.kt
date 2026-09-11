@@ -21,7 +21,7 @@ class StarTv : MainAPI() {
     private var cacheTime: Long = 0
     private val cacheValidityDuration = 30 * 60 * 1000
 
-    // ★ DygDigital API sabitleri
+    // ★ DygDigital API sabitleri (doğrulanmış)
     private val dygPublisherId = "1"
     private val dygSecretKey   = "NtvApiSecret2014*"
     private val dygApiBase     = "https://dygvideo.dygdigital.com/api/redirect"
@@ -318,10 +318,10 @@ class StarTv : MainAPI() {
 
     /**
      * ★ Sayfa HTML'inden video ID'sini çıkarır
-     * Star TV, JSON-LD veya script içinde "videoId":"1033394" veya benzeri bir alan kullanır
+     * Birden fazla yöntem dener
      */
     private fun extractVideoId(document: org.jsoup.nodes.Document): String? {
-        // 1. Doğrudan "videoId":"XXXXX" pattern'i ara
+        // 1. "videoId":"XXXXX" pattern'i
         val videoIdRegex = Regex("\"videoId\"\\s*:\\s*\"?(\\d+)\"?")
         for (script in document.select("script")) {
             val content = script.data()
@@ -332,18 +332,18 @@ class StarTv : MainAPI() {
             }
         }
 
-        // 2. JSON-LD'de referenceId veya contentId ara
-        for (script in document.select("script[type=application/ld+json]")) {
+        // 2. "referenceId":"XXXXX" pattern'i
+        val refRegex = Regex("\"referenceId\"\\s*:\\s*\"?(\\d+|[A-Za-z0-9_]+)\"?")
+        for (script in document.select("script")) {
             val content = script.data()
-            val refRegex = Regex("\"(?:referenceId|contentId|videoId)\"\\s*:\\s*\"?(\\d+)\"?")
             refRegex.find(content)?.let { match ->
                 val id = match.groupValues[1]
-                Log.d("StarTV", "JSON-LD'den ID bulundu: $id")
+                Log.d("StarTV", "referenceId bulundu: $id")
                 return id
             }
         }
 
-        // 3. data-video-id attribute'u ara
+        // 3. data-video-id attribute'u
         document.select("[data-video-id]").firstOrNull()?.let { el ->
             val id = el.attr("data-video-id").trim()
             if (id.isNotEmpty()) {
@@ -352,16 +352,22 @@ class StarTv : MainAPI() {
             }
         }
 
-        // 4. Player div'inde ID ara
-        document.select("#dyg-player, [id*=player]").firstOrNull()?.let { el ->
+        // 4. dyg-player div'i içinde ID ara
+        document.select("#dyg-player, [id*=player], [class*=player]").firstOrNull()?.let { el ->
             el.attributes().forEach { attr ->
-                if (attr.key.contains("video", ignoreCase = true) || attr.key.contains("id", ignoreCase = true)) {
-                    val value = attr.value.trim()
-                    if (value.matches(Regex("\\d+"))) {
-                        Log.d("StarTV", "Player attribute'tan ID bulundu: $value")
-                        return value
-                    }
+                val value = attr.value.trim()
+                if (value.matches(Regex("\\d+"))) {
+                    Log.d("StarTV", "Player attribute'tan ID bulundu: ${attr.key}=$value")
+                    return value
                 }
+            }
+        }
+
+        // 5. URL'den ID çıkar: /bolumler/2-bolum -> 2
+        document.select("link[rel=canonical]").firstOrNull()?.attr("href")?.let { canonical ->
+            Regex("/(\\d+)-bolum").find(canonical)?.let { match ->
+                Log.d("StarTV", "Canonical'dan ID bulundu: ${match.groupValues[1]}")
+                return match.groupValues[1]
             }
         }
 
@@ -384,66 +390,73 @@ class StarTv : MainAPI() {
             val document = app.get(data, headers = headers).document
             var found = false
 
-            // ★ ÖNCELİK 1: DygDigital API üzerinden video ID çıkar ve m3u8 oluştur
+            // ★ ÖNCELİK 1: DygDigital API üzerinden m3u8
             val videoId = extractVideoId(document)
             if (videoId != null) {
-                // ★ ReferenceId formatı: StarTV_{ID}
-                val referenceId = if (videoId.startsWith("StarTV_")) videoId else "StarTV_$videoId"
-                val dygUrl = buildDygUrl(referenceId)
-                Log.d("StarTV", "DygDigital m3u8 URL: $dygUrl")
-
-                callback.invoke(
-                    newExtractorLink(
-                        name = this.name,
-                        source = this.name,
-                        url = dygUrl,
-                        type = ExtractorLinkType.M3U8
-                    ) {
-                        this.referer = mainUrl
-                        this.quality = Qualities.Unknown.value
-                    }
+                // Denenecek ReferenceId formatları
+                val referenceFormats = listOf(
+                    "StarTV_$videoId",   // Doğrulanmış format
+                    videoId,              // Sadece ID
+                    "StarTV_${videoId}_1" // Alternatif
                 )
-                found = true
-            } else {
-                Log.w("StarTV", "Video ID bulunamadı, alternatif yöntemler denenecek")
-            }
 
-            // ★ ÖNCELİK 2: JSON-LD VideoObject embedUrl varsa kontrol et
-            if (!found) {
-                for (script in document.select("script[type=application/ld+json]")) {
-                    val content = script.data()
-                    if (!content.contains("VideoObject")) continue
+                for (refId in referenceFormats) {
+                    val dygUrl = buildDygUrl(refId)
+                    Log.d("StarTV", "DygDigital deneme: $dygUrl")
+
                     try {
-                        val json = JSONObject(content)
-                        val graph = json.optJSONArray("@graph")
-                        if (graph != null) {
-                            for (i in 0 until graph.length()) {
-                                val item = graph.getJSONObject(i)
-                                if (item.optString("@type") == "VideoObject") {
-                                    val embedUrl = item.optString("embedUrl", "")
-                                    val contentUrl = item.optString("contentUrl", "")
-                                    Log.d("StarTV", "JSON-LD VideoObject: embed=$embedUrl, content=$contentUrl")
+                        // URL'in geçerli olup olmadığını test et
+                        val testResponse = app.get(
+                            dygUrl,
+                            headers = headers + mapOf("Referer" to mainUrl),
+                            allowRedirects = true
+                        )
+
+                        val finalUrl = testResponse.url
+                        val responseText = testResponse.text
+
+                        Log.d("StarTV", "DygDigital yanıt: ${finalUrl.take(100)}")
+                        Log.d("StarTV", "Yanıt içeriği: ${responseText.take(200)}")
+
+                        // Eğer m3u8 içeriği geldiyse veya redirect başarılıysa
+                        if (responseText.contains("#EXTM3U") || finalUrl.contains(".m3u8")) {
+                            val m3u8Url = if (finalUrl.contains(".m3u8")) finalUrl else dygUrl
+                            Log.d("StarTV", "✓ DygDigital m3u8 bulundu: $m3u8Url")
+
+                            callback.invoke(
+                                newExtractorLink(
+                                    name = this.name,
+                                    source = this.name,
+                                    url = m3u8Url,
+                                    type = ExtractorLinkType.M3U8
+                                ) {
+                                    this.referer = mainUrl
+                                    this.quality = Qualities.Unknown.value
                                 }
-                            }
+                            )
+                            found = true
+                            break
                         }
                     } catch (e: Exception) {
-                        Log.e("StarTV", "JSON-LD parse hatası: ${e.message}")
+                        Log.d("StarTV", "DygDigital deneme başarısız ($refId): ${e.message}")
                     }
                 }
             }
 
-            // ★ ÖNCELİK 3: HTML'de doğrudan m3u8/mp4 ara (fallback)
+            // ★ ÖNCELİK 2: HTML'de doğrudan m3u8/mp4 ara
             if (!found) {
+                Log.d("StarTV", "DygDigital başarısız, HTML'de m3u8 aranıyor...")
                 val patterns = listOf(
                     Regex("(https?://[^\"'\\s]+\\.m3u8[^\"'\\s]*)"),
-                    Regex("(https?://[^\"'\\s]+\\.mp4[^\"'\\s]*)")
+                    Regex("(https?://[^\"'\\s]+\\.mp4[^\"'\\s]*)"),
+                    Regex("(https?://startv\\.akamaized\\.net/[^\"'\\s]+)")
                 )
                 for (script in document.select("script")) {
                     val content = script.data()
                     for (pattern in patterns) {
                         pattern.find(content)?.let { match ->
                             val videoUrl = match.groupValues[1].replace("\\/", "/")
-                            Log.d("StarTV", "Regex ile bulundu: $videoUrl")
+                            Log.d("StarTV", "✓ Regex ile bulundu: $videoUrl")
                             callback.invoke(
                                 newExtractorLink(
                                     name = this.name,
@@ -456,6 +469,42 @@ class StarTv : MainAPI() {
                             )
                             found = true
                         }
+                    }
+                }
+            }
+
+            // ★ ÖNCELİK 3: JSON-LD'de contentUrl varsa
+            if (!found) {
+                for (script in document.select("script[type=application/ld+json]")) {
+                    val content = script.data()
+                    if (!content.contains("VideoObject")) continue
+                    try {
+                        val json = JSONObject(content)
+                        val graph = json.optJSONArray("@graph")
+                        if (graph != null) {
+                            for (i in 0 until graph.length()) {
+                                val item = graph.getJSONObject(i)
+                                if (item.optString("@type") == "VideoObject") {
+                                    val contentUrl = item.optString("contentUrl", "")
+                                    if (contentUrl.isNotEmpty() && contentUrl.contains(".m3u8")) {
+                                        Log.d("StarTV", "✓ JSON-LD'den: $contentUrl")
+                                        callback.invoke(
+                                            newExtractorLink(
+                                                name = this.name,
+                                                source = this.name,
+                                                url = contentUrl,
+                                                type = ExtractorLinkType.M3U8
+                                            ) {
+                                                this.referer = mainUrl
+                                            }
+                                        )
+                                        found = true
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("StarTV", "JSON-LD hatası: ${e.message}")
                     }
                 }
             }
