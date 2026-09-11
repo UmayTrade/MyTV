@@ -24,7 +24,6 @@ class KanalD : MainAPI() {
 
     override val mainPage = mainPageOf(
         "${mainUrl}/diziler"    to "Diziler",
-        "${mainUrl}/retro-d" to "Retro-D",
         "${mainUrl}/programlar" to "Programlar"
     )
 
