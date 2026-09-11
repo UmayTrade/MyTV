@@ -6,7 +6,6 @@ import android.util.Log
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -14,7 +13,7 @@ import java.util.*
 
 class KanalD : MainAPI() {
     override var mainUrl              = "https://www.kanald.com.tr"
-    override var name                 = "Kanal D"
+    override var name                 = "KanalD"
     override val hasMainPage          = true
     override var lang                 = "tr"
     override val hasQuickSearch       = false
@@ -32,25 +31,21 @@ class KanalD : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
-        val sections = mutableListOf<HomePageList>()
 
-        // Kanal D ana sayfa ve liste sayfalarında içerikleri toplama stratejisi
         val items = document.select("div.card, div.item, li.item, article")
         val results = items.mapNotNull { it.toMainPageResult() }
 
-        if (results.isNotEmpty()) {
-            sections.add(HomePageList(request.name, results))
-        }
-
-        return HomePageResponse(sections)
+        // Deprecated HomePageResponse constructor yerine newHomePageResponse kullanılıyor
+        return newHomePageResponse(
+            listOf(HomePageList(request.name, results))
+        )
     }
 
     private fun Element.toMainPageResult(): SearchResponse? {
         val link = this.selectFirst("a") ?: return null
         val href = fixUrlNull(link.attr("href")) ?: return null
-        
-        // Başlık ve resim çekme (Kanal D class yapısına göre tahmini)
-        val title = this.selectFirst("h3, h2, .title, .card-title")?.text()?.trim() 
+
+        val title = this.selectFirst("h3, h2, .title, .card-title")?.text()?.trim()
             ?: link.attr("title").trim()
         val poster = this.selectFirst("img")?.let { img ->
             fixUrlNull(img.attr("data-src").ifEmpty { img.attr("src") })
@@ -70,9 +65,8 @@ class KanalD : MainAPI() {
 
         val allContent = mutableListOf<SearchResponse>()
         try {
-            // Kanal D'de diziler ve programlar sayfalarını tarayarak önbellek oluşturuyoruz
             val pagesToScan = listOf("${mainUrl}/diziler", "${mainUrl}/programlar")
-            
+
             for (pageUrl in pagesToScan) {
                 val document = app.get(pageUrl).document
                 val items = document.select("div.card, div.item, li.item, article")
@@ -93,12 +87,12 @@ class KanalD : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         if (query.isBlank()) return emptyList()
-        
+
         val allContent = getAllContent()
         val searchQuery = query.lowercase(Locale.getDefault())
-        
-        return allContent.filter { 
-            it.name.lowercase(Locale.getDefault()).contains(searchQuery) 
+
+        return allContent.filter {
+            it.name.lowercase(Locale.getDefault()).contains(searchQuery)
         }
     }
 
@@ -112,7 +106,6 @@ class KanalD : MainAPI() {
         val description = document.selectFirst("meta[name=description]")?.attr("content")?.trim()
         val year = document.selectFirst("span.year, .year")?.text()?.trim()?.toIntOrNull()
 
-        // Bölümleri çekme mantığı
         val episodes = getEpisodes(document, url)
 
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
@@ -124,12 +117,10 @@ class KanalD : MainAPI() {
 
     private suspend fun getEpisodes(document: org.jsoup.nodes.Document, baseUrl: String): List<Episode> {
         val allEpisodes = mutableListOf<Episode>()
-        
+
         try {
-            // Kanal D bölüm listesi genellikle "bolumler" linki altındadır veya sayfada listelenir
             val episodeLinks = document.select("a[href*='/bolumler/'], a[href*='/bolum/']")
-            
-            // Eğer sayfada direkt bölüm linkleri yoksa, bölümler sayfasına gitmeyi dene
+
             val episodePageUrl = if (episodeLinks.isEmpty()) {
                 if (baseUrl.contains("/bolumler")) baseUrl else "$baseUrl/bolumler"
             } else {
@@ -143,11 +134,11 @@ class KanalD : MainAPI() {
             }
 
             val items = docToParse.select("a[href*='/bolum/'], a[href*='/bolumler/']").distinctBy { it.attr("href") }
-            
+
             items.forEachIndexed { index, element ->
                 val href = fixUrlNull(element.attr("href")) ?: return@forEachIndexed
                 val epName = element.text().trim().ifEmpty { "Bölüm ${index + 1}" }
-                
+
                 newEpisode(href) {
                     this.name = epName
                     this.episode = index + 1
@@ -167,30 +158,25 @@ class KanalD : MainAPI() {
         try {
             if (data.isBlank()) return false
 
-            // Kanal D için link çıkarma stratejisi
-            // Genellikle sayfa içinde "videoUrl" veya "m3u8" veya YouTube embed bulunur.
             val document = app.get(data).document
-            
-            // 1. Doğrudan MP4 / M3U8 arama
             val scripts = document.select("script")
             var found = false
-            
+
             for (script in scripts) {
                 val content = script.data()
-                // Regex ile video linklerini ara
                 val patterns = listOf(
                     Regex("\"videoUrl\"\\s*:\\s*\"([^\"]+)\""),
                     Regex("\"file\"\\s*:\\s*\"([^\"]+)\""),
                     Regex("src\\s*=\\s*\"([^\"]+\\.m3u8[^\"]*)\""),
                     Regex("src\\s*=\\s*\"([^\"]+\\.mp4[^\"]*)\"")
                 )
-                
+
                 for (pattern in patterns) {
                     val match = pattern.find(content)
                     if (match != null) {
                         val videoUrl = match.groupValues[1].replace("\\/", "/")
                         Log.d("KanalD", "Bulunan video URL: $videoUrl")
-                        
+
                         callback.invoke(
                             newExtractorLink(
                                 name = this.name,
@@ -206,8 +192,7 @@ class KanalD : MainAPI() {
                     }
                 }
             }
-            
-            // 2. YouTube veya harici embed kontrolü
+
             val iframe = document.selectFirst("iframe[src*='youtube'], iframe[src*='dailymotion']")
             if (iframe != null && !found) {
                 val embedUrl = iframe.attr("src")
