@@ -21,7 +21,7 @@ class StarTv : MainAPI() {
     private var cacheTime: Long = 0
     private val cacheValidityDuration = 30 * 60 * 1000
 
-    // ★ DygDigital API sabitleri (doğrulanmış)
+    // ★ DygDigital API sabitleri
     private val dygPublisherId = "1"
     private val dygSecretKey   = "NtvApiSecret2014*"
     private val dygApiBase     = "https://dygvideo.dygdigital.com/api/redirect"
@@ -62,26 +62,8 @@ class StarTv : MainAPI() {
                     element.toListPageResult()?.let { results.add(it) }
                 }
             }
-
-            Log.d("StarTV", "Liste sayfasından ${results.size} öğe alındı")
         } catch (e: Exception) {
             Log.e("StarTV", "Liste sayfası hatası: ${e.message}")
-        }
-
-        if (results.isEmpty()) {
-            try {
-                val mainDoc = app.get(mainUrl, headers = headers).document
-                val menuSelector = if (request.name == "Diziler") {
-                    "nav a[href*='/dizi/']"
-                } else {
-                    "nav a[href*='/program/']"
-                }
-                mainDoc.select(menuSelector).forEach { element ->
-                    element.toMenuItemResult()?.let { results.add(it) }
-                }
-            } catch (e: Exception) {
-                Log.e("StarTV", "Menü çekme hatası: ${e.message}")
-            }
         }
 
         val uniqueResults = results.distinctBy { it.url }
@@ -90,33 +72,6 @@ class StarTv : MainAPI() {
         return newHomePageResponse(
             listOf(HomePageList(request.name, uniqueResults))
         )
-    }
-
-    private fun Element.toMenuItemResult(): SearchResponse? {
-        val hrefRaw = this.attr("href")
-        if (hrefRaw.isBlank()) return null
-
-        val fullUrl = fixUrlNull(hrefRaw) ?: return null
-        if (!fullUrl.contains("startv.com.tr")) return null
-
-        val path = normalizePath(fullUrl) ?: return null
-        if (!path.startsWith("dizi/") && !path.startsWith("program/")) return null
-
-        val segments = path.split("/")
-        if (segments.size != 2) return null
-
-        val slug = segments[1]
-        if (systemPages.contains(slug)) return null
-
-        val title = this.text().trim().takeIf { it.isNotEmpty() } ?: return null
-
-        val poster = this.parent()?.selectFirst("img")?.let { img ->
-            fixUrlNull(img.attr("data-src").ifEmpty { img.attr("src") })
-        }
-
-        return newMovieSearchResponse(title, fullUrl, TvType.TvSeries) {
-            this.posterUrl = poster
-        }
     }
 
     private fun Element.toListPageResult(): SearchResponse? {
@@ -148,8 +103,6 @@ class StarTv : MainAPI() {
                 img.attr("src").ifEmpty { img.attr("data-lazy-src") }
             }
         )
-
-        Log.d("StarTV", "  ✓ [$path] → $title")
 
         return newMovieSearchResponse(title, fullUrl, TvType.TvSeries) {
             this.posterUrl = poster
@@ -200,7 +153,6 @@ class StarTv : MainAPI() {
             val uniqueContent = allContent.distinctBy { it.url }
             allContentCache = uniqueContent
             cacheTime = currentTime
-            Log.d("StarTV", "getAllContent: ${uniqueContent.size} öğe önbelleğe alındı")
             return uniqueContent
         } catch (e: Exception) {
             Log.e("StarTV", "İçerik toplanırken hata: ${e.message}")
@@ -221,7 +173,6 @@ class StarTv : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url, headers = headers).document
-
         val path = normalizePath(url) ?: return null
 
         if ((path.startsWith("dizi/") || path.startsWith("program/")) && path.split("/").size == 2) {
@@ -243,13 +194,10 @@ class StarTv : MainAPI() {
         if (path.contains("/bolumler/")) {
             val parentPath = path.substringBefore("/bolumler/")
             val parentUrl = "$mainUrl/$parentPath"
-            Log.d("StarTV", "Bölüm sayfası, parent'a yönlendiriliyor: $parentUrl")
             return load(parentUrl)
         }
 
-        val title = document.selectFirst("h1")?.text()?.trim()
-            ?: document.selectFirst("meta[property=og:title]")?.attr("content")?.trim()
-            ?: return null
+        val title = document.selectFirst("h1")?.text()?.trim() ?: return null
         val poster = fixUrlNull(document.selectFirst("meta[property=og:image]")?.attr("content"))
         val description = document.selectFirst("meta[name=description]")?.attr("content")?.trim()
 
@@ -275,7 +223,6 @@ class StarTv : MainAPI() {
                 }
 
             if (episodeLinks.isNotEmpty()) {
-                Log.d("StarTV", "Statik ${episodeLinks.size} bölüm linki bulundu")
                 episodeLinks.distinctBy { it.attr("href") }.forEachIndexed { index, element ->
                     val href = fixUrlNull(element.attr("href")) ?: return@forEachIndexed
 
@@ -300,7 +247,6 @@ class StarTv : MainAPI() {
 
                 return allEpisodes.sortedBy { it.episode }
             }
-
             return emptyList()
         } catch (e: Exception) {
             Log.e("StarTV", "Bölüm çekme hatası: ${e.message}")
@@ -309,69 +255,227 @@ class StarTv : MainAPI() {
     }
 
     /**
-     * ★ DygDigital API üzerinden m3u8 linki oluşturur
-     * Format: https://dygvideo.dygdigital.com/api/redirect?PublisherId=1&ReferenceId=StarTV_{ID}&SecretKey=NtvApiSecret2014*&.m3u8
+     * ★ DygDigital API URL'i oluşturur
+     * Doğrulanmış format: PublisherId + ReferenceId + SecretKey + .m3u8
      */
     private fun buildDygUrl(referenceId: String): String {
         return "$dygApiBase?PublisherId=$dygPublisherId&ReferenceId=$referenceId&SecretKey=$dygSecretKey&.m3u8"
     }
 
     /**
-     * ★ Sayfa HTML'inden video ID'sini çıkarır
-     * Birden fazla yöntem dener
+     * ★ Video ID çıkarma - 6 farklı yöntem
+     * Star TV, HTML'de video ID'sini saklar: "videoId":"1033394"
      */
     private fun extractVideoId(document: org.jsoup.nodes.Document): String? {
-        // 1. "videoId":"XXXXX" pattern'i
+        // 1. "videoId":"XXXXX"
         val videoIdRegex = Regex("\"videoId\"\\s*:\\s*\"?(\\d+)\"?")
         for (script in document.select("script")) {
-            val content = script.data()
-            videoIdRegex.find(content)?.let { match ->
-                val id = match.groupValues[1]
-                Log.d("StarTV", "videoId bulundu: $id")
-                return id
+            videoIdRegex.find(script.data())?.let {
+                Log.d("StarTV", "✓ videoId bulundu: ${it.groupValues[1]}")
+                return it.groupValues[1]
             }
         }
 
-        // 2. "referenceId":"XXXXX" pattern'i
-        val refRegex = Regex("\"referenceId\"\\s*:\\s*\"?(\\d+|[A-Za-z0-9_]+)\"?")
+        // 2. "referenceId":"XXXXX"
+        val refRegex = Regex("\"referenceId\"\\s*:\\s*\"?([A-Za-z0-9_]+)\"?")
         for (script in document.select("script")) {
-            val content = script.data()
-            refRegex.find(content)?.let { match ->
-                val id = match.groupValues[1]
-                Log.d("StarTV", "referenceId bulundu: $id")
-                return id
+            refRegex.find(script.data())?.let {
+                Log.d("StarTV", "✓ referenceId bulundu: ${it.groupValues[1]}")
+                return it.groupValues[1]
             }
         }
 
-        // 3. data-video-id attribute'u
+        // 3. data-video-id attribute
         document.select("[data-video-id]").firstOrNull()?.let { el ->
             val id = el.attr("data-video-id").trim()
-            if (id.isNotEmpty()) {
-                Log.d("StarTV", "data-video-id bulundu: $id")
+            if (id.matches(Regex("\\d+"))) {
+                Log.d("StarTV", "✓ data-video-id bulundu: $id")
                 return id
             }
         }
 
-        // 4. dyg-player div'i içinde ID ara
+        // 4. Player div attribute
         document.select("#dyg-player, [id*=player], [class*=player]").firstOrNull()?.let { el ->
             el.attributes().forEach { attr ->
                 val value = attr.value.trim()
-                if (value.matches(Regex("\\d+"))) {
-                    Log.d("StarTV", "Player attribute'tan ID bulundu: ${attr.key}=$value")
+                if (value.matches(Regex("\\d{5,}"))) {
+                    Log.d("StarTV", "✓ player attribute: ${attr.key}=$value")
                     return value
                 }
             }
         }
 
-        // 5. URL'den ID çıkar: /bolumler/2-bolum -> 2
+        // 5. Canonical URL'den bölüm numarası
         document.select("link[rel=canonical]").firstOrNull()?.attr("href")?.let { canonical ->
-            Regex("/(\\d+)-bolum").find(canonical)?.let { match ->
-                Log.d("StarTV", "Canonical'dan ID bulundu: ${match.groupValues[1]}")
-                return match.groupValues[1]
+            Regex("/(\\d+)-bolum").find(canonical)?.let {
+                Log.d("StarTV", "✓ canonical'dan: ${it.groupValues[1]}")
+                return it.groupValues[1]
             }
         }
 
+        // 6. LD+JSON'dan referenceId
+        for (script in document.select("script[type=application/ld+json]")) {
+            val content = script.data()
+            Regex("\"referenceId\"\\s*:\\s*\"?(\\d+)\"?").find(content)?.let {
+                Log.d("StarTV", "✓ LD+JSON referenceId: ${it.groupValues[1]}")
+                return it.groupValues[1]
+            }
+        }
+
+        Log.w("StarTV", "✗ Video ID bulunamadı!")
         return null
+    }
+
+    /**
+     * ★ iframe içeriğinden m3u8 bul - özyinelemeli
+     */
+    private suspend fun findM3u8InIframe(
+        embedUrl: String,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        try {
+            Log.d("StarTV", "iframe içeriği çekiliyor: $embedUrl")
+            val iframeDoc = app.get(embedUrl, headers = headers).document
+            val iframeHtml = iframeDoc.html()
+
+            // iframe HTML'inde m3u8 ara
+            val m3u8Regex = Regex("(https?://[^\"'\\s<>]+\\.m3u8[^\"'\\s<>]*)")
+            m3u8Regex.find(iframeHtml)?.let { match ->
+                val m3u8Url = match.groupValues[1].replace("\\/", "/")
+                Log.d("StarTV", "✓ iframe'de m3u8 bulundu: $m3u8Url")
+                callback.invoke(
+                    newExtractorLink(
+                        name = this.name,
+                        source = this.name,
+                        url = m3u8Url,
+                        type = ExtractorLinkType.M3U8
+                    ) {
+                        this.referer = mainUrl
+                        this.quality = Qualities.Unknown.value
+                    }
+                )
+                return true
+            }
+
+            // video source / file attribute
+            iframeDoc.select("video source[src], video[src], source[src]").forEach { src ->
+                val url = src.attr("src")
+                if (url.contains(".m3u8") || url.contains(".mp4")) {
+                    val fullUrl = fixUrl(url)
+                    Log.d("StarTV", "✓ iframe video source: $fullUrl")
+                    callback.invoke(
+                        newExtractorLink(
+                            name = this.name,
+                            source = this.name,
+                            url = fullUrl,
+                            type = if (fullUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                        ) {
+                            this.referer = mainUrl
+                        }
+                    )
+                    return true
+                }
+            }
+
+            // iframe içindeki script'lerde m3u8 ara
+            for (script in iframeDoc.select("script")) {
+                val content = script.data()
+                m3u8Regex.find(content)?.let { match ->
+                    val m3u8Url = match.groupValues[1].replace("\\/", "/")
+                    Log.d("StarTV", "✓ iframe script'te m3u8: $m3u8Url")
+                    callback.invoke(
+                        newExtractorLink(
+                            name = this.name,
+                            source = this.name,
+                            url = m3u8Url,
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.referer = mainUrl
+                        }
+                    )
+                    return true
+                }
+            }
+
+            return false
+        } catch (e: Exception) {
+            Log.e("StarTV", "iframe çekme hatası: ${e.message}")
+            return false
+        }
+    }
+
+    /**
+     * ★ DygDigital API'den m3u8 al - doğrulama ile
+     */
+    private suspend fun tryDygDigital(
+        videoId: String,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        // Denenecek formatlar
+        val formats = listOf(
+            "StarTV_$videoId",
+            videoId,
+            "StarTV_${videoId}_1",
+            "startv_$videoId"
+        )
+
+        for (refId in formats) {
+            val url = buildDygUrl(refId)
+            Log.d("StarTV", "DygDigital deneme: $url")
+
+            try {
+                val response = app.get(
+                    url,
+                    headers = headers + mapOf("Referer" to mainUrl),
+                    allowRedirects = true
+                )
+
+                val finalUrl = response.url
+                val body = response.text
+
+                // Başarılı mı kontrol et
+                if (body.contains("#EXTM3U") || finalUrl.contains(".m3u8")) {
+                    val m3u8Url = if (finalUrl.contains(".m3u8")) finalUrl else url
+                    Log.d("StarTV", "✓ DygDigital başarılı: $m3u8Url")
+
+                    callback.invoke(
+                        newExtractorLink(
+                            name = this.name,
+                            source = this.name,
+                            url = m3u8Url,
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.referer = mainUrl
+                            this.quality = Qualities.Unknown.value
+                        }
+                    )
+                    return true
+                }
+
+                // Body'de m3u8 URL'i var mı?
+                val bodyM3u8 = Regex("(https?://[^\"'\\s<>]+\\.m3u8[^\"'\\s<>]*)").find(body)
+                if (bodyM3u8 != null) {
+                    val m3u8Url = bodyM3u8.groupValues[1].replace("\\/", "/")
+                    Log.d("StarTV", "✓ DygDigital yanıtında m3u8: $m3u8Url")
+                    callback.invoke(
+                        newExtractorLink(
+                            name = this.name,
+                            source = this.name,
+                            url = m3u8Url,
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.referer = mainUrl
+                        }
+                    )
+                    return true
+                }
+
+                Log.d("StarTV", "✗ Format başarısız ($refId), yanıt: ${body.take(150)}")
+            } catch (e: Exception) {
+                Log.d("StarTV", "✗ DygDigital hata ($refId): ${e.message}")
+            }
+        }
+        return false
     }
 
     override suspend fun loadLinks(
@@ -380,83 +484,48 @@ class StarTv : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("StarTV", "=== loadLinks başladı: $data ===")
+        Log.d("StarTV", "═══════════ loadLinks BAŞLADI ═══════════")
+        Log.d("StarTV", "URL: $data")
+
         try {
-            if (data.isBlank()) {
-                Log.e("StarTV", "data boş!")
-                return false
-            }
+            if (data.isBlank()) return false
 
             val document = app.get(data, headers = headers).document
             var found = false
 
-            // ★ ÖNCELİK 1: DygDigital API üzerinden m3u8
+            // ★ ADIM 1: Video ID çıkar
             val videoId = extractVideoId(document)
+
+            // ★ ADIM 2: DygDigital API dene
             if (videoId != null) {
-                // Denenecek ReferenceId formatları
-                val referenceFormats = listOf(
-                    "StarTV_$videoId",   // Doğrulanmış format
-                    videoId,              // Sadece ID
-                    "StarTV_${videoId}_1" // Alternatif
-                )
-
-                for (refId in referenceFormats) {
-                    val dygUrl = buildDygUrl(refId)
-                    Log.d("StarTV", "DygDigital deneme: $dygUrl")
-
-                    try {
-                        // URL'in geçerli olup olmadığını test et
-                        val testResponse = app.get(
-                            dygUrl,
-                            headers = headers + mapOf("Referer" to mainUrl),
-                            allowRedirects = true
-                        )
-
-                        val finalUrl = testResponse.url
-                        val responseText = testResponse.text
-
-                        Log.d("StarTV", "DygDigital yanıt: ${finalUrl.take(100)}")
-                        Log.d("StarTV", "Yanıt içeriği: ${responseText.take(200)}")
-
-                        // Eğer m3u8 içeriği geldiyse veya redirect başarılıysa
-                        if (responseText.contains("#EXTM3U") || finalUrl.contains(".m3u8")) {
-                            val m3u8Url = if (finalUrl.contains(".m3u8")) finalUrl else dygUrl
-                            Log.d("StarTV", "✓ DygDigital m3u8 bulundu: $m3u8Url")
-
-                            callback.invoke(
-                                newExtractorLink(
-                                    name = this.name,
-                                    source = this.name,
-                                    url = m3u8Url,
-                                    type = ExtractorLinkType.M3U8
-                                ) {
-                                    this.referer = mainUrl
-                                    this.quality = Qualities.Unknown.value
-                                }
-                            )
-                            found = true
-                            break
-                        }
-                    } catch (e: Exception) {
-                        Log.d("StarTV", "DygDigital deneme başarısız ($refId): ${e.message}")
-                    }
+                Log.d("StarTV", "→ ADIM 2: DygDigital API deneniyor (ID: $videoId)")
+                if (tryDygDigital(videoId, callback)) {
+                    found = true
                 }
             }
 
-            // ★ ÖNCELİK 2: HTML'de doğrudan m3u8/mp4 ara
+            // ★ ADIM 3: HTML'de doğrudan m3u8/mp4 ara
             if (!found) {
-                Log.d("StarTV", "DygDigital başarısız, HTML'de m3u8 aranıyor...")
+                Log.d("StarTV", "→ ADIM 3: HTML'de m3u8/mp4 aranıyor")
+                val html = document.html()
                 val patterns = listOf(
-                    Regex("(https?://[^\"'\\s]+\\.m3u8[^\"'\\s]*)"),
-                    Regex("(https?://[^\"'\\s]+\\.mp4[^\"'\\s]*)"),
-                    Regex("(https?://startv\\.akamaized\\.net/[^\"'\\s]+)")
+                    Regex("(https?://[^\"'\\s<>]+\\.m3u8[^\"'\\s<>]*)"),
+                    Regex("(https?://[^\"'\\s<>]+\\.mp4[^\"'\\s<>]*)"),
+                    Regex("(https?://startv\\.akamaized\\.net/[^\"'\\s<>]+)"),
+                    Regex("\"(?:hls|hlsUrl|streamUrl|videoUrl|source)\"\\s*:\\s*\"([^\"]+)\"")
                 )
-                for (script in document.select("script")) {
-                    val content = script.data()
-                    for (pattern in patterns) {
-                        pattern.find(content)?.let { match ->
-                            val videoUrl = match.groupValues[1].replace("\\/", "/")
-                            Log.d("StarTV", "✓ Regex ile bulundu: $videoUrl")
+
+                for (pattern in patterns) {
+                    pattern.findAll(html).forEach { match ->
+                        if (found) return@forEach
+                        val videoUrl = match.groupValues[1]
+                            .replace("\\/", "/")
+                            .replace("\\u0026", "&")
+
+                        if (videoUrl.startsWith("http") &&
+                            (videoUrl.contains(".m3u8") || videoUrl.contains(".mp4") ||
+                             videoUrl.contains("akamaized"))) {
+                            Log.d("StarTV", "✓ Regex m3u8: $videoUrl")
                             callback.invoke(
                                 newExtractorLink(
                                     name = this.name,
@@ -473,8 +542,9 @@ class StarTv : MainAPI() {
                 }
             }
 
-            // ★ ÖNCELİK 3: JSON-LD'de contentUrl varsa
+            // ★ ADIM 4: JSON-LD'den contentUrl
             if (!found) {
+                Log.d("StarTV", "→ ADIM 4: JSON-LD kontrol ediliyor")
                 for (script in document.select("script[type=application/ld+json]")) {
                     val content = script.data()
                     if (!content.contains("VideoObject")) continue
@@ -487,7 +557,7 @@ class StarTv : MainAPI() {
                                 if (item.optString("@type") == "VideoObject") {
                                     val contentUrl = item.optString("contentUrl", "")
                                     if (contentUrl.isNotEmpty() && contentUrl.contains(".m3u8")) {
-                                        Log.d("StarTV", "✓ JSON-LD'den: $contentUrl")
+                                        Log.d("StarTV", "✓ JSON-LD contentUrl: $contentUrl")
                                         callback.invoke(
                                             newExtractorLink(
                                                 name = this.name,
@@ -509,20 +579,57 @@ class StarTv : MainAPI() {
                 }
             }
 
-            // ★ ÖNCELİK 4: iframe embed (son çare)
+            // ★ ADIM 5: iframe içeriğini özyinelemeli ara
             if (!found) {
-                val iframe = document.selectFirst("iframe[src]")
-                if (iframe != null) {
-                    val embedUrl = fixUrl(iframe.attr("src"))
+                Log.d("StarTV", "→ ADIM 5: iframe'ler kontrol ediliyor")
+                for (iframe in document.select("iframe[src]")) {
+                    if (found) break
+                    val iframeSrc = iframe.attr("src")
+                    if (iframeSrc.isBlank()) continue
+
+                    val embedUrl = fixUrl(iframeSrc)
                     Log.d("StarTV", "iframe bulundu: $embedUrl")
+
+                    // loadExtractor dene
                     if (loadExtractor(embedUrl, data, subtitleCallback, callback)) {
+                        found = true
+                        break
+                    }
+
+                    // Manuel iframe HTML çek ve m3u8 ara
+                    if (findM3u8InIframe(embedUrl, callback)) {
+                        found = true
+                        break
+                    }
+                }
+            }
+
+            // ★ ADIM 6: Video element
+            if (!found) {
+                Log.d("StarTV", "→ ADIM 6: video element kontrol ediliyor")
+                document.select("video[src], video source[src]").forEach { el ->
+                    val src = el.attr("src")
+                    if (src.isNotEmpty()) {
+                        val fullUrl = fixUrl(src)
+                        Log.d("StarTV", "✓ video element: $fullUrl")
+                        callback.invoke(
+                            newExtractorLink(
+                                name = this.name,
+                                source = this.name,
+                                url = fullUrl,
+                                type = if (fullUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                            ) {
+                                this.referer = mainUrl
+                            }
+                        )
                         found = true
                     }
                 }
             }
 
-            Log.d("StarTV", "=== loadLinks bitti, bulundu: $found ===")
+            Log.d("StarTV", "═══════════ SONUÇ: $found ═══════════")
             return found
+
         } catch (e: Exception) {
             Log.e("StarTV", "LoadLinks hatası: ${e.message}")
             e.printStackTrace()
