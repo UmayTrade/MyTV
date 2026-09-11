@@ -21,57 +21,103 @@ class Atv : MainAPI() {
     private var cacheTime: Long = 0
     private val cacheValidityDuration = 30 * 60 * 1000
 
+    // Sistem sayfaları - bunlar dizi/program olarak gösterilmemeli
+    private val systemPages = setOf(
+        "diziler", "programlar", "yayin-akisi", "canli-yayin",
+        "haberler", "haber", "eski-diziler", "a2tv", "arama",
+        "kunye", "iletisim", "bize-ulasin", "gizlilik-bildirimi",
+        "veri-politikasi", "uydu-frekanslari", "site-haritasi",
+        "rss-bilgi", "adblock", "retro-d", "filmler",
+        "milyoner", "webtv", "diger", "kadro", "fragmanlar",
+        "ozetler", "ozel-klipler", "foto-galeri", "oyuncular",
+        "hikaye-ve-kunye", "d-shorts", "bolumler"
+    )
+
     override val mainPage = mainPageOf(
         "${mainUrl}/diziler"    to "Diziler",
         "${mainUrl}/programlar" to "Programlar"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(request.data).document
-        val results = document.select("a[href]")
-            .mapNotNull { it.toMainPageResult() }
-            .distinctBy { it.url }
+        val results = mutableListOf<SearchResponse>()
 
-        Log.d("ATV", "getMainPage: ${request.data} -> ${results.size} sonuç bulundu")
+        // ★ 1. Ana sayfadaki menüden linkleri al
+        try {
+            val mainDoc = app.get(mainUrl).document
+            val menuSelector = if (request.name == "Diziler") {
+                "div.series-drop .sub-menu-list li a[href]"
+            } else {
+                "div.program-drop-menu .sub-menu-list li a[href]"
+            }
+            mainDoc.select(menuSelector).forEach { element ->
+                element.toMenuItemResult()?.let { results.add(it) }
+            }
+            Log.d("ATV", "Menüden ${results.size} öğe alındı")
+        } catch (e: Exception) {
+            Log.e("ATV", "Menü çekme hatası: ${e.message}")
+        }
+
+        // ★ 2. Liste sayfasından da kart linklerini al
+        try {
+            val listDoc = app.get(request.data).document
+            listDoc.select("a[href]").forEach { element ->
+                element.toListPageResult()?.let { results.add(it) }
+            }
+            Log.d("ATV", "Liste sayfasından toplam ${results.size} öğe alındı")
+        } catch (e: Exception) {
+            Log.e("ATV", "Liste sayfası hatası: ${e.message}")
+        }
+
+        val uniqueResults = results.distinctBy { it.url }
+        Log.d("ATV", "getMainPage: ${request.name} -> ${uniqueResults.size} sonuç")
 
         return newHomePageResponse(
-            listOf(HomePageList(request.name, results))
+            listOf(HomePageList(request.name, uniqueResults))
         )
     }
 
-    private fun Element.toMainPageResult(): SearchResponse? {
+    private fun Element.toMenuItemResult(): SearchResponse? {
         val hrefRaw = this.attr("href")
         if (hrefRaw.isBlank()) return null
 
         val fullUrl = fixUrlNull(hrefRaw) ?: return null
         if (!fullUrl.contains("atv.com.tr")) return null
 
-        val path = fullUrl
-            .removePrefix("https://www.atv.com.tr")
-            .removePrefix("https://atv.com.tr")
-            .removePrefix("http://www.atv.com.tr")
-            .removePrefix("http://atv.com.tr")
-            .trim('/')
-            .substringBefore("?")
-            .substringBefore("#")
+        // Path'i normalize et
+        val path = normalizePath(fullUrl) ?: return null
 
-        if (path.isEmpty() || path.contains("/")) return null
-
-        val systemPages = setOf(
-            "diziler", "programlar", "yayin-akisi", "canli-yayin",
-            "haberler", "haber", "eski-diziler", "a2tv", "arama",
-            "kunye", "iletisim", "bize-ulasin", "gizlilik-bildirimi",
-            "veri-politikasi", "uydu-frekanslari", "site-haritasi",
-            "rss-bilgi", "adblock", "retro-d", "filmler",
-            "milyoner", "webtv", "diger"
-        )
+        // Alt sayfaları filtrele
+        if (path.contains("/")) return null
         if (systemPages.contains(path)) return null
 
-        // ★ Görsel - birden fazla seçici dene
-        val img = this.selectFirst("img")
-            ?: this.selectFirst("picture img")
-            ?: this.selectFirst("picture source")
-            ?: return null
+        val title = this.text().trim().takeIf { it.isNotEmpty() } ?: return null
+
+        // Menüde poster genelde kardeş <img>'de
+        val poster = this.parent()?.selectFirst("img")?.let { img ->
+            fixUrlNull(img.attr("data-src").ifEmpty { img.attr("src") })
+        }
+
+        return newMovieSearchResponse(title, fullUrl, TvType.TvSeries) {
+            this.posterUrl = poster
+        }
+    }
+
+    private fun Element.toListPageResult(): SearchResponse? {
+        val hrefRaw = this.attr("href")
+        if (hrefRaw.isBlank()) return null
+
+        val fullUrl = fixUrlNull(hrefRaw) ?: return null
+        if (!fullUrl.contains("atv.com.tr")) return null
+
+        // Path'i normalize et
+        val path = normalizePath(fullUrl) ?: return null
+
+        // ★ Kesin kural: SADECE tek segment slug
+        if (path.contains("/")) return null
+        if (systemPages.contains(path)) return null
+
+        // Resim şart (kart olduğunu doğrular)
+        val img = this.selectFirst("img") ?: return null
 
         // Başlık
         val title = this.selectFirst("figcaption p, figcaption .title, h2, h3, .title, .caption")
@@ -80,24 +126,38 @@ class Atv : MainAPI() {
             ?: this.attr("title").trim().takeIf { it.isNotEmpty() }
             ?: return null
 
-        // ★ Poster - data-src, src, data-lazy-src, srcset hepsini dene
-        val srcRaw = img.attr("data-src").ifEmpty {
-            img.attr("src").ifEmpty {
-                img.attr("data-lazy-src").ifEmpty {
-                    img.attr("data-original").ifEmpty {
-                        // srcset'ten ilk URL'yi çek
-                        img.attr("srcset").split(",").firstOrNull()?.trim()?.substringBefore(" ") ?: ""
-                    }
-                }
+        // Poster
+        val poster = fixUrlNull(
+            img.attr("data-src").ifEmpty {
+                img.attr("src").ifEmpty { img.attr("data-lazy-src") }
             }
-        }
-        val poster = fixUrlNull(srcRaw)
+        )
 
-        Log.d("ATV", "  ✓ $title | poster=$poster")
+        Log.d("ATV", "  ✓ [$path] → $title")
 
         return newMovieSearchResponse(title, fullUrl, TvType.TvSeries) {
             this.posterUrl = poster
         }
+    }
+
+    /**
+     * URL'yi normalize edip path döndürür.
+     * Örn: "https://www.atv.com.tr/mercan-kosk" -> "mercan-kosk"
+     */
+    private fun normalizePath(url: String): String? {
+        var path = url
+        path = path.replace("https://www.atv.com.tr", "")
+        path = path.replace("https://atv.com.tr", "")
+        path = path.replace("http://www.atv.com.tr", "")
+        path = path.replace("http://atv.com.tr", "")
+        path = path.substringBefore("?").substringBefore("#")
+        path = path.trim('/')
+
+        if (path.isEmpty()) return null
+        if (path.contains(".")) return null  // .jpg, .mp4 vs.
+        if (path.length < 2) return null
+
+        return path
     }
 
     private suspend fun getAllContent(): List<SearchResponse> {
@@ -110,10 +170,25 @@ class Atv : MainAPI() {
         try {
             val pagesToScan = listOf("${mainUrl}/diziler", "${mainUrl}/programlar")
             for (pageUrl in pagesToScan) {
-                val document = app.get(pageUrl).document
-                val items = document.select("a[href]")
-                    .mapNotNull { it.toMainPageResult() }
-                allContent.addAll(items)
+                try {
+                    val document = app.get(pageUrl).document
+                    document.select("a[href]").forEach { element ->
+                        element.toListPageResult()?.let { allContent.add(it) }
+                    }
+                } catch (e: Exception) {
+                    Log.e("ATV", "Sayfa çekme hatası ($pageUrl): ${e.message}")
+                }
+            }
+
+            // Menüden de ekle
+            try {
+                val mainDoc = app.get(mainUrl).document
+                mainDoc.select("div.series-drop .sub-menu-list li a[href], div.program-drop-menu .sub-menu-list li a[href]")
+                    .forEach { element ->
+                        element.toMenuItemResult()?.let { allContent.add(it) }
+                    }
+            } catch (e: Exception) {
+                Log.e("ATV", "Menü çekme hatası: ${e.message}")
             }
 
             val uniqueContent = allContent.distinctBy { it.url }
@@ -141,6 +216,7 @@ class Atv : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
+        // ★ Bölüm sayfası mı? (/izle ile bitiyorsa tek bölüm olarak işle)
         if (url.contains("/izle")) {
             val title = document.selectFirst("h1.video-title")?.text()?.trim()
                 ?: document.selectFirst("h1")?.text()?.trim()
@@ -160,6 +236,7 @@ class Atv : MainAPI() {
             }
         }
 
+        // Dizi detay sayfası
         val title = document.selectFirst("h1")?.text()?.trim() ?: return null
         val poster = fixUrlNull(document.selectFirst("meta[property=og:image]")?.attr("content"))
         val description = document.selectFirst("meta[name=description]")?.attr("content")?.trim()
@@ -175,30 +252,41 @@ class Atv : MainAPI() {
     private suspend fun getEpisodes(document: org.jsoup.nodes.Document, baseUrl: String): List<Episode> {
         val allEpisodes = mutableListOf<Episode>()
         try {
-            // ATV bölüm sayfasından bölüm linklerini topla
+            // ★ Bölüm linklerini topla
+            // Format: /mercan-kosk/1-bolum/izle veya /mercan-kosk/1-bolum-1-fragman/izle
             val episodeLinks = document.select("a[href*='/izle']")
-                .filter { 
-                    val href = it.attr("href")
-                    href.contains("-bolum") || href.contains("/bolum/") 
+                .filter { element ->
+                    val href = element.attr("href")
+                    // Fragman değil, bölüm olmalı: "-bolum/" veya "-bolum-"
+                    href.contains("-bolum") && href.endsWith("/izle")
                 }
 
             if (episodeLinks.isNotEmpty()) {
                 Log.d("ATV", "Statik ${episodeLinks.size} bölüm linki bulundu")
                 episodeLinks.distinctBy { it.attr("href") }.forEachIndexed { index, element ->
                     val href = fixUrlNull(element.attr("href")) ?: return@forEachIndexed
+
+                    // Bölüm adını al
                     val epName = element.selectFirst(".style-01, .style-02, h3, .title, .date")
                         ?.text()?.trim()?.takeIf { it.isNotEmpty() }
+                        ?: element.text().trim().takeIf { it.isNotEmpty() }
                         ?: "Bölüm ${index + 1}"
+
+                    // Bölüm numarasını URL'den çıkarmaya çalış
+                    val epNum = Regex("/(\\d+)-bolum").find(href)?.groupValues?.get(1)?.toIntOrNull()
+                        ?: (index + 1)
 
                     newEpisode(href) {
                         this.name = epName
-                        this.episode = index + 1
+                        this.episode = epNum
                     }?.let { allEpisodes.add(it) }
                 }
-                return allEpisodes.reversed()
+
+                // Bölüm numarasına göre sırala
+                return allEpisodes.sortedBy { it.episode }
             }
 
-            // AJAX dene
+            // ★ Alternatif: AJAX endpoint'lerini dene
             val slug = baseUrl.substringAfter(mainUrl).trim('/').substringBefore("/")
             val ajaxUrls = listOf(
                 "$mainUrl/ajax/series/$slug/episodes",
@@ -216,19 +304,23 @@ class Atv : MainAPI() {
                     )
                     val doc = response.document
                     val links = doc.select("a[href*='/izle']")
+                        .filter { it.attr("href").contains("-bolum") }
                     if (links.isNotEmpty()) {
+                        Log.d("ATV", "AJAX'den ${links.size} bölüm bulundu: $ajaxUrl")
                         links.distinctBy { it.attr("href") }.forEachIndexed { index, element ->
                             val href = fixUrlNull(element.attr("href")) ?: return@forEachIndexed
                             val epName = element.selectFirst(".style-01, .style-02, h3, .title")
                                 ?.text()?.trim()?.takeIf { it.isNotEmpty() }
                                 ?: "Bölüm ${index + 1}"
+                            val epNum = Regex("/(\\d+)-bolum").find(href)?.groupValues?.get(1)?.toIntOrNull()
+                                ?: (index + 1)
 
                             newEpisode(href) {
                                 this.name = epName
-                                this.episode = index + 1
+                                this.episode = epNum
                             }?.let { allEpisodes.add(it) }
                         }
-                        if (allEpisodes.isNotEmpty()) return allEpisodes.reversed()
+                        if (allEpisodes.isNotEmpty()) return allEpisodes.sortedBy { it.episode }
                     }
                 } catch (e: Exception) {
                     Log.d("ATV", "AJAX denemesi başarısız ($ajaxUrl): ${e.message}")
@@ -257,20 +349,15 @@ class Atv : MainAPI() {
 
             // ★ Öncelik 1: JSON-LD VideoObject > contentUrl
             val ldJsonScripts = document.select("script[type=application/ld+json]")
-            Log.d("ATV", "Toplam ${ldJsonScripts.size} ld+json script bulundu")
-            
             for (script in ldJsonScripts) {
                 val content = script.data()
-                Log.d("ATV", "ld+json içeriği (ilk 200): ${content.take(200)}")
-                
                 if (!content.contains("VideoObject") && !content.contains("contentUrl")) continue
                 try {
                     val json = JSONObject(content)
                     if (json.optString("@type").contains("VideoObject")) {
                         val contentUrl = json.optString("contentUrl", "")
-                        Log.d("ATV", "VideoObject contentUrl: $contentUrl")
-                        
                         if (contentUrl.isNotEmpty() && contentUrl.startsWith("http")) {
+                            Log.d("ATV", "JSON-LD contentUrl bulundu: $contentUrl")
                             callback.invoke(
                                 newExtractorLink(
                                     name = this.name,
@@ -292,11 +379,9 @@ class Atv : MainAPI() {
 
             // ★ Öncelik 2: Regex ile contentUrl / m3u8 / mp4 ara
             if (!found) {
-                Log.d("ATV", "JSON-LD'de bulunamadı, regex deneniyor...")
                 val patterns = listOf(
                     Regex("\"contentUrl\"\\s*:\\s*\"([^\"]+\\.m3u8[^\"]*)\""),
                     Regex("\"contentUrl\"\\s*:\\s*\"([^\"]+\\.mp4[^\"]*)\""),
-                    Regex("\"contentUrl\"\\s*:\\s*\"([^\"]+)\""),
                     Regex("(https?://[^\"'\\s]+\\.m3u8[^\"'\\s]*)"),
                     Regex("(https?://[^\"'\\s]+\\.mp4[^\"'\\s]*)")
                 )
@@ -322,36 +407,8 @@ class Atv : MainAPI() {
                 }
             }
 
-            // ★ Öncelik 3: Sayfa HTML'inde video/mp4 veya m3u8 ara (attributelarda)
+            // ★ Öncelik 3: iframe embed
             if (!found) {
-                Log.d("ATV", "Regex'te bulunamadı, HTML attribute'ları deneniyor...")
-                document.select("[data-video], [data-src], [data-url], [data-videourl]").forEach { el ->
-                    val possibleUrl = el.attr("data-video").ifEmpty {
-                        el.attr("data-src").ifEmpty {
-                            el.attr("data-url").ifEmpty { el.attr("data-videourl") }
-                        }
-                    }
-                    if (possibleUrl.contains(".mp4") || possibleUrl.contains(".m3u8")) {
-                        val videoUrl = fixUrl(possibleUrl)
-                        Log.d("ATV", "Attribute'dan bulundu: $videoUrl")
-                        callback.invoke(
-                            newExtractorLink(
-                                name = this.name,
-                                source = this.name,
-                                url = videoUrl,
-                                type = if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                            ) {
-                                this.referer = mainUrl
-                            }
-                        )
-                        found = true
-                    }
-                }
-            }
-
-            // ★ Öncelik 4: iframe embed
-            if (!found) {
-                Log.d("ATV", "HTML attribute'ta bulunamadı, iframe deneniyor...")
                 val iframe = document.selectFirst("iframe[src]")
                 if (iframe != null) {
                     val embedUrl = fixUrl(iframe.attr("src"))
@@ -362,7 +419,6 @@ class Atv : MainAPI() {
                 }
             }
 
-            Log.d("ATV", "loadLinks sonucu: found=$found")
             return found
         } catch (e: Exception) {
             Log.e("ATV", "LoadLinks hatası: ${e.message}")
