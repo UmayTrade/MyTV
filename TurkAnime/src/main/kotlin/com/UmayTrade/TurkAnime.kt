@@ -14,67 +14,74 @@ class Tranimeizle : MainAPI() {
     override val hasQuickSearch       = false
     override val supportedTypes       = setOf(TvType.Anime)
 
+    // Ortak istek başlıkları (403 hatalarını önlemek için)
+    private val headers = mapOf(
+        "User-Agent"      to "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+        "Referer"         to "$mainUrl/",
+        "Accept"          to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8"
+    )
+
     // ✅ HTML'den çıkarılan DOĞRU tür URL'leri
-    // Format: /animeizle/{slug}-anime-izle-{sayfa}
     override val mainPage = mainPageOf(
-        "${mainUrl}/animeizle/aksiyon-anime-izle"        to "Aksiyon",
-        "${mainUrl}/animeizle/arabalar-anime-izle"       to "Arabalar",
-        "${mainUrl}/animeizle/askeri-anime-izle"         to "Askeri",
-        "${mainUrl}/animeizle/bilim-kurgu-anime-izle"    to "Bilim Kurgu",
-        "${mainUrl}/animeizle/buyu-anime-izle"           to "Büyü",
-        "${mainUrl}/animeizle/cocuk-anime-izle"          to "Çocuklar",
-        "${mainUrl}/animeizle/dogaustu-gucler-anime-izle" to "Doğaüstü Güçler",
-        "${mainUrl}/animeizle/dovus-anime-izle"          to "Dövüş",
-        "${mainUrl}/animeizle/dram-anime-izle"           to "Dram",
-        "${mainUrl}/animeizle/ecchi-anime-izle"          to "Ecchi",
-        "${mainUrl}/animeizle/fantastik-anime-izle"      to "Fantastik",
-        "${mainUrl}/animeizle/gerilim-anime-izle"        to "Gerilim",
-        "${mainUrl}/animeizle/gizem-anime-izle"          to "Gizem",
-        "${mainUrl}/animeizle/harem-anime-izle"          to "Harem",
-        "${mainUrl}/animeizle/josei-anime-izle"          to "Josei",
-        "${mainUrl}/animeizle/komedi-anime-izle"         to "Komedi",
-        "${mainUrl}/animeizle/korku-anime-izle"          to "Korku",
-        "${mainUrl}/animeizle/macera-anime-izle"         to "Macera",
-        "${mainUrl}/animeizle/mecha-anime-izle"          to "Mecha",
-        "${mainUrl}/animeizle/movie-anime-izle"          to "Film",
-        "${mainUrl}/animeizle/muzik-anime-izle"          to "Müzik",
-        "${mainUrl}/animeizle/ova-anime-izle"            to "OVA",
-        "${mainUrl}/animeizle/okul-anime-izle"           to "Okul",
-        "${mainUrl}/animeizle/oyun-anime-izle"           to "Oyun",
-        "${mainUrl}/animeizle/psikolojik-anime-izle"     to "Psikolojik",
-        "${mainUrl}/animeizle/romantizm-anime-izle"      to "Romantizm",
-        "${mainUrl}/animeizle/seinen-anime-izle"         to "Seinen",
-        "${mainUrl}/animeizle/shoujo-anime-izle"         to "Shoujo",
-        "${mainUrl}/animeizle/shoujo-ai-anime-izle"      to "Shoujo Ai",
-        "${mainUrl}/animeizle/shounen-anime-izle"        to "Shounen",
-        "${mainUrl}/animeizle/shounen-ai-anime-izle"     to "Shounen Ai",
+        "${mainUrl}/animeizle/aksiyon-anime-izle"           to "Aksiyon",
+        "${mainUrl}/animeizle/arabalar-anime-izle"          to "Arabalar",
+        "${mainUrl}/animeizle/askeri-anime-izle"            to "Askeri",
+        "${mainUrl}/animeizle/bilim-kurgu-anime-izle"       to "Bilim Kurgu",
+        "${mainUrl}/animeizle/buyu-anime-izle"              to "Büyü",
+        "${mainUrl}/animeizle/cocuk-anime-izle"             to "Çocuklar",
+        "${mainUrl}/animeizle/dogaustu-gucler-anime-izle"   to "Doğaüstü Güçler",
+        "${mainUrl}/animeizle/dovus-anime-izle"             to "Dövüş",
+        "${mainUrl}/animeizle/dram-anime-izle"              to "Dram",
+        "${mainUrl}/animeizle/ecchi-anime-izle"             to "Ecchi",
+        "${mainUrl}/animeizle/fantastik-anime-izle"         to "Fantastik",
+        "${mainUrl}/animeizle/gerilim-anime-izle"           to "Gerilim",
+        "${mainUrl}/animeizle/gizem-anime-izle"             to "Gizem",
+        "${mainUrl}/animeizle/harem-anime-izle"             to "Harem",
+        "${mainUrl}/animeizle/josei-anime-izle"             to "Josei",
+        "${mainUrl}/animeizle/komedi-anime-izle"            to "Komedi",
+        "${mainUrl}/animeizle/korku-anime-izle"             to "Korku",
+        "${mainUrl}/animeizle/macera-anime-izle"            to "Macera",
+        "${mainUrl}/animeizle/mecha-anime-izle"             to "Mecha",
+        "${mainUrl}/animeizle/movie-anime-izle"             to "Film",
+        "${mainUrl}/animeizle/muzik-anime-izle"             to "Müzik",
+        "${mainUrl}/animeizle/ova-anime-izle"               to "OVA",
+        "${mainUrl}/animeizle/okul-anime-izle"              to "Okul",
+        "${mainUrl}/animeizle/oyun-anime-izle"              to "Oyun",
+        "${mainUrl}/animeizle/psikolojik-anime-izle"        to "Psikolojik",
+        "${mainUrl}/animeizle/romantizm-anime-izle"         to "Romantizm",
+        "${mainUrl}/animeizle/seinen-anime-izle"            to "Seinen",
+        "${mainUrl}/animeizle/shoujo-anime-izle"            to "Shoujo",
+        "${mainUrl}/animeizle/shoujo-ai-anime-izle"         to "Shoujo Ai",
+        "${mainUrl}/animeizle/shounen-anime-izle"           to "Shounen",
+        "${mainUrl}/animeizle/shounen-ai-anime-izle"        to "Shounen Ai",
         "${mainUrl}/animeizle/yasamdan-kesitler-anime-izle" to "Yaşamdan Kesitler",
-        "${mainUrl}/animeizle/spor-anime-izle"           to "Spor",
-        "${mainUrl}/animeizle/super-guc-anime-izle"      to "Süper Güç",
-        "${mainUrl}/animeizle/tarihi-anime-izle"         to "Tarihi",
-        "${mainUrl}/animeizle/uzay-anime-izle"           to "Uzay",
-        "${mainUrl}/animeizle/vampir-anime-izle"         to "Vampir",
-        "${mainUrl}/animeizle/yaoi-anime-izle"           to "Yaoi",
-        "${mainUrl}/animeizle/yuri-anime-izle"           to "Yuri",
-        "${mainUrl}/animeizle/polisiye-anime-izle"       to "Polisiye",
-        "${mainUrl}/animeizle/samuray-anime-izle"        to "Samuray",
-        "${mainUrl}/animeizle/parodi-anime-izle"         to "Parodi",
-        "${mainUrl}/animeizle/seytanlar-anime-izle"      to "Şeytanlar",
-        "${mainUrl}/animeizle/savas-sanatlari-anime-izle" to "Savaş Sanatları",
-        "${mainUrl}/animeizle/ona-anime-izle"            to "Ona",
+        "${mainUrl}/animeizle/spor-anime-izle"              to "Spor",
+        "${mainUrl}/animeizle/super-guc-anime-izle"         to "Süper Güç",
+        "${mainUrl}/animeizle/tarihi-anime-izle"            to "Tarihi",
+        "${mainUrl}/animeizle/uzay-anime-izle"              to "Uzay",
+        "${mainUrl}/animeizle/vampir-anime-izle"            to "Vampir",
+        "${mainUrl}/animeizle/yaoi-anime-izle"              to "Yaoi",
+        "${mainUrl}/animeizle/yuri-anime-izle"              to "Yuri",
+        "${mainUrl}/animeizle/polisiye-anime-izle"          to "Polisiye",
+        "${mainUrl}/animeizle/samuray-anime-izle"           to "Samuray",
+        "${mainUrl}/animeizle/parodi-anime-izle"            to "Parodi",
+        "${mainUrl}/animeizle/seytanlar-anime-izle"         to "Şeytanlar",
+        "${mainUrl}/animeizle/savas-sanatlari-anime-izle"   to "Savaş Sanatları",
+        "${mainUrl}/animeizle/ona-anime-izle"               to "Ona",
         "${mainUrl}/animeizle/kisilik-bolunmesi-anime-izle" to "Kişilik Bölünmesi",
-        "${mainUrl}/animeizle/donghua-anime-izle"        to "Donghua",
-        "${mainUrl}/animeizle/isekai-anime-izle"         to "Isekai",
+        "${mainUrl}/animeizle/donghua-anime-izle"           to "Donghua",
+        "${mainUrl}/animeizle/isekai-anime-izle"            to "Isekai",
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         // ✅ HTML'den: Sayfalama /sayfa-N formatında
         val url = if (page <= 1) "${request.data}-1" else "${request.data}-$page"
-        val document = app.get(url).document
+        val document = app.get(url, headers = headers).document
 
         // ✅ HTML'den: Anime kartları div.flx-block
         val items = document.select("div.flx-block")
-        val home = items.mapNotNull { it.toMainPageResult() }
+        val home  = items.mapNotNull { it.toMainPageResult() }
 
         Log.d("TRANM", "getMainPage(${request.name}, page=$page) -> ${home.size} sonuç | URL: $url")
 
@@ -102,7 +109,7 @@ class Tranimeizle : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         // ✅ HTML'den: Arama GET /arama/{query}
         val encoded = java.net.URLEncoder.encode(query, "UTF-8")
-        val document = app.get("${mainUrl}/arama/$encoded").document
+        val document = app.get("${mainUrl}/arama/$encoded", headers = headers).document
 
         val items = document.select("div.flx-block")
         Log.d("TRANM", "search($query) -> ${items.size} sonuç")
@@ -113,31 +120,59 @@ class Tranimeizle : MainAPI() {
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
     override suspend fun load(url: String): LoadResponse? {
-        val document = app.get(url).document
+        Log.d("TRANM", "load() URL » $url")
 
-        // ✅ HTML'den: Başlık .playlist-title h1 içinde
+        val document = app.get(url, headers = headers).document
+
+        // ✅ Başlık: birden fazla olası seçici
         val title = document.selectFirst("div.playlist-title h1")?.text()?.trim()
             ?: document.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
+            ?: document.selectFirst("div.animeDetail-content h1")?.text()?.trim()
+            ?: document.selectFirst("h1")?.text()?.trim()
             ?: return null
 
-        // ✅ HTML'den: Poster og:image meta etiketinden
+        // ✅ Poster: og:image meta etiketi veya animeDetail içindeki img
         val poster = fixUrlNull(
             document.selectFirst("meta[property='og:image']")?.attr("content")
+                ?: document.selectFirst("div.animeDetail-content img")?.attr("src")
+                ?: document.selectFirst("div.animeDetail-poster img")?.attr("src")
         )
 
-        // ✅ HTML'den: Açıklama meta[name=description] içinde (HTML entity çözümlü)
-        val description = document.selectFirst("meta[name='description']")
+        // ✅ Açıklama: og:description veya meta[name=description]
+        val description = document.selectFirst("meta[property='og:description']")
             ?.attr("content")
             ?.let { org.jsoup.parser.Parser.unescapeEntities(it, true) }
-            ?.replace(Regex("<[^>]*>"), "")  // HTML tag'lerini temizle
+            ?.replace(Regex("<[^>]*>"), "")
             ?.trim()
+            ?: document.selectFirst("meta[name='description']")
+                ?.attr("content")
+                ?.let { org.jsoup.parser.Parser.unescapeEntities(it, true) }
+                ?.replace(Regex("<[^>]*>"), "")
+                ?.trim()
 
-        // ✅ HTML'den: Breadcrumb'dan anime adı ve bölüm linkleri
-        // Bölümler sağ sütunda div.animeDetail-items ol li a
-        val episodes = document.select("div.animeDetail-items ol li a").mapNotNull { el ->
+        // ✅ Tür etiketleri (breadcrumb'dan)
+        val tags = document.select("ol.breadcrumb li a")
+            .map { it.text().trim() }
+            .filter { it.isNotBlank() && it != "Animeler" }
+
+        // ✅ BÖLÜM LİSTESİ: birden fazla olası seçici
+        val episodeElements = document.select(
+            "div.animeDetail-items ol li a, " +
+            "div.animeDetail-items ul li a, " +
+            "div.bolumler a, " +
+            "ul.episode-list a"
+        )
+
+        Log.d("TRANM", "Bölüm elementleri: ${episodeElements.size}")
+
+        val episodes = episodeElements.mapNotNull { el ->
             val epHref = fixUrlNull(el.attr("href")) ?: return@mapNotNull null
-            val epName = el.selectFirst("div.etitle span")?.text()?.trim() ?: return@mapNotNull null
-            val epNum  = Regex("""(\d+)\.\s*Bölüm""").find(epName)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+            val epName = el.selectFirst("div.etitle span")?.text()?.trim()
+                ?: el.selectFirst("span")?.text()?.trim()
+                ?: el.text().trim().takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+
+            val epNum = Regex("""(\d+)\.\s*Bölüm""").find(epName)?.groupValues?.get(1)?.toIntOrNull() ?: 1
             val epSeason = Regex("""(\d+)\.\s*Sezon""").find(epName)?.groupValues?.get(1)?.toIntOrNull() ?: 1
 
             newEpisode(epHref) {
@@ -147,11 +182,21 @@ class Tranimeizle : MainAPI() {
             }
         }
 
-        Log.d("TRANM", "load($url) -> ${episodes.size} bölüm")
+        Log.d("TRANM", "load($url) -> ${episodes.size} bölüm | title=$title")
+
+        // Bölüm bulunamadıysa tek bölümlük yapı olarak dön
+        if (episodes.isEmpty()) {
+            Log.w("TRANM", "Bölüm bulunamadı, tek bölümlük seri olarak dönülüyor")
+            return newMovieLoadResponse(title, url, TvType.Anime, url) {
+                this.posterUrl = poster
+                this.plot      = description
+            }
+        }
 
         return newTvSeriesLoadResponse(title, url, TvType.Anime, episodes) {
             this.posterUrl = poster
             this.plot      = description
+            this.tags      = tags
         }
     }
 
@@ -162,19 +207,21 @@ class Tranimeizle : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         Log.d("TRANM", "loadLinks data » $data")
-        val document = app.get(data).document
+
+        val document = app.get(data, headers = headers).document
 
         // ✅ HTML'den: animeWatch.initialize(animeId, episodeId, fansubId, fansubAd, fansubUrl)
-        // Bu JS fonksiyonu /js/site.js içinde tanımlı ve AJAX ile kaynakları yüklüyor.
-        // En yaygın endpoint: /Video/GetVideo?animeId=X&episodeId=Y&fansubId=Z
         val scriptText = document.select("script")
             .map { it.data() }
             .firstOrNull { it.contains("animeWatch.initialize") }
-            ?: return false
+            ?: run {
+                Log.e("TRANM", "animeWatch.initialize bulunamadı!")
+                return false
+            }
 
         val match = Regex("""animeWatch\.initialize\((\d+),\s*(\d+),\s*(\d+)""").find(scriptText)
             ?: run {
-                Log.e("TRANM", "animeWatch.initialize bulunamadı!")
+                Log.e("TRANM", "animeWatch.initialize regex eşleşmedi!")
                 return false
             }
 
@@ -186,23 +233,25 @@ class Tranimeizle : MainAPI() {
 
         // Kaynak listesini AJAX ile çek
         val sourcesUrl = "${mainUrl}/Video/GetVideo?animeId=$animeId&episodeId=$episodeId&fansubId=$fansubId"
-        val sourcesResponse = app.get(
-            sourcesUrl,
-            headers = mapOf(
-                "X-Requested-With" to "XMLHttpRequest",
-                "Referer"          to data
-            )
-        ).text
+
+        val sourcesResponse = try {
+            app.get(
+                sourcesUrl,
+                headers = mapOf(
+                    "X-Requested-With" to "XMLHttpRequest",
+                    "Referer"          to data,
+                    "User-Agent"       to headers["User-Agent"].orEmpty()
+                )
+            ).text
+        } catch (e: Exception) {
+            Log.e("TRANM", "Kaynak listesi alınamadı: ${e.message}")
+            return false
+        }
 
         Log.d("TRANM", "sourcesResponse length: ${sourcesResponse.length}")
-        Log.d("TRANM", "sourcesResponse preview: ${sourcesResponse.take(500)}")
+        Log.d("TRANM", "sourcesResponse preview: ${sourcesResponse.take(800)}")
 
-        // Muhtemel yanıt formatları:
-        // 1) JSON: {"url":"...","name":"..."}
-        // 2) HTML: <a data-url="...">...</a> veya <button>...</button>
-        // 3) Doğrudan URL veya iframe src
-
-        // 1) JSON dene
+        // 1) JSON formatı
         val jsonRegex = Regex(""""url"\s*:\s*"([^"]+)"""")
         val jsonMatches = jsonRegex.findAll(sourcesResponse).toList()
         if (jsonMatches.isNotEmpty()) {
@@ -214,7 +263,7 @@ class Tranimeizle : MainAPI() {
             return true
         }
 
-        // 2) HTML parse et
+        // 2) HTML içindeki iframe'ler
         val subDoc = org.jsoup.Jsoup.parse(sourcesResponse, sourcesUrl)
         val iframes = subDoc.select("iframe[src]")
         if (iframes.isNotEmpty()) {
@@ -226,7 +275,7 @@ class Tranimeizle : MainAPI() {
             return true
         }
 
-        // 3) Doğrudan m3u8/url regex
+        // 3) Doğrudan m3u8/mp4 URL regex
         val urlRegex = Regex("""(https?://[^\s"'<>]+\.(?:m3u8|mp4)[^\s"'<>]*)""")
         val urlMatches = urlRegex.findAll(sourcesResponse).toList()
         if (urlMatches.isNotEmpty()) {
