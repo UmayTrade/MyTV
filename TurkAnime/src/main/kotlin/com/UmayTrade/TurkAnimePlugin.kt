@@ -5,8 +5,8 @@ import com.lagradost.cloudstream3.plugins.Plugin
 import android.content.Context
 
 @CloudstreamPlugin
-class TurkAnimePlugin: Plugin() {
+class TranimeizlePlugin : Plugin() {
     override fun load(context: Context) {
-        registerMainAPI(TurkAnime())
+        registerMainAPI(Tranimeizle())
     }
 }
