@@ -8,14 +8,16 @@ import com.lagradost.cloudstream3.utils.*
 import android.util.Base64
 import com.lagradost.cloudstream3.extractors.helper.AesHelper
 
-class TurkAnime : MainAPI() {
-    override var mainUrl              = "https://www.turkanime.tv"
-    override var name                 = "TurkAnime"
+class Tranimeizle : MainAPI() {
+    override var mainUrl              = "https://www.tranimeizle.io"
+    override var name                 = "Tranimeizle"
     override val hasMainPage          = true
     override var lang                 = "tr"
     override val hasQuickSearch       = false
     override val supportedTypes       = setOf(TvType.Anime)
 
+    // NOT: Aşağıdaki tür URL'leri hedef sitenin gerçek yol yapısına göre
+    // güncellenmelidir. Şu an orijinal TurkAnime yapısı korunmuştur.
     override val mainPage = mainPageOf(
         "${mainUrl}/anime-turu/1/Aksiyon"                                   to "Aksiyon",
         "${mainUrl}/anime-turu/3/Arabalar"                                  to "Arabalar",
@@ -63,7 +65,9 @@ class TurkAnime : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
-        val home     = document.select("div#orta-icerik div.panel").mapNotNull { it.toMainPageResult() }
+        // NOT: Hedef sitede sayfalama varsa ?sayfa=page şeklinde URL'ye eklenmeli.
+        // Örnek: "${request.data}?sayfa=$page"
+        val home = document.select("div#orta-icerik div.panel").mapNotNull { it.toMainPageResult() }
 
         return newHomePageResponse(request.name, home)
     }
@@ -77,8 +81,8 @@ class TurkAnime : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.post("${mainUrl}/arama", data=mapOf("arama" to query)).document
-
+        // NOT: Hedef sitenin arama yolu ve parametresi farklı olabilir.
+        val document = app.post("${mainUrl}/arama", data = mapOf("arama" to query)).document
         return document.select("div#orta-icerik div.panel").mapNotNull { it.toMainPageResult() }
     }
 
@@ -87,21 +91,28 @@ class TurkAnime : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
+        // NOT: Aşağıdaki seçiciler hedef sitenin gerçek yapısına göre düzenlenmelidir.
         val title       = document.selectFirst("div#detayPaylas div.panel-title")?.text()?.trim() ?: return null
         val poster      = fixUrlNull(document.selectFirst("div#detayPaylas div.imaj img")?.attr("data-src"))
         val description = document.selectFirst("div#detayPaylas p.ozet")?.text()?.trim()
         val year        = document.selectFirst("div#detayPaylas a[href*='yil/']")?.attr("href")?.substringAfter("yil/")?.toIntOrNull()
         val tags        = document.select("div#animedetay a[href*='anime-turu']").map { it.text() }
 
-        val bolumlerUrl = fixUrlNull(document.selectFirst("a[data-url*='ajax/bolumler&animeId=']")?.attr("data-url")) ?: return null
-        val bolumlerDoc = app.get(
-            bolumlerUrl,
-            headers = mapOf(
-                "X-Requested-With" to "XMLHttpRequest",
-                "token"            to document.selectFirst("meta[name='_token']")!!.attr("content")
-            ),
-            cookies = mapOf("yasOnay" to "1")
-        ).document
+        // Bölüm listesi AJAX ile alınıyor olabilir; hedef sitede bölümler doğrudan
+        // sayfada yer alıyorsa bu kısım basitleştirilebilir.
+        val bolumlerUrl = fixUrlNull(document.selectFirst("a[data-url*='ajax/bolumler&animeId=']")?.attr("data-url"))
+        val bolumlerDoc: Document = if (bolumlerUrl != null) {
+            app.get(
+                bolumlerUrl,
+                headers = mapOf(
+                    "X-Requested-With" to "XMLHttpRequest",
+                    "token"            to (document.selectFirst("meta[name='_token']")?.attr("content") ?: "")
+                ),
+                cookies = mapOf("yasOnay" to "1")
+            ).document
+        } else {
+            document
+        }
 
         val episodes = bolumlerDoc.select("div#bolum-list li").mapNotNull {
             val epHref    = fixUrlNull(it.selectFirst("a[href*='/video/']")?.attr("href")) ?: return@mapNotNull null
@@ -111,8 +122,8 @@ class TurkAnime : MainAPI() {
             val epEpisode = Regex("""(\d+). Bölüm""").find(epTitle)?.groupValues?.get(1)?.toIntOrNull() ?: 1
 
             newEpisode(epHref) {
-                this.name = epName
-                this.season = epSeason
+                this.name    = epName
+                this.season  = epSeason
                 this.episode = epEpisode
             }
         }
@@ -125,36 +136,54 @@ class TurkAnime : MainAPI() {
         }
     }
 
-    private suspend fun iframe2AesLink(iframe: String): String? {
+    private fun iframe2AesLink(iframe: String): String? {
         var aesData = iframe.substringAfter("embed/#/url/").substringBefore("?status")
         aesData     = String(Base64.decode(aesData, Base64.DEFAULT))
 
         val aesKey  = "710^8A@3@>T2}#zN5xK?kR7KNKb@-A!LzYL5~M1qU0UfdWsZoBm4UUat%}ueUv6E--*hDPPbH7K2bp9^3o41hw,khL:}Kx8080@M"
-        val aesLink = AesHelper.cryptoAESHandler(aesData, aesKey.toByteArray(), false)?.replace("\\", "") ?: throw ErrorLoadingException("failed to decrypt")
+        val aesLink = AesHelper.cryptoAESHandler(aesData, aesKey.toByteArray(), false)?.replace("\\", "")
+            ?: throw ErrorLoadingException("failed to decrypt")
 
         return fixUrlNull(aesLink.replace("\"", ""))
     }
 
-    private suspend fun iframe2Load(document: Document, @Suppress("UNUSED_PARAMETER") iframe: String, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit) {
+    private suspend fun iframe2Load(
+        document: Document,
+        @Suppress("UNUSED_PARAMETER") iframe: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        // NOT: Hedef sitenin video kaynağı yapısına göre bu blok tamamen
+        // yeniden yazılmalıdır. Şu an orijinal mantık korunmuştur.
         for (button in document.select("button[onclick*='ajax/videosec']")) {
-            val butonLink = fixUrlNull(button.attr("onclick").substringAfter("IndexIcerik('").substringBefore("'")) ?: continue
+            val butonLink = fixUrlNull(
+                button.attr("onclick").substringAfter("IndexIcerik('").substringBefore("'")
+            ) ?: continue
             val butonName = button.ownText().trim()
-            val subDoc    = app.get(butonLink, headers=mapOf("X-Requested-With" to "XMLHttpRequest")).document
+            val subDoc = app.get(
+                butonLink,
+                headers = mapOf("X-Requested-With" to "XMLHttpRequest")
+            ).document
 
-            val subFrame  = fixUrlNull(subDoc.selectFirst("iframe")?.attr("src")) ?: continue
-            val subLink   = iframe2AesLink(subFrame) ?: continue
+            val subFrame = fixUrlNull(subDoc.selectFirst("iframe")?.attr("src")) ?: continue
+            val subLink  = iframe2AesLink(subFrame) ?: continue
             Log.d("TRANM", "$butonName » $subLink")
 
             loadExtractor(subLink, "${mainUrl}/", subtitleCallback, callback)
         }
     }
 
-    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
         Log.d("TRANM", "data » $data")
         val document = app.get(data).document
 
         val iframeElement = document.selectFirst("iframe")
-        val iframe = fixUrlNull(iframeElement?.attr("src"))
+        val iframe        = fixUrlNull(iframeElement?.attr("src"))
 
         if (iframe == null || iframe.contains("a-ads.com")) {
             val buttons = document.select("button[onclick*='IndexIcerik']")
@@ -167,21 +196,23 @@ class TurkAnime : MainAPI() {
 
                 Log.d("TRANM", "Extra seçici ile alınan link: $subLink")
 
-                val subResponse = app.get(subLink, headers = mapOf("X-Requested-With" to "XMLHttpRequest"))
+                val subResponse = app.get(
+                    subLink,
+                    headers = mapOf("X-Requested-With" to "XMLHttpRequest")
+                )
                 val subHtml = subResponse.body?.string().orEmpty()
 
                 val subDoc = org.jsoup.Jsoup.parse(subHtml, subLink)
 
-                // Önce artplayer-app içindeki data-url kontrol edilir
                 val dataUrl = subDoc.selectFirst("div.artplayer-app")?.attr("data-url")
-                if (dataUrl != null && dataUrl.endsWith(".m3u8")) {
+                if (!dataUrl.isNullOrBlank() && dataUrl.endsWith(".m3u8")) {
                     Log.d("TRANM", "M3U8 data-url bulundu: $dataUrl")
                     callback(
                         newExtractorLink(
-                            name = "TurkAnime",
-                            source = "TurkAnime",
-                            url = dataUrl,
-                            type = ExtractorLinkType.M3U8
+                            name   = "Tranimeizle",
+                            source = "Tranimeizle",
+                            url    = dataUrl,
+                            type   = ExtractorLinkType.M3U8
                         ) {
                             quality = Qualities.Unknown.value
                             headers = mapOf("Referer" to subLink)
@@ -190,7 +221,6 @@ class TurkAnime : MainAPI() {
                     continue
                 }
 
-                // Eğer data-url yoksa iframe'e fallback yap
                 val subFrame = fixUrlNull(subDoc.selectFirst("iframe")?.attr("src")) ?: continue
                 Log.d("TRANM", "subFrame » $subFrame")
 
