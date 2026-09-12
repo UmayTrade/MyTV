@@ -3,7 +3,7 @@ version = 14
 cloudstream {
     authors     = listOf("keyiflerolsun")
     language    = "tr"
-    description = "Türk Anime TV - Türkiye'nin Online Anime izleme sitesi."
+    description = "Tranimeizle - Türkçe altyazılı anime izleme sitesi."
 
     /**
      * Status int as the following:
@@ -14,5 +14,5 @@ cloudstream {
     **/
     status  = 1 // will be 3 if unspecified
     tvTypes = listOf("Anime")
-    iconUrl = "https://www.google.com/s2/favicons?domain=www.turkanime.co&sz=%size%"
+    iconUrl = "https://www.google.com/s2/favicons?domain=www.tranimeizle.io&sz=%size%"
 }
