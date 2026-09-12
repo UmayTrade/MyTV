@@ -14,15 +14,22 @@ class Tranimeizle : MainAPI() {
     override val hasQuickSearch       = false
     override val supportedTypes       = setOf(TvType.Anime)
 
-    // Ortak istek başlıkları (403 hatalarını önlemek için)
+    // ✅ Tam tarayıcı benzeri başlıklar (403/Cloudflare bypass için)
     private val headers = mapOf(
-        "User-Agent"      to "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-        "Referer"         to "$mainUrl/",
-        "Accept"          to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8"
+        "User-Agent"                to "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+        "Accept"                    to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language"           to "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Encoding"           to "gzip, deflate, br",
+        "Connection"                to "keep-alive",
+        "Upgrade-Insecure-Requests" to "1",
+        "Sec-Fetch-Dest"            to "document",
+        "Sec-Fetch-Mode"            to "navigate",
+        "Sec-Fetch-Site"            to "none",
+        "Sec-Fetch-User"            to "?1",
+        "Cache-Control"             to "max-age=0",
+        "DNT"                       to "1"
     )
 
-    // ✅ HTML'den çıkarılan DOĞRU tür URL'leri
     override val mainPage = mainPageOf(
         "${mainUrl}/animeizle/aksiyon-anime-izle"           to "Aksiyon",
         "${mainUrl}/animeizle/arabalar-anime-izle"          to "Arabalar",
@@ -75,30 +82,32 @@ class Tranimeizle : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // ✅ HTML'den: Sayfalama /sayfa-N formatında
         val url = if (page <= 1) "${request.data}-1" else "${request.data}-$page"
-        val document = app.get(url, headers = headers).document
+        Log.d("TRANM", "getMainPage() URL » $url")
 
-        // ✅ HTML'den: Anime kartları div.flx-block
+        val document = try {
+            app.get(url, headers = headers).document
+        } catch (e: Exception) {
+            Log.e("TRANM", "getMainPage HATA: ${e.message}")
+            return newHomePageResponse(request.name, emptyList())
+        }
+
         val items = document.select("div.flx-block")
         val home  = items.mapNotNull { it.toMainPageResult() }
 
-        Log.d("TRANM", "getMainPage(${request.name}, page=$page) -> ${home.size} sonuç | URL: $url")
+        Log.d("TRANM", "getMainPage(${request.name}, page=$page) -> ${home.size} sonuç")
 
         return newHomePageResponse(request.name, home)
     }
 
     private fun Element.toMainPageResult(): SearchResponse? {
-        // ✅ HTML'den: Link a.news-image veya data-href
         val href = fixUrlNull(
             this.selectFirst("a.news-image")?.attr("href")
                 ?: this.attr("data-href")
         ) ?: return null
 
-        // ✅ HTML'den: Başlık div.bar h4 içinde
         val title = this.selectFirst("div.bar h4")?.text()?.trim() ?: return null
 
-        // ✅ HTML'den: Poster img.img-responsive
         val posterUrl = fixUrlNull(this.selectFirst("img.img-responsive")?.attr("src"))
 
         return newAnimeSearchResponse(title, href, TvType.Anime) {
@@ -107,9 +116,16 @@ class Tranimeizle : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        // ✅ HTML'den: Arama GET /arama/{query}
         val encoded = java.net.URLEncoder.encode(query, "UTF-8")
-        val document = app.get("${mainUrl}/arama/$encoded", headers = headers).document
+        val url = "${mainUrl}/arama/$encoded"
+        Log.d("TRANM", "search() URL » $url")
+
+        val document = try {
+            app.get(url, headers = headers).document
+        } catch (e: Exception) {
+            Log.e("TRANM", "search HATA: ${e.message}")
+            return emptyList()
+        }
 
         val items = document.select("div.flx-block")
         Log.d("TRANM", "search($query) -> ${items.size} sonuç")
@@ -119,26 +135,59 @@ class Tranimeizle : MainAPI() {
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
+    // ============================================================
+    // DETAY SAYFASI — Detaylı log ve hata yakalama içerir
+    // ============================================================
     override suspend fun load(url: String): LoadResponse? {
-        Log.d("TRANM", "load() URL » $url")
+        Log.d("TRANM", "════════════════════════════════════════")
+        Log.d("TRANM", "load() BAŞLADI: $url")
 
-        val document = app.get(url, headers = headers).document
+        // 1) Sayfayı çekmeyi dene
+        val response = try {
+            app.get(url, headers = headers)
+        } catch (e: Exception) {
+            Log.e("TRANM", "!!! HTTP İSTEĞİ HATA: ${e.javaClass.simpleName}: ${e.message}")
+            throw ErrorLoadingException("HTTP isteği başarısız: ${e.message}")
+        }
 
-        // ✅ Başlık: birden fazla olası seçici
+        Log.d("TRANM", "HTTP Status Code: ${response.code}")
+        Log.d("TRANM", "HTTP Message: ${response.message}")
+        Log.d("TRANM", "Response URL: ${response.url}")
+        Log.d("TRANM", "Content-Type: ${response.headers["Content-Type"]}")
+        Log.d("TRANM", "Response length: ${response.text.length}")
+
+        if (!response.isSuccessful) {
+            Log.e("TRANM", "!!! BAŞARISIZ HTTP: ${response.code}")
+            Log.e("TRANM", "Yanıt ilk 500: ${response.text.take(500)}")
+            throw ErrorLoadingException("Site yanıt vermedi: HTTP ${response.code}")
+        }
+
+        val document = response.document
+        Log.d("TRANM", "HTML title etiketi: '${document.title()}'")
+        Log.d("TRANM", "HTML ilk 500 karakter: ${document.outerHtml().take(500)}")
+
+        // 2) Başlık
         val title = document.selectFirst("div.playlist-title h1")?.text()?.trim()
             ?: document.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
             ?: document.selectFirst("div.animeDetail-content h1")?.text()?.trim()
             ?: document.selectFirst("h1")?.text()?.trim()
-            ?: return null
 
-        // ✅ Poster: og:image meta etiketi veya animeDetail içindeki img
+        Log.d("TRANM", "Bulunan başlık: '$title'")
+
+        if (title.isNullOrBlank()) {
+            Log.e("TRANM", "!!! Başlık bulunamadı, sayfa yapısı beklenmiyor")
+            return null
+        }
+
+        // 3) Poster
         val poster = fixUrlNull(
             document.selectFirst("meta[property='og:image']")?.attr("content")
                 ?: document.selectFirst("div.animeDetail-content img")?.attr("src")
                 ?: document.selectFirst("div.animeDetail-poster img")?.attr("src")
         )
+        Log.d("TRANM", "Bulunan poster: $poster")
 
-        // ✅ Açıklama: og:description veya meta[name=description]
+        // 4) Açıklama
         val description = document.selectFirst("meta[property='og:description']")
             ?.attr("content")
             ?.let { org.jsoup.parser.Parser.unescapeEntities(it, true) }
@@ -150,20 +199,32 @@ class Tranimeizle : MainAPI() {
                 ?.replace(Regex("<[^>]*>"), "")
                 ?.trim()
 
-        // ✅ Tür etiketleri (breadcrumb'dan)
+        // 5) Türler
         val tags = document.select("ol.breadcrumb li a")
             .map { it.text().trim() }
             .filter { it.isNotBlank() && it != "Animeler" }
 
-        // ✅ BÖLÜM LİSTESİ: birden fazla olası seçici
-        val episodeElements = document.select(
-            "div.animeDetail-items ol li a, " +
-            "div.animeDetail-items ul li a, " +
-            "div.bolumler a, " +
-            "ul.episode-list a"
+        // 6) Bölüm listesi — birden fazla deneme
+        val selectorList = listOf(
+            "div.animeDetail-items ol li a",
+            "div.animeDetail-items ul li a",
+            "div.animeDetail-playlist ol li a",
+            "div.animeDetail-playlist ul li a",
+            "div.bolumler a",
+            "ul.episode-list a",
+            "div.episodes a"
         )
 
-        Log.d("TRANM", "Bölüm elementleri: ${episodeElements.size}")
+        var episodeElements = document.select(selectorList[0])
+        for ((idx, sel) in selectorList.withIndex()) {
+            val found = document.select(sel)
+            Log.d("TRANM", "Seçici #$idx '$sel' -> ${found.size} element")
+            if (found.size > episodeElements.size) {
+                episodeElements = found
+            }
+        }
+
+        Log.d("TRANM", "TOPLAM bölüm elementi: ${episodeElements.size}")
 
         val episodes = episodeElements.mapNotNull { el ->
             val epHref = fixUrlNull(el.attr("href")) ?: return@mapNotNull null
@@ -182,11 +243,11 @@ class Tranimeizle : MainAPI() {
             }
         }
 
-        Log.d("TRANM", "load($url) -> ${episodes.size} bölüm | title=$title")
+        Log.d("TRANM", "Parse edilen bölüm sayısı: ${episodes.size}")
+        Log.d("TRANM", "════════════════════════════════════════")
 
-        // Bölüm bulunamadıysa tek bölümlük yapı olarak dön
         if (episodes.isEmpty()) {
-            Log.w("TRANM", "Bölüm bulunamadı, tek bölümlük seri olarak dönülüyor")
+            Log.w("TRANM", "Bölüm yok, tek yapım olarak dönülüyor")
             return newMovieLoadResponse(title, url, TvType.Anime, url) {
                 this.posterUrl = poster
                 this.plot      = description
@@ -200,30 +261,48 @@ class Tranimeizle : MainAPI() {
         }
     }
 
+    // ============================================================
+    // LİNKLER — Detaylı log
+    // ============================================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("TRANM", "loadLinks data » $data")
+        Log.d("TRANM", "════════════════════════════════════════")
+        Log.d("TRANM", "loadLinks BAŞLADI: $data")
 
-        val document = app.get(data, headers = headers).document
+        val document = try {
+            app.get(data, headers = headers).document
+        } catch (e: Exception) {
+            Log.e("TRANM", "loadLinks HTTP HATA: ${e.message}")
+            return false
+        }
 
-        // ✅ HTML'den: animeWatch.initialize(animeId, episodeId, fansubId, fansubAd, fansubUrl)
-        val scriptText = document.select("script")
-            .map { it.data() }
-            .firstOrNull { it.contains("animeWatch.initialize") }
-            ?: run {
-                Log.e("TRANM", "animeWatch.initialize bulunamadı!")
-                return false
+        Log.d("TRANM", "Sayfa başlığı: '${document.title()}'")
+
+        // animeWatch.initialize(animeId, episodeId, fansubId, ...)
+        val allScripts = document.select("script").map { it.data() }
+        Log.d("TRANM", "Toplam ${allScripts.size} script etiketi")
+
+        val scriptText = allScripts.firstOrNull { it.contains("animeWatch.initialize") }
+        if (scriptText == null) {
+            Log.e("TRANM", "!!! animeWatch.initialize bulunamadı")
+            Log.d("TRANM", "Script önizlemeleri:")
+            allScripts.forEachIndexed { i, s ->
+                if (s.isNotBlank()) Log.d("TRANM", "  script[$i]: ${s.take(200)}")
             }
+            return false
+        }
+
+        Log.d("TRANM", "animeWatch script bulundu: ${scriptText.take(300)}")
 
         val match = Regex("""animeWatch\.initialize\((\d+),\s*(\d+),\s*(\d+)""").find(scriptText)
-            ?: run {
-                Log.e("TRANM", "animeWatch.initialize regex eşleşmedi!")
-                return false
-            }
+        if (match == null) {
+            Log.e("TRANM", "!!! regex eşleşmedi")
+            return false
+        }
 
         val animeId   = match.groupValues[1]
         val episodeId = match.groupValues[2]
@@ -231,62 +310,76 @@ class Tranimeizle : MainAPI() {
 
         Log.d("TRANM", "animeId=$animeId episodeId=$episodeId fansubId=$fansubId")
 
-        // Kaynak listesini AJAX ile çek
-        val sourcesUrl = "${mainUrl}/Video/GetVideo?animeId=$animeId&episodeId=$episodeId&fansubId=$fansubId"
+        // Kaynak listesini AJAX ile çek — birkaç olası endpoint denenir
+        val endpointsToTry = listOf(
+            "${mainUrl}/Video/GetVideo?animeId=$animeId&episodeId=$episodeId&fansubId=$fansubId",
+            "${mainUrl}/Video/GetSources?animeId=$animeId&episodeId=$episodeId&fansubId=$fansubId",
+            "${mainUrl}/Video/VideoSources?animeId=$animeId&episodeId=$episodeId&fansubId=$fansubId",
+            "${mainUrl}/Anime/GetVideoSources?animeId=$animeId&episodeId=$episodeId&fansubId=$fansubId"
+        )
 
-        val sourcesResponse = try {
-            app.get(
-                sourcesUrl,
-                headers = mapOf(
-                    "X-Requested-With" to "XMLHttpRequest",
-                    "Referer"          to data,
-                    "User-Agent"       to headers["User-Agent"].orEmpty()
+        var sourcesResponse: String? = null
+        for (endpoint in endpointsToTry) {
+            Log.d("TRANM", "Denenen endpoint: $endpoint")
+            try {
+                val r = app.get(
+                    endpoint,
+                    headers = headers + mapOf(
+                        "X-Requested-With" to "XMLHttpRequest",
+                        "Referer"          to data,
+                        "Accept"           to "application/json, text/javascript, */*; q=0.01"
+                    )
                 )
-            ).text
-        } catch (e: Exception) {
-            Log.e("TRANM", "Kaynak listesi alınamadı: ${e.message}")
+                Log.d("TRANM", "  -> HTTP ${r.code} | length: ${r.text.length}")
+                Log.d("TRANM", "  -> ilk 300: ${r.text.take(300)}")
+                if (r.isSuccessful && r.text.length > 5) {
+                    sourcesResponse = r.text
+                    break
+                }
+            } catch (e: Exception) {
+                Log.e("TRANM", "  -> HATA: ${e.message}")
+            }
+        }
+
+        if (sourcesResponse == null) {
+            Log.e("TRANM", "!!! Hiçbir endpoint yanıt vermedi")
             return false
         }
 
-        Log.d("TRANM", "sourcesResponse length: ${sourcesResponse.length}")
-        Log.d("TRANM", "sourcesResponse preview: ${sourcesResponse.take(800)}")
-
-        // 1) JSON formatı
-        val jsonRegex = Regex(""""url"\s*:\s*"([^"]+)"""")
-        val jsonMatches = jsonRegex.findAll(sourcesResponse).toList()
+        // 1) JSON: "url":"..."
+        val jsonMatches = Regex(""""url"\s*:\s*"([^"]+)"""").findAll(sourcesResponse).toList()
         if (jsonMatches.isNotEmpty()) {
             for (m in jsonMatches) {
                 val videoUrl = m.groupValues[1].replace("\\/", "/")
-                Log.d("TRANM", "JSON URL: $videoUrl")
+                Log.d("TRANM", "JSON URL » $videoUrl")
                 loadExtractor(videoUrl, "${mainUrl}/", subtitleCallback, callback)
             }
             return true
         }
 
-        // 2) HTML içindeki iframe'ler
-        val subDoc = org.jsoup.Jsoup.parse(sourcesResponse, sourcesUrl)
+        // 2) HTML iframe
+        val subDoc = org.jsoup.Jsoup.parse(sourcesResponse, data)
         val iframes = subDoc.select("iframe[src]")
         if (iframes.isNotEmpty()) {
             for (iframe in iframes) {
                 val src = fixUrlNull(iframe.attr("src")) ?: continue
-                Log.d("TRANM", "iframe src: $src")
+                Log.d("TRANM", "iframe » $src")
                 loadExtractor(src, "${mainUrl}/", subtitleCallback, callback)
             }
             return true
         }
 
-        // 3) Doğrudan m3u8/mp4 URL regex
-        val urlRegex = Regex("""(https?://[^\s"'<>]+\.(?:m3u8|mp4)[^\s"'<>]*)""")
-        val urlMatches = urlRegex.findAll(sourcesResponse).toList()
+        // 3) Doğrudan m3u8/mp4
+        val urlMatches = Regex("""(https?://[^\s"'<>]+\.(?:m3u8|mp4)[^\s"'<>]*)""").findAll(sourcesResponse).toList()
         if (urlMatches.isNotEmpty()) {
             for (m in urlMatches) {
-                Log.d("TRANM", "Direct URL: ${m.groupValues[1]}")
+                Log.d("TRANM", "Direct URL » ${m.groupValues[1]}")
                 loadExtractor(m.groupValues[1], "${mainUrl}/", subtitleCallback, callback)
             }
             return true
         }
 
-        Log.w("TRANM", "Hiçbir video kaynağı çözümlenemedi. Ham yanıt loglara bakın.")
+        Log.w("TRANM", "Hiçbir kaynak çözümlenemedi. Ham yanıt: ${sourcesResponse.take(500)}")
         return false
     }
 }
