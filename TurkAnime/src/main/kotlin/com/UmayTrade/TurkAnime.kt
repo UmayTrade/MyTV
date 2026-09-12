@@ -16,8 +16,6 @@ class Tranimeizle : MainAPI() {
     override val hasQuickSearch       = false
     override val supportedTypes       = setOf(TvType.Anime)
 
-    // NOT: Aşağıdaki tür URL'leri hedef sitenin gerçek yol yapısına göre
-    // güncellenmelidir. Şu an orijinal TurkAnime yapısı korunmuştur.
     override val mainPage = mainPageOf(
         "${mainUrl}/anime-turu/1/Aksiyon"                                   to "Aksiyon",
         "${mainUrl}/anime-turu/3/Arabalar"                                  to "Arabalar",
@@ -65,9 +63,7 @@ class Tranimeizle : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
-        // NOT: Hedef sitede sayfalama varsa ?sayfa=page şeklinde URL'ye eklenmeli.
-        // Örnek: "${request.data}?sayfa=$page"
-        val home = document.select("div#orta-icerik div.panel").mapNotNull { it.toMainPageResult() }
+        val home     = document.select("div#orta-icerik div.panel").mapNotNull { it.toMainPageResult() }
 
         return newHomePageResponse(request.name, home)
     }
@@ -81,7 +77,6 @@ class Tranimeizle : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        // NOT: Hedef sitenin arama yolu ve parametresi farklı olabilir.
         val document = app.post("${mainUrl}/arama", data = mapOf("arama" to query)).document
         return document.select("div#orta-icerik div.panel").mapNotNull { it.toMainPageResult() }
     }
@@ -91,15 +86,12 @@ class Tranimeizle : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
-        // NOT: Aşağıdaki seçiciler hedef sitenin gerçek yapısına göre düzenlenmelidir.
         val title       = document.selectFirst("div#detayPaylas div.panel-title")?.text()?.trim() ?: return null
         val poster      = fixUrlNull(document.selectFirst("div#detayPaylas div.imaj img")?.attr("data-src"))
         val description = document.selectFirst("div#detayPaylas p.ozet")?.text()?.trim()
         val year        = document.selectFirst("div#detayPaylas a[href*='yil/']")?.attr("href")?.substringAfter("yil/")?.toIntOrNull()
         val tags        = document.select("div#animedetay a[href*='anime-turu']").map { it.text() }
 
-        // Bölüm listesi AJAX ile alınıyor olabilir; hedef sitede bölümler doğrudan
-        // sayfada yer alıyorsa bu kısım basitleştirilebilir.
         val bolumlerUrl = fixUrlNull(document.selectFirst("a[data-url*='ajax/bolumler&animeId=']")?.attr("data-url"))
         val bolumlerDoc: Document = if (bolumlerUrl != null) {
             app.get(
@@ -136,7 +128,10 @@ class Tranimeizle : MainAPI() {
         }
     }
 
-    private fun iframe2AesLink(iframe: String): String? {
+    // ✅ DÜZELTME: suspend anahtar kelimesi eklendi.
+    // AesHelper.cryptoAESHandler suspend bir fonksiyon olduğu için,
+    // onu çağıran bu fonksiyonun da suspend olması gerekir.
+    private suspend fun iframe2AesLink(iframe: String): String? {
         var aesData = iframe.substringAfter("embed/#/url/").substringBefore("?status")
         aesData     = String(Base64.decode(aesData, Base64.DEFAULT))
 
@@ -153,8 +148,6 @@ class Tranimeizle : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        // NOT: Hedef sitenin video kaynağı yapısına göre bu blok tamamen
-        // yeniden yazılmalıdır. Şu an orijinal mantık korunmuştur.
         for (button in document.select("button[onclick*='ajax/videosec']")) {
             val butonLink = fixUrlNull(
                 button.attr("onclick").substringAfter("IndexIcerik('").substringBefore("'")
