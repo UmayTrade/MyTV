@@ -6,13 +6,11 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import java.net.URLDecoder
 import java.net.URLEncoder
 
 class DiziBol : MainAPI() {
@@ -48,14 +46,14 @@ class DiziBol : MainAPI() {
             val response = app.get(url)
             val res = response.parsedSafe<WListResponse>()
             if (res == null) {
-                newHomePageResponse(emptyList())
+                newHomePageResponse(request.name, emptyList())
             } else {
                 val items = res.data?.mapNotNull { it.toSearchResponse() } ?: emptyList()
                 val hasNext = (res.pagination?.page ?: 1) < (res.pagination?.totalPages ?: 1)
                 newHomePageResponse(request.name, items, hasNext)
             }
         } catch (e: Exception) {
-            newHomePageResponse(emptyList())
+            newHomePageResponse(request.name, emptyList())
         }
     }
 
