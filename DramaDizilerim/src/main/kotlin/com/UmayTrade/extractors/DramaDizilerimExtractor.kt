@@ -1,4 +1,4 @@
-package com.blackhope01.extractors
+package com.UmayTrade.extractors
 
 import android.util.Log
 import com.lagradost.cloudstream3.*
