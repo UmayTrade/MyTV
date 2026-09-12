@@ -1,5 +1,3 @@
-
-
 package com.UmayTrade
 
 import android.util.Log
@@ -127,7 +125,7 @@ class TurkAnime : MainAPI() {
         }
     }
 
-    private fun iframe2AesLink(iframe: String): String? {
+    private suspend fun iframe2AesLink(iframe: String): String? {
         var aesData = iframe.substringAfter("embed/#/url/").substringBefore("?status")
         aesData     = String(Base64.decode(aesData, Base64.DEFAULT))
 
@@ -138,43 +136,6 @@ class TurkAnime : MainAPI() {
     }
 
     private suspend fun iframe2Load(document: Document, @Suppress("UNUSED_PARAMETER") iframe: String, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit) {
-        // val mainVideo = iframe2AesLink(iframe)
-        // if (mainVideo != null) {
-        //     val mainKey = mainVideo.split("/").last()
-        //     val mainAPI = app.get(
-        //         "${mainUrl}/sources/${mainKey}/true",
-        //         headers = mapOf(
-        //             "Content-Type"     to "application/json",
-        //             "X-Requested-With" to "XMLHttpRequest",
-        //             "Csrf-Token"       to "EqdGHqwZJvydjfbmuYsZeGvBxDxnQXeARRqUNbhRYnPEWqdDnYFEKVBaUPCAGTZA",
-        //             "Connection"       to "keep-alive",
-        //             "Sec-Fetch-Dest"   to "empty",
-        //             "Sec-Fetch-Mode"   to "cors",
-        //             "Sec-Fetch-Site"   to "same-origin",
-        //             "Pragma"           to "no-cache",
-        //             "Cache-Control"    to "no-cache",
-        //         ),
-        //         referer = mainVideo,
-        //         cookies = mapOf("yasOnay" to "1")
-        //     ).text
-
-        //     val m3uLink = fixUrlNull(Regex("""file\":\"([^\"]+)""").find(mainAPI)?.groupValues?.get(1)?.replace("\\", ""))
-        //     Log.d("TRANM", "m3uLink » ${m3uLink}")
-
-        //     if (m3uLink != null) {
-        //         callback.invoke(
-        //             ExtractorLink(
-        //                 source  = this.name,
-        //                 name    = this.name,
-        //                 url     = m3uLink,
-        //                 referer = "${mainVideo}",
-        //                 quality = Qualities.Unknown.value,
-        //                 isM3u8  = true,
-        //             )
-        //         )
-        //     }
-        // }
-
         for (button in document.select("button[onclick*='ajax/videosec']")) {
             val butonLink = fixUrlNull(button.attr("onclick").substringAfter("IndexIcerik('").substringBefore("'")) ?: continue
             val butonName = button.ownText().trim()
@@ -187,57 +148,58 @@ class TurkAnime : MainAPI() {
             loadExtractor(subLink, "${mainUrl}/", subtitleCallback, callback)
         }
     }
-override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
-    Log.d("TRANM", "data » $data")
-    val document = app.get(data).document
 
-    val iframeElement = document.selectFirst("iframe")
-    val iframe = fixUrlNull(iframeElement?.attr("src"))
+    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
+        Log.d("TRANM", "data » $data")
+        val document = app.get(data).document
 
-    if (iframe == null || iframe.contains("a-ads.com")) {
-        val buttons = document.select("button[onclick*='IndexIcerik']")
+        val iframeElement = document.selectFirst("iframe")
+        val iframe = fixUrlNull(iframeElement?.attr("src"))
 
-        for (button in buttons) {
-            val onclickAttr = button.attr("onclick")
-            val subLink = onclickAttr.substringAfter("IndexIcerik('").substringBefore("'")
-                .takeIf { it.isNotBlank() }
-                ?.let { fixUrlNull(it) } ?: continue
+        if (iframe == null || iframe.contains("a-ads.com")) {
+            val buttons = document.select("button[onclick*='IndexIcerik']")
 
-            Log.d("TRANM", "Extra seçici ile alınan link: $subLink")
+            for (button in buttons) {
+                val onclickAttr = button.attr("onclick")
+                val subLink = onclickAttr.substringAfter("IndexIcerik('").substringBefore("'")
+                    .takeIf { it.isNotBlank() }
+                    ?.let { fixUrlNull(it) } ?: continue
 
-            val subResponse = app.get(subLink, headers = mapOf("X-Requested-With" to "XMLHttpRequest"))
-            val subHtml = subResponse.body?.string().orEmpty()
+                Log.d("TRANM", "Extra seçici ile alınan link: $subLink")
 
-            val subDoc = org.jsoup.Jsoup.parse(subHtml, subLink)
+                val subResponse = app.get(subLink, headers = mapOf("X-Requested-With" to "XMLHttpRequest"))
+                val subHtml = subResponse.body?.string().orEmpty()
 
-            // Önce artplayer-app içindeki data-url kontrol edilir
-            val dataUrl = subDoc.selectFirst("div.artplayer-app")?.attr("data-url")
-            if (dataUrl != null && dataUrl.endsWith(".m3u8")) {
-                Log.d("TRANM", "M3U8 data-url bulundu: $dataUrl")
-                callback(
-                    newExtractorLink(
-                        name = "TurkAnime",
-                        source = "TurkAnime",
-                        url = dataUrl,
-                        type = ExtractorLinkType.M3U8
+                val subDoc = org.jsoup.Jsoup.parse(subHtml, subLink)
+
+                // Önce artplayer-app içindeki data-url kontrol edilir
+                val dataUrl = subDoc.selectFirst("div.artplayer-app")?.attr("data-url")
+                if (dataUrl != null && dataUrl.endsWith(".m3u8")) {
+                    Log.d("TRANM", "M3U8 data-url bulundu: $dataUrl")
+                    callback(
+                        newExtractorLink(
+                            name = "TurkAnime",
+                            source = "TurkAnime",
+                            url = dataUrl,
+                            type = ExtractorLinkType.M3U8
                         ) {
-                        quality = Qualities.Unknown.value
-                        headers = mapOf("Referer" to subLink)
-            }
-                )
-                continue
-            }
+                            quality = Qualities.Unknown.value
+                            headers = mapOf("Referer" to subLink)
+                        }
+                    )
+                    continue
+                }
 
-            // Eğer data-url yoksa iframe'e fallback yap
-            val subFrame = fixUrlNull(subDoc.selectFirst("iframe")?.attr("src")) ?: continue
-            Log.d("TRANM", "subFrame » $subFrame")
+                // Eğer data-url yoksa iframe'e fallback yap
+                val subFrame = fixUrlNull(subDoc.selectFirst("iframe")?.attr("src")) ?: continue
+                Log.d("TRANM", "subFrame » $subFrame")
 
-            iframe2Load(subDoc, subFrame, subtitleCallback, callback)
+                iframe2Load(subDoc, subFrame, subtitleCallback, callback)
+            }
+        } else {
+            iframe2Load(document, iframe, subtitleCallback, callback)
         }
-    } else {
-        iframe2Load(document, iframe, subtitleCallback, callback)
-    }
 
-    return true
-}
+        return true
+    }
 }
