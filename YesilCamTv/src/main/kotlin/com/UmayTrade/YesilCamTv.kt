@@ -1,5 +1,4 @@
-package com.cloudstream.tr.yesilcamtv
-
+package com.UmayTrade
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
