@@ -1,4 +1,5 @@
 package com.UmayTrade
+
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
@@ -137,8 +138,7 @@ class YesilCamTv : MainAPI() {
         val doc = app.get(data).document
         var linksFound = false
 
-        // 1. Embedded iframe players (Rumble, YouTube, Ok.ru, Mail.ru, vb.)
-        // NOT: wp-embedded-content class'ı olan iframe'leri de dahil et (Rumble için kritik!)
+        // 1. Embedded iframe players
         doc.select("iframe").forEach { iframe ->
             val src = iframe.attr("data-src").ifEmpty { iframe.attr("src") }
             if (src.isNotBlank() && !src.startsWith("about:")) {
@@ -150,21 +150,20 @@ class YesilCamTv : MainAPI() {
                     }
                     if (success) linksFound = true
                 } catch (e: Exception) {
-                    // Yoksay, sonraki iframe'e geç
+                    // Yoksay
                 }
             }
         }
 
-        // 2. Rumble özel çözüm (loadExtractor başarısız olursa)
-        if (!linksFound) {
-            doc.select("iframe[src*=rumble], iframe[data-src*=rumble]").forEach { iframe ->
-                val src = iframe.attr("data-src").ifEmpty { iframe.attr("src") }
-                if (src.isNotBlank()) {
-                    val rumbleId = extractRumbleId(src)
-                    if (rumbleId != null) {
-                        if (extractRumbleLinks(rumbleId, subtitleCallback, callback)) {
-                            linksFound = true
-                        }
+        // 2. Rumble özel çözüm (doğrudan API'den, header'larla)
+        doc.select("iframe[src*=rumble], iframe[data-src*=rumble]").forEach { iframe ->
+            val src = iframe.attr("data-src").ifEmpty { iframe.attr("src") }
+            if (src.isNotBlank()) {
+                val rumbleId = extractRumbleId(src)
+                if (rumbleId != null) {
+                    val embedUrl = fixUrl(src)
+                    if (extractRumbleLinks(rumbleId, embedUrl, subtitleCallback, callback)) {
+                        linksFound = true
                     }
                 }
             }
@@ -201,19 +200,36 @@ class YesilCamTv : MainAPI() {
 
     /**
      * Rumble video için API'den direkt linkleri çeker.
+     * KRİTİK: Rumble stream'leri sadece doğru Referer ve Origin header'ları ile çalışır.
      */
     private suspend fun extractRumbleLinks(
         videoId: String,
+        embedUrl: String,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         return try {
             val apiUrl = "https://rumble.com/embedJS/u3/?request=video&ver=2&v=$videoId"
-            val response = app.get(apiUrl, referer = "https://rumble.com/").text
+            val response = app.get(
+                apiUrl,
+                referer = embedUrl,
+                headers = mapOf(
+                    "Origin" to "https://rumble.com",
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
+            ).text
+
             val json = JSONObject(response)
             var found = false
 
-            // Doğrudan mp4 linkleri
+            // Rumble stream'leri için gerekli header'lar
+            val rumbleHeaders = mapOf(
+                "Referer" to "https://rumble.com/",
+                "Origin" to "https://rumble.com",
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+
+            // "u" objesi: mp4/hls linkleri
             val u = json.optJSONObject("u")
             if (u != null) {
                 val keys = u.keys()
@@ -231,6 +247,7 @@ class YesilCamTv : MainAPI() {
                             ) {
                                 this.referer = "https://rumble.com/"
                                 this.quality = qualityToValue(key)
+                                this.headers = rumbleHeaders
                             }
                         )
                         found = true
@@ -238,9 +255,9 @@ class YesilCamTv : MainAPI() {
                 }
             }
 
-            // Alternatif: "ua" objesi
+            // "ua" objesi: alternatif linkler
             val ua = json.optJSONObject("ua")
-            if (ua != null && !found) {
+            if (ua != null) {
                 val keys = ua.keys()
                 while (keys.hasNext()) {
                     val key = keys.next()
@@ -255,9 +272,28 @@ class YesilCamTv : MainAPI() {
                             ) {
                                 this.referer = "https://rumble.com/"
                                 this.quality = qualityToValue(key)
+                                this.headers = rumbleHeaders
                             }
                         )
                         found = true
+                    }
+                }
+            }
+
+            // Altyazıları da çek (varsa)
+            val cc = json.optJSONObject("cc")
+            if (cc != null) {
+                val keys = cc.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val value = cc.optString(key)
+                    if (value.contains(".vtt") || value.contains(".srt")) {
+                        subtitleCallback(
+                            newSubtitleFile(
+                                lang = key,
+                                url = value
+                            )
+                        )
                     }
                 }
             }
