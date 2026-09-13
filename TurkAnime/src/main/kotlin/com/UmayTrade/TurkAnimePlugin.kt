@@ -1,12 +1,12 @@
-package com.UmayTrade
 
+package com.UmayTradee
+
+import com.lagradost.cloudstream3.plugins.BasePlugin
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
-import com.lagradost.cloudstream3.plugins.Plugin
-import android.content.Context
 
 @CloudstreamPlugin
-class TranimeizlePlugin : Plugin() {
-    override fun load(context: Context) {
-        registerMainAPI(Tranimeizle())
+class TurkAnimePlugin : BasePlugin() {
+    override fun load() {
+        registerMainAPI(TurkAnime())
     }
 }
