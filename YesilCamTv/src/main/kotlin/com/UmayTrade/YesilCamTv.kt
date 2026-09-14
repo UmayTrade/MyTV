@@ -142,6 +142,27 @@ class YesilCamTv : MainAPI() {
         println("DEBUG YesilCamTv: iframe sayısı=${doc.select("iframe").size}")
         println("DEBUG YesilCamTv: video sayısı=${doc.select("video").size}")
 
+        // 0. Ham HTML'de JS ile yüklenen Rumble embed URL'lerini ara
+        try {
+            val rawHtml = app.get(data).text
+            val rumbleMatches = Regex("""https://rumble\.com/embed/[a-zA-Z0-9]+[^"'\s<>]*""").findAll(rawHtml)
+            rumbleMatches.forEach { match ->
+                val rumbleUrl = match.value
+                println("DEBUG YesilCamTv: ham HTML'de Rumble bulundu -> $rumbleUrl")
+                try {
+                    val success = loadExtractor(rumbleUrl, referer = mainUrl, subtitleCallback) { link ->
+                        callback(link)
+                        linksFound = true
+                    }
+                    if (success) linksFound = true
+                } catch (e: Exception) {
+                    println("DEBUG YesilCamTv: ham HTML Rumble hatası -> ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            println("DEBUG YesilCamTv: ham HTML okuma hatası -> ${e.message}")
+        }
+
         // 1. iframe'ler — Rumble, YouTube vb.
         doc.select("iframe").forEach { iframe ->
             val src = iframe.attr("data-src").ifEmpty { iframe.attr("src") }
