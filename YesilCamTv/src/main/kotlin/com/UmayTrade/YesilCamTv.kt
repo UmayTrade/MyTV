@@ -84,6 +84,7 @@ class YesilCamTv : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
+        println("DEBUG YesilCamTv: load çağrıldı url=$url")
         val doc = app.get(url).document
         return parseLoadMetadata(doc, url)
     }
@@ -138,46 +139,47 @@ class YesilCamTv : MainAPI() {
         val doc = app.get(data).document
         var linksFound = false
 
-        println("DEBUG YesilCamTv: loadLinks çağrıldı, data=$data")
+        println("DEBUG YesilCamTv: loadLinks data=$data")
         println("DEBUG YesilCamTv: iframe sayısı=${doc.select("iframe").size}")
-        println("DEBUG YesilCamTv: video sayısı=${doc.select("video").size}")
 
-        // 0. Ham HTML'de JS ile yüklenen Rumble embed URL'lerini ara
-        try {
-            val rawHtml = app.get(data).text
-            val rumbleMatches = Regex("""https://rumble\.com/embed/[a-zA-Z0-9]+[^"'\s<>]*""").findAll(rawHtml)
-            rumbleMatches.forEach { match ->
-                val rumbleUrl = match.value
-                println("DEBUG YesilCamTv: ham HTML'de Rumble bulundu -> $rumbleUrl")
-                try {
-                    val success = loadExtractor(rumbleUrl, referer = mainUrl, subtitleCallback) { link ->
-                        callback(link)
-                        linksFound = true
-                    }
-                    if (success) linksFound = true
-                } catch (e: Exception) {
-                    println("DEBUG YesilCamTv: ham HTML Rumble hatası -> ${e.message}")
-                }
-            }
-        } catch (e: Exception) {
-            println("DEBUG YesilCamTv: ham HTML okuma hatası -> ${e.message}")
-        }
-
-        // 1. iframe'ler — Rumble, YouTube vb.
+        // 1. Tüm iframe'leri tara
         doc.select("iframe").forEach { iframe ->
-            val src = iframe.attr("data-src").ifEmpty { iframe.attr("src") }
-            if (src.isNotBlank() && !src.startsWith("about:")) {
-                val fixed = fixUrl(src)
-                println("DEBUG YesilCamTv: iframe bulundu -> $fixed")
+            val rawSrc = iframe.attr("data-src").ifEmpty { iframe.attr("src") }
+            if (rawSrc.isBlank() || rawSrc.startsWith("about:")) return@forEach
+
+            // Rumble URL'sini temizle (hash ve secret kısmını at)
+            val cleanUrl = if (rawSrc.contains("rumble.com")) {
+                // https://rumble.com/embed/v72u3ay/#?secret=XXX -> https://rumble.com/embed/v72u3ay/
+                rawSrc.substringBefore("#")
+            } else {
+                fixUrl(rawSrc)
+            }
+
+            println("DEBUG YesilCamTv: iframe -> $cleanUrl")
+
+            try {
+                // Önce CloudStream'in loadExtractor'ını dene
+                val success = loadExtractor(cleanUrl, referer = mainUrl, subtitleCallback) { link ->
+                    println("DEBUG YesilCamTv: link alındı -> ${link.url}")
+                    callback(link)
+                    linksFound = true
+                }
+                if (success) linksFound = true
+            } catch (e: Exception) {
+                println("DEBUG YesilCamTv: loadExtractor hatası -> ${e.message}")
+            }
+
+            // loadExtractor başarısız olduysa RumbleExtractor'ı doğrudan çağır
+            if (!linksFound && cleanUrl.contains("rumble.com")) {
+                println("DEBUG YesilCamTv: doğrudan RumbleExtractor çağrılıyor")
                 try {
-                    val success = loadExtractor(fixed, referer = mainUrl, subtitleCallback) { link ->
-                        println("DEBUG YesilCamTv: link alındı -> ${link.url}")
+                    RumbleExtractor().getUrl(cleanUrl, mainUrl, subtitleCallback) { link ->
+                        println("DEBUG YesilCamTv: direct Rumble link -> ${link.url}")
                         callback(link)
                         linksFound = true
                     }
-                    if (success) linksFound = true
                 } catch (e: Exception) {
-                    println("DEBUG YesilCamTv: iframe hatası -> ${e.message}")
+                    println("DEBUG YesilCamTv: direct Rumble hatası -> ${e.message}")
                 }
             }
         }
