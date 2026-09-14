@@ -7,5 +7,6 @@ import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 class YesilCamTvPlugin : BasePlugin() {
     override fun load() {
         registerMainAPI(YesilCamTv())
+        registerExtractorAPI(RumbleExtractor())
     }
 }
