@@ -115,8 +115,7 @@ class YesilCamTv : MainAPI() {
 
         val score = doc.selectFirst(".bolum-ust, .imdb-score, .score, #listelements .elements")?.text()?.trim()
             ?.let { text ->
-                val regex = Regex("""IMDb:\s*([\d.,]+)""")
-                regex.find(text)?.groupValues?.get(1)
+                Regex("""IMDb:\s*([\d.,]+)""").find(text)?.groupValues?.get(1)
             }
 
         return newMovieLoadResponse(title, url, TvType.Movie, url) {
@@ -138,38 +137,44 @@ class YesilCamTv : MainAPI() {
         val doc = app.get(data).document
         var linksFound = false
 
-        // 1. Embedded iframe players
+        // 1. Tüm iframe'leri topla (Rumble, YouTube, Ok.ru vb.)
+        val iframeUrls = mutableListOf<String>()
         doc.select("iframe").forEach { iframe ->
             val src = iframe.attr("data-src").ifEmpty { iframe.attr("src") }
             if (src.isNotBlank() && !src.startsWith("about:")) {
-                val fixed = fixUrl(src)
-                try {
-                    val success = loadExtractor(fixed, referer = mainUrl, subtitleCallback) { link ->
-                        callback(link)
-                        linksFound = true
-                    }
-                    if (success) linksFound = true
-                } catch (e: Exception) {
-                    // Yoksay
-                }
+                iframeUrls.add(fixUrl(src))
             }
         }
 
-        // 2. Rumble özel çözüm (doğrudan API'den, header'larla)
-        doc.select("iframe[src*=rumble], iframe[data-src*=rumble]").forEach { iframe ->
-            val src = iframe.attr("data-src").ifEmpty { iframe.attr("src") }
-            if (src.isNotBlank()) {
-                val rumbleId = extractRumbleId(src)
+        // 2. Her iframe için extractor dene
+        for (iframeUrl in iframeUrls.distinct()) {
+            val isRumble = iframeUrl.contains("rumble.com")
+            val refererForExtractor = if (isRumble) "https://rumble.com/" else mainUrl
+
+            try {
+                val success = loadExtractor(iframeUrl, referer = refererForExtractor, subtitleCallback) { link ->
+                    callback(link)
+                    linksFound = true
+                }
+                if (success) linksFound = true
+            } catch (e: Exception) {
+                // yoksay
+            }
+        }
+
+        // 3. Rumble için manuel API çözümü (loadExtractor başarısız olursa)
+        for (iframeUrl in iframeUrls) {
+            if (iframeUrl.contains("rumble.com")) {
+                val rumbleId = extractRumbleId(iframeUrl)
                 if (rumbleId != null) {
-                    val embedUrl = fixUrl(src)
-                    if (extractRumbleLinks(rumbleId, embedUrl, subtitleCallback, callback)) {
+                    if (extractRumbleLinksManuel(rumbleId, subtitleCallback, callback)) {
                         linksFound = true
                     }
                 }
             }
         }
 
-        // 3. Direct HTML5 video / mp4 / m3u8
+        // 4. Direct HTML5 video / mp4 / m3u8
         doc.select("video source[src], video[src]").forEach { v ->
             val src = fixUrlNull(v.attr("src")) ?: return@forEach
             val isM3u8 = src.contains(".m3u8")
@@ -190,118 +195,147 @@ class YesilCamTv : MainAPI() {
         return linksFound
     }
 
-    /**
-     * Rumble embed URL'inden video ID'sini çıkarır.
-     * Örnek: https://rumble.com/embed/v6ylbnw/#?secret=uIHksviEvi -> v6ylbnw
-     */
     private fun extractRumbleId(url: String): String? {
         return Regex("""rumble\.com/embed/([a-zA-Z0-9]+)""").find(url)?.groupValues?.get(1)
     }
 
     /**
-     * Rumble video için API'den direkt linkleri çeker.
-     * KRİTİK: Rumble stream'leri sadece doğru Referer ve Origin header'ları ile çalışır.
+     * Rumble için güncel manuel çözüm.
+     * Birden fazla endpoint'i dener.
      */
-    private suspend fun extractRumbleLinks(
+    private suspend fun extractRumbleLinksManuel(
         videoId: String,
-        embedUrl: String,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        return try {
-            val apiUrl = "https://rumble.com/embedJS/u3/?request=video&ver=2&v=$videoId"
-            val response = app.get(
-                apiUrl,
-                referer = embedUrl,
-                headers = mapOf(
-                    "Origin" to "https://rumble.com",
-                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                )
-            ).text
+        val rumbleHeaders = mapOf(
+            "Referer" to "https://rumble.com/",
+            "Origin" to "https://rumble.com",
+            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept" to "application/json, text/plain, */*"
+        )
 
-            val json = JSONObject(response)
-            var found = false
+        // Denenecek API endpoint'leri (Rumble zaman zaman değiştiriyor)
+        val endpoints = listOf(
+            "https://rumble.com/embedJS/u3/?request=video&ver=2&v=$videoId",
+            "https://rumble.com/embedJS/VideoPlayback/?request=video&ver=2&v=$videoId",
+            "https://rumble.com/-/api/video/$videoId"
+        )
 
-            // Rumble stream'leri için gerekli header'lar
-            val rumbleHeaders = mapOf(
-                "Referer" to "https://rumble.com/",
-                "Origin" to "https://rumble.com",
-                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
+        for (endpoint in endpoints) {
+            try {
+                val response = app.get(
+                    endpoint,
+                    referer = "https://rumble.com/",
+                    headers = rumbleHeaders
+                ).text
 
-            // "u" objesi: mp4/hls linkleri
-            val u = json.optJSONObject("u")
-            if (u != null) {
-                val keys = u.keys()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    val value = u.optString(key)
-                    if (value.contains(".mp4") || value.contains(".m3u8")) {
-                        val quality = parseQuality(key)
-                        callback(
-                            newExtractorLink(
-                                source = "Rumble",
-                                name = "Rumble $quality",
-                                url = value,
-                                type = if (value.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                            ) {
-                                this.referer = "https://rumble.com/"
-                                this.quality = qualityToValue(key)
-                                this.headers = rumbleHeaders
-                            }
-                        )
-                        found = true
-                    }
+                if (response.isBlank() || response.length < 10) continue
+
+                // JSON parse dene
+                val json = try {
+                    JSONObject(response)
+                } catch (e: Exception) {
+                    continue
                 }
-            }
 
-            // "ua" objesi: alternatif linkler
-            val ua = json.optJSONObject("ua")
-            if (ua != null) {
-                val keys = ua.keys()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    val value = ua.optString(key)
-                    if (value.contains(".mp4") || value.contains(".m3u8")) {
-                        callback(
-                            newExtractorLink(
-                                source = "Rumble",
-                                name = "Rumble ${parseQuality(key)}",
-                                url = value,
-                                type = if (value.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                            ) {
-                                this.referer = "https://rumble.com/"
-                                this.quality = qualityToValue(key)
-                                this.headers = rumbleHeaders
-                            }
-                        )
-                        found = true
-                    }
-                }
-            }
+                var found = false
 
-            // Altyazıları da çek (varsa)
-            val cc = json.optJSONObject("cc")
-            if (cc != null) {
-                val keys = cc.keys()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    val value = cc.optString(key)
-                    if (value.contains(".vtt") || value.contains(".srt")) {
-                        subtitleCallback(
-                            newSubtitleFile(
-                                lang = key,
-                                url = value
+                // "u" objesi: kalite -> url map
+                val u = json.optJSONObject("u")
+                if (u != null) {
+                    val keys = u.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val value = u.optString(key)
+                        if (value.contains(".mp4") || value.contains(".m3u8")) {
+                            callback(
+                                newExtractorLink(
+                                    source = "Rumble",
+                                    name = "Rumble ${parseQuality(key)}",
+                                    url = value,
+                                    type = if (value.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                                ) {
+                                    this.referer = "https://rumble.com/"
+                                    this.quality = qualityToValue(key)
+                                    this.headers = rumbleHeaders
+                                }
                             )
-                        )
+                            found = true
+                        }
                     }
                 }
-            }
 
-            found
-        } catch (e: Exception) {
-            false
+                // "ua" objesi
+                val ua = json.optJSONObject("ua")
+                if (ua != null) {
+                    val keys = ua.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val value = ua.optString(key)
+                        if (value.contains(".mp4") || value.contains(".m3u8")) {
+                            callback(
+                                newExtractorLink(
+                                    source = "Rumble",
+                                    name = "Rumble ${parseQuality(key)}",
+                                    url = value,
+                                    type = if (value.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                                ) {
+                                    this.referer = "https://rumble.com/"
+                                    this.quality = qualityToValue(key)
+                                    this.headers = rumbleHeaders
+                                }
+                            )
+                            found = true
+                        }
+                    }
+                }
+
+                // "s" objesi (bazı videolarda)
+                val s = json.optJSONObject("s")
+                if (s != null) {
+                    val keys = s.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val value = s.optString(key)
+                        if (value.contains(".mp4") || value.contains(".m3u8")) {
+                            callback(
+                                newExtractorLink(
+                                    source = "Rumble",
+                                    name = "Rumble ${parseQuality(key)}",
+                                    url = value,
+                                    type = if (value.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                                ) {
+                                    this.referer = "https://rumble.com/"
+                                    this.quality = qualityToValue(key)
+                                    this.headers = rumbleHeaders
+                                }
+                            )
+                            found = true
+                        }
+                    }
+                }
+
+                // Altyazılar
+                val cc = json.optJSONObject("cc")
+                if (cc != null) {
+                    val keys = cc.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val value = cc.optString(key)
+                        if (value.contains(".vtt") || value.contains(".srt")) {
+                            subtitleCallback(newSubtitleFile(lang = key, url = value))
+                        }
+                    }
+                }
+
+                if (found) return true
+            } catch (e: Exception) {
+                // Sonraki endpoint'i dene
+            }
         }
+
+        return false
     }
 
     private fun parseQuality(key: String): String {
