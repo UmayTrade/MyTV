@@ -123,7 +123,7 @@ class YesilCamTv : MainAPI() {
         val doc = app.get(data).document
         var linksFound = false
 
-        // 1. Film sayfasındaki iframe'leri tara
+        // 1. iframe'ler
         doc.select("iframe").forEach { iframe ->
             val rawSrc = iframe.attr("data-src").ifEmpty { iframe.attr("src") }
             if (rawSrc.isBlank() || rawSrc.startsWith("about:")) return@forEach
@@ -132,12 +132,10 @@ class YesilCamTv : MainAPI() {
             println("DEBUG YesilCamTv: iframe -> $cleanUrl")
 
             if (cleanUrl.contains("rumble.com")) {
-                // Rumble'ı doğrudan burada çöz
-                if (extractRumbleDirect(cleanUrl, subtitleCallback, callback)) {
+                if (extractRumbleLinks(cleanUrl, subtitleCallback, callback)) {
                     linksFound = true
                 }
             } else {
-                // Diğer iframe'ler için extractor dene
                 try {
                     val ok = loadExtractor(cleanUrl, referer = mainUrl, subtitleCallback) { link ->
                         callback(link)
@@ -150,7 +148,7 @@ class YesilCamTv : MainAPI() {
             }
         }
 
-        // 2. Doğrudan video/mp4/m3u8 etiketleri
+        // 2. Doğrudan video/mp4/m3u8
         doc.select("video source[src], video[src]").forEach { v ->
             val src = fixUrlNull(v.attr("src")) ?: return@forEach
             val isM3u8 = src.contains(".m3u8")
@@ -173,9 +171,10 @@ class YesilCamTv : MainAPI() {
     }
 
     /**
-     * Rumble embed URL'sini doğrudan çözer — extractor'a bağımlı değildir.
+     * Rumble embed sayfasından video linklerini çıkarır.
+     * Öncelik: mp4 (ua.tar.*) > mp4 (u.tar) > HLS > timeline önizleme
      */
-    private suspend fun extractRumbleDirect(
+    private suspend fun extractRumbleLinks(
         embedUrl: String,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
@@ -192,17 +191,15 @@ class YesilCamTv : MainAPI() {
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         )
 
-        val pageUrl = "https://rumble.com/embed/$videoId/"
         val html = try {
-            app.get(pageUrl, referer = "https://rumble.com/", headers = rumbleHeaders).text
+            app.get("https://rumble.com/embed/$videoId/", referer = "https://rumble.com/", headers = rumbleHeaders).text
         } catch (e: Exception) {
-            println("DEBUG Rumble: istek hatası -> ${e.message}")
+            println("DEBUG Rumble: HTML hatası -> ${e.message}")
             return false
         }
 
         println("DEBUG Rumble: HTML uzunluk=${html.length}")
 
-        // m.f["VIDEOID"]={...} işaretçisini bul
         val marker = """m.f["$videoId"]="""
         val startIdx = html.indexOf(marker)
         if (startIdx < 0) {
@@ -210,8 +207,7 @@ class YesilCamTv : MainAPI() {
             return false
         }
 
-        val jsonStart = startIdx + marker.length
-        val jsonStr = extractBalancedJson(html, jsonStart)
+        val jsonStr = extractBalancedJson(html, startIdx + marker.length)
         if (jsonStr == null) {
             println("DEBUG Rumble: JSON çıkarılamadı")
             return false
@@ -219,18 +215,82 @@ class YesilCamTv : MainAPI() {
 
         println("DEBUG Rumble: JSON uzunluk=${jsonStr.length}")
 
-        val json = try {
-            JSONObject(jsonStr)
-        } catch (e: Exception) {
+        val json = try { JSONObject(jsonStr) } catch (e: Exception) {
             println("DEBUG Rumble: JSON parse hatası -> ${e.message}")
             return false
         }
 
-        var found = false
+        // Toplanan linkler: (url, type, quality)
+        data class RumLink(val url: String, val type: ExtractorLinkType, val quality: Int, val label: String)
+        val collected = mutableListOf<RumLink>()
 
-        // u ve ua objelerinden HLS/mp4 linklerini çıkar
-        parseNestedForLinks(json.optJSONObject("u"), callback)?.let { found = true }
-        parseNestedForLinks(json.optJSONObject("ua"), callback)?.let { found = true }
+        // Öncelik 1: ua.tar.* → yüksek kaliteli mp4'ler (en çok tercih edilen)
+        json.optJSONObject("ua")?.optJSONObject("tar")?.let { tar ->
+            val keys = tar.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                val obj = tar.optJSONObject(k) ?: continue
+                val url = obj.optString("url").takeIf { it.isNotBlank() } ?: continue
+                val q = when {
+                    k.contains("1080") -> Qualities.P1080.value
+                    k.contains("720") -> Qualities.P720.value
+                    k.contains("480") -> Qualities.P480.value
+                    k.contains("360") -> Qualities.P360.value
+                    k.contains("240") -> Qualities.P240.value
+                    else -> Qualities.Unknown.value
+                }
+                collected.add(RumLink(url, ExtractorLinkType.VIDEO, q, "${k}p"))
+            }
+        }
+
+        // Öncelik 2: u.tar → varsayılan yüksek kalite mp4
+        json.optJSONObject("u")?.optJSONObject("tar")?.optString("url")?.takeIf { it.isNotBlank() }?.let {
+            collected.add(RumLink(it, ExtractorLinkType.VIDEO, Qualities.P1080.value, "En Yüksek"))
+        }
+
+        // Öncelik 3: u.hls.url ve ua.hls.*
+        json.optJSONObject("u")?.optJSONObject("hls")?.optString("url")?.takeIf { it.contains(".m3u8") }?.let {
+            collected.add(RumLink(it, ExtractorLinkType.M3U8, Qualities.P1080.value, "HLS"))
+        }
+        json.optJSONObject("ua")?.optJSONObject("hls")?.let { hlsObj ->
+            val keys = hlsObj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                val obj = hlsObj.optJSONObject(k) ?: continue
+                obj.optString("url").takeIf { it.contains(".m3u8") }?.let {
+                    collected.add(RumLink(it, ExtractorLinkType.M3U8, Qualities.P720.value, "HLS"))
+                }
+            }
+        }
+
+        // Öncelik 4: timeline mp4 (düşük kalite önizleme - son çare)
+        json.optJSONObject("u")?.optJSONObject("timeline")?.optString("url")?.takeIf { it.isNotBlank() }?.let {
+            collected.add(RumLink(it, ExtractorLinkType.VIDEO, Qualities.P240.value, "240p"))
+        }
+
+        if (collected.isEmpty()) {
+            println("DEBUG Rumble: video linki bulunamadı")
+            return false
+        }
+
+        // Kaliteye göre yüksekten düşüğe sırala
+        val sorted = collected.distinctBy { it.url }.sortedByDescending { it.quality }
+
+        sorted.forEach { rumLink ->
+            println("DEBUG Rumble: link kalite=${rumLink.label} url=${rumLink.url}")
+            callback(
+                newExtractorLink(
+                    source = "Rumble",
+                    name = "Rumble ${rumLink.label}",
+                    url = rumLink.url,
+                    type = rumLink.type
+                ) {
+                    this.referer = "https://rumble.com/"
+                    this.quality = rumLink.quality
+                    this.headers = rumbleHeaders
+                }
+            )
+        }
 
         // Altyazılar
         val cc = json.optJSONArray("cc")
@@ -245,48 +305,7 @@ class YesilCamTv : MainAPI() {
             }
         }
 
-        return found
-    }
-
-    /**
-     * İç içe JSON objelerinden .m3u8 / .mp4 linklerini bulur.
-     */
-    private suspend fun parseNestedForLinks(
-        obj: JSONObject?,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean? {
-        if (obj == null) return null
-        var found = false
-        val keys = obj.keys()
-        while (keys.hasNext()) {
-            val key = keys.next()
-            val value = obj.opt(key)
-
-            if (value is JSONObject) {
-                val innerUrl = value.optString("url")
-                if (innerUrl.isNotBlank() && !innerUrl.contains("timeline")) {
-                    val isM3u8 = innerUrl.contains(".m3u8")
-                    val isMp4 = innerUrl.contains(".mp4")
-                    if (isM3u8 || isMp4) {
-                        println("DEBUG Rumble: kalite=$key url=$innerUrl")
-                        callback(
-                            newExtractorLink(
-                                source = "Rumble",
-                                name = "Rumble ${prettyQuality(key)}",
-                                url = innerUrl,
-                                type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                            ) {
-                                this.referer = "https://rumble.com/"
-                                this.quality = qualityToValue(key)
-                            }
-                        )
-                        found = true
-                    }
-                }
-                if (parseNestedForLinks(value, callback) == true) found = true
-            }
-        }
-        return if (found) true else null
+        return true
     }
 
     /**
@@ -317,24 +336,5 @@ class YesilCamTv : MainAPI() {
             }
         }
         return null
-    }
-
-    private fun prettyQuality(key: String): String = when {
-        key.contains("1080") -> "1080p"
-        key.contains("720") -> "720p"
-        key.contains("480") -> "480p"
-        key.contains("360") -> "360p"
-        key.contains("240") -> "240p"
-        key.contains("hls", true) || key.equals("auto", true) -> "Otomatik"
-        else -> key
-    }
-
-    private fun qualityToValue(key: String): Int = when {
-        key.contains("1080") -> Qualities.P1080.value
-        key.contains("720") -> Qualities.P720.value
-        key.contains("480") -> Qualities.P480.value
-        key.contains("360") -> Qualities.P360.value
-        key.contains("240") -> Qualities.P240.value
-        else -> Qualities.Unknown.value
     }
 }
