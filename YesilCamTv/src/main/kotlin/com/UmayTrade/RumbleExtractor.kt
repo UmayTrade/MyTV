@@ -4,13 +4,6 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.json.JSONObject
 
-/**
- * Rumble için özel Extractor.
- * Embed URL'ini alır, Rumble'ın embedJS API'sinden doğrudan mp4/m3u8 linklerini çeker.
- *
- * Örnek giriş: https://rumble.com/embed/v6ylbw8/#?secret=aapeyq6DLH
- * videoId     : v6ylbw8
- */
 class RumbleExtractor : ExtractorApi() {
     override var mainUrl = "https://rumble.com"
     override var name = "Rumble"
@@ -57,14 +50,10 @@ class RumbleExtractor : ExtractorApi() {
                 null
             } ?: continue
 
-            // "u" objesi: en yaygın kalite haritası
-            parseQualityMap(json.optJSONObject("u"), subtitleCallback, callback)?.let { anyLinkFound = true }
-            // "ua" objesi: alternatif isimlendirme
-            parseQualityMap(json.optJSONObject("ua"), subtitleCallback, callback)?.let { anyLinkFound = true }
-            // "s" objesi: bazı eski videolarda
-            parseQualityMap(json.optJSONObject("s"), subtitleCallback, callback)?.let { anyLinkFound = true }
+            parseQualityMap(json.optJSONObject("u"), callback)?.let { anyLinkFound = true }
+            parseQualityMap(json.optJSONObject("ua"), callback)?.let { anyLinkFound = true }
+            parseQualityMap(json.optJSONObject("s"), callback)?.let { anyLinkFound = true }
 
-            // Altyazılar (cc)
             val cc = json.optJSONObject("cc")
             if (cc != null) {
                 val ccKeys = cc.keys()
@@ -88,7 +77,6 @@ class RumbleExtractor : ExtractorApi() {
 
     private suspend fun parseQualityMap(
         obj: JSONObject?,
-        subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean? {
         if (obj == null) return null
