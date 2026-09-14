@@ -38,20 +38,14 @@ class RumbleExtractor : ExtractorApi() {
 
         val endpoints = listOf(
             "https://rumble.com/embedJS/u3/?request=video&ver=2&v=$videoId",
-            "https://rumble.com/embedJS/VideoPlayback/?request=video&ver=2&v=$videoId",
-            "https://rumble.com/-/api/video/$videoId"
+            "https://rumble.com/embedJS/VideoPlayback/?request=video&ver=2&v=$videoId"
         )
 
         var anyLinkFound = false
 
         for (endpoint in endpoints) {
-            println("DEBUG Rumble: endpoint deneniyor -> $endpoint")
             val body = try {
-                app.get(
-                    endpoint,
-                    referer = "https://rumble.com/",
-                    headers = rumbleHeaders
-                ).text
+                app.get(endpoint, referer = "https://rumble.com/", headers = rumbleHeaders).text
             } catch (e: Exception) {
                 println("DEBUG Rumble: istek hatası -> ${e.message}")
                 null
@@ -67,26 +61,10 @@ class RumbleExtractor : ExtractorApi() {
                 continue
             }
 
-            parseQualityMap(json.optJSONObject("u"), callback)?.let { anyLinkFound = true }
-            parseQualityMap(json.optJSONObject("ua"), callback)?.let { anyLinkFound = true }
-            parseQualityMap(json.optJSONObject("s"), callback)?.let { anyLinkFound = true }
-
-            val cc = json.optJSONObject("cc")
-            if (cc != null) {
-                val ccKeys = cc.keys()
-                while (ccKeys.hasNext()) {
-                    val lang = ccKeys.next()
-                    val v = cc.optString(lang)
-                    if (v.contains(".vtt") || v.contains(".srt")) {
-                        subtitleCallback(
-                            newSubtitleFile(
-                                lang = lang,
-                                url = v
-                            )
-                        )
-                    }
-                }
-            }
+            // Ana "u" objesi (yeni format)
+            parseNestedQualityMap(json.optJSONObject("u"), callback)?.let { anyLinkFound = true }
+            // Alternatif "ua" objesi
+            parseNestedQualityMap(json.optJSONObject("ua"), callback)?.let { anyLinkFound = true }
 
             if (anyLinkFound) {
                 println("DEBUG Rumble: link bulundu, döngüden çıkılıyor")
@@ -97,39 +75,76 @@ class RumbleExtractor : ExtractorApi() {
         println("DEBUG Rumble: sonuç anyLinkFound=$anyLinkFound")
     }
 
-    private suspend fun parseQualityMap(
+    /**
+     * Rumble API'nin "u" ve "ua" objelerini özyinelemeli (recursive) tarar.
+     * İç içe geçmiş yapıdan hls.url / tar.url / mp4 / m3u8 linklerini çıkarır.
+     */
+    private suspend fun parseNestedQualityMap(
         obj: JSONObject?,
         callback: (ExtractorLink) -> Unit
     ): Boolean? {
         if (obj == null) return null
         var found = false
-        val keys = obj.keys()
-        while (keys.hasNext()) {
-            val key = keys.next()
-            val value = obj.optString(key)
-            if (value.isBlank()) continue
 
-            val isM3u8 = value.contains(".m3u8")
-            val isMp4 = value.contains(".mp4")
-
-            if (isM3u8 || isMp4) {
-                println("DEBUG Rumble: kalite=$key url=$value")
-                callback(
-                    newExtractorLink(
-                        source = this.name,
-                        name = "Rumble ${prettyQuality(key)}",
-                        url = value,
-                        type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                    ) {
-                        this.referer = "https://rumble.com/"
-                        this.quality = qualityToValue(key)
-                        this.headers = rumbleHeaders
-                    }
-                )
+        // 1. Doğrudan "url" alanı var mı? (tar, hls, audio objeleri)
+        obj.optString("url").takeIf { it.isNotBlank() }?.let { directUrl ->
+            // HLS ise direkt ekle
+            if (directUrl.contains(".m3u8") || directUrl.contains("playlist.m3u8")) {
+                emitLink(directUrl, "auto", true, callback)
+                found = true
+            }
+            // .mp4 ise (timeline gibi küçük dosyaları atla)
+            else if (directUrl.contains(".mp4") && !directUrl.contains("timeline")) {
+                emitLink(directUrl, "auto", false, callback)
                 found = true
             }
         }
+
+        // 2. İç içe objeleri tara (tar, ua.tar.360, ua.hls.auto gibi)
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val value = obj.opt(key)
+
+            if (value is JSONObject) {
+                // İç objenin içinde "url" var mı kontrol et
+                val innerUrl = value.optString("url")
+                if (innerUrl.isNotBlank()) {
+                    if (innerUrl.contains(".m3u8")) {
+                        emitLink(innerUrl, key, true, callback)
+                        found = true
+                    } else if (innerUrl.contains(".mp4") && !innerUrl.contains("timeline")) {
+                        emitLink(innerUrl, key, false, callback)
+                        found = true
+                    }
+                }
+                // Daha derine in
+                if (parseNestedQualityMap(value, callback) == true) found = true
+            }
+        }
+
         return if (found) true else null
+    }
+
+    private suspend fun emitLink(
+        url: String,
+        qualityKey: String,
+        isHls: Boolean,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        println("DEBUG Rumble: kalite=$qualityKey url=$url")
+        callback(
+            newExtractorLink(
+                source = this.name,
+                name = "Rumble ${prettyQuality(qualityKey)}",
+                url = url,
+                type = if (isHls) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+            ) {
+                this.referer = "https://rumble.com/"
+                this.quality = qualityToValue(qualityKey)
+                this.headers = rumbleHeaders
+            }
+        )
     }
 
     private fun prettyQuality(key: String): String = when {
@@ -138,6 +153,7 @@ class RumbleExtractor : ExtractorApi() {
         key.contains("480") -> "480p"
         key.contains("360") -> "360p"
         key.contains("240") -> "240p"
+        key.equals("auto", ignoreCase = true) -> "Otomatik"
         else -> key
     }
 
@@ -147,6 +163,7 @@ class RumbleExtractor : ExtractorApi() {
         key.contains("480") -> Qualities.P480.value
         key.contains("360") -> Qualities.P360.value
         key.contains("240") -> Qualities.P240.value
+        key.equals("auto", ignoreCase = true) -> Qualities.Unknown.value
         else -> Qualities.Unknown.value
     }
 }
