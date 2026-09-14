@@ -23,7 +23,7 @@ class RumbleExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        val videoId = Regex("""rumble\.com/embed/([a-zA-Z0-9]+)""")
+        val videoId = Regex("""rumble\.com/embed/(?:v|)([a-zA-Z0-9]+)""")
             .find(url)?.groupValues?.get(1)
             ?: Regex("""rumble\.com/([a-zA-Z0-9\-]+)\.html""")
                 .find(url)?.groupValues?.get(1)
