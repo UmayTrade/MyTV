@@ -138,20 +138,25 @@ class YesilCamTv : MainAPI() {
         val doc = app.get(data).document
         var linksFound = false
 
-        // 1. Tüm iframe'ler (Rumble, YouTube, Ok.ru vb.)
-        //    Rumble URL'leri artık kayıtlı RumbleExtractor tarafından otomatik çözülür.
+        println("DEBUG YesilCamTv: loadLinks çağrıldı, data=$data")
+        println("DEBUG YesilCamTv: iframe sayısı=${doc.select("iframe").size}")
+        println("DEBUG YesilCamTv: video sayısı=${doc.select("video").size}")
+
+        // 1. iframe'ler — Rumble, YouTube vb.
         doc.select("iframe").forEach { iframe ->
             val src = iframe.attr("data-src").ifEmpty { iframe.attr("src") }
             if (src.isNotBlank() && !src.startsWith("about:")) {
                 val fixed = fixUrl(src)
+                println("DEBUG YesilCamTv: iframe bulundu -> $fixed")
                 try {
                     val success = loadExtractor(fixed, referer = mainUrl, subtitleCallback) { link ->
+                        println("DEBUG YesilCamTv: link alındı -> ${link.url}")
                         callback(link)
                         linksFound = true
                     }
                     if (success) linksFound = true
                 } catch (e: Exception) {
-                    // yoksay, sonraki iframe'e geç
+                    println("DEBUG YesilCamTv: iframe hatası -> ${e.message}")
                 }
             }
         }
@@ -159,6 +164,7 @@ class YesilCamTv : MainAPI() {
         // 2. Direct HTML5 video / mp4 / m3u8
         doc.select("video source[src], video[src]").forEach { v ->
             val src = fixUrlNull(v.attr("src")) ?: return@forEach
+            println("DEBUG YesilCamTv: video src -> $src")
             val isM3u8 = src.contains(".m3u8")
             callback(
                 newExtractorLink(
@@ -174,6 +180,7 @@ class YesilCamTv : MainAPI() {
             linksFound = true
         }
 
+        println("DEBUG YesilCamTv: sonuç linksFound=$linksFound")
         return linksFound
     }
 }
