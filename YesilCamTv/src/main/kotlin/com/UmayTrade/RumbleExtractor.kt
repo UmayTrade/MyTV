@@ -14,7 +14,7 @@ import org.json.JSONObject
 class RumbleExtractor : ExtractorApi() {
     override var mainUrl = "https://rumble.com"
     override var name = "Rumble"
-    override val requiresReferer = false
+    override val requiresReferer = true
 
     private val rumbleHeaders = mapOf(
         "Referer" to "https://rumble.com/",
@@ -36,7 +36,6 @@ class RumbleExtractor : ExtractorApi() {
                 .find(url)?.groupValues?.get(1)
             ?: return
 
-        // Rumble API birden fazla endpoint barındırır, sırayla dene
         val endpoints = listOf(
             "https://rumble.com/embedJS/u3/?request=video&ver=2&v=$videoId",
             "https://rumble.com/embedJS/VideoPlayback/?request=video&ver=2&v=$videoId",
@@ -60,16 +59,17 @@ class RumbleExtractor : ExtractorApi() {
 
             // "u" objesi: en yaygın kalite haritası
             parseQualityMap(json.optJSONObject("u"), subtitleCallback, callback)?.let { anyLinkFound = true }
-
             // "ua" objesi: alternatif isimlendirme
             parseQualityMap(json.optJSONObject("ua"), subtitleCallback, callback)?.let { anyLinkFound = true }
-
             // "s" objesi: bazı eski videolarda
             parseQualityMap(json.optJSONObject("s"), subtitleCallback, callback)?.let { anyLinkFound = true }
 
             // Altyazılar (cc)
-            json.optJSONObject("cc")?.let { cc ->
-                cc.keys().forEach { lang ->
+            val cc = json.optJSONObject("cc")
+            if (cc != null) {
+                val ccKeys = cc.keys()
+                while (ccKeys.hasNext()) {
+                    val lang = ccKeys.next()
                     val v = cc.optString(lang)
                     if (v.contains(".vtt") || v.contains(".srt")) {
                         subtitleCallback(
@@ -86,16 +86,18 @@ class RumbleExtractor : ExtractorApi() {
         }
     }
 
-    private fun parseQualityMap(
+    private suspend fun parseQualityMap(
         obj: JSONObject?,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean? {
         if (obj == null) return null
         var found = false
-        obj.keys().forEach { key ->
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
             val value = obj.optString(key)
-            if (value.isBlank()) return@forEach
+            if (value.isBlank()) continue
 
             val isM3u8 = value.contains(".m3u8")
             val isMp4 = value.contains(".mp4")
