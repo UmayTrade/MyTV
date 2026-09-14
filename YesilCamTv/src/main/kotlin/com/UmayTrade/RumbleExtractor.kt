@@ -23,11 +23,18 @@ class RumbleExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
+        println("DEBUG Rumble: getUrl çağrıldı -> $url")
+
         val videoId = Regex("""rumble\.com/embed/([a-zA-Z0-9]+)""")
             .find(url)?.groupValues?.get(1)
             ?: Regex("""rumble\.com/([a-zA-Z0-9\-]+)\.html""")
                 .find(url)?.groupValues?.get(1)
-            ?: return
+            ?: run {
+                println("DEBUG Rumble: videoId çıkarılamadı!")
+                return
+            }
+
+        println("DEBUG Rumble: videoId=$videoId")
 
         val endpoints = listOf(
             "https://rumble.com/embedJS/u3/?request=video&ver=2&v=$videoId",
@@ -38,17 +45,27 @@ class RumbleExtractor : ExtractorApi() {
         var anyLinkFound = false
 
         for (endpoint in endpoints) {
-            val json = try {
-                val body = app.get(
+            println("DEBUG Rumble: endpoint deneniyor -> $endpoint")
+            val body = try {
+                app.get(
                     endpoint,
                     referer = "https://rumble.com/",
                     headers = rumbleHeaders
                 ).text
-                if (body.isBlank() || body.length < 20) null
-                else JSONObject(body)
             } catch (e: Exception) {
+                println("DEBUG Rumble: istek hatası -> ${e.message}")
                 null
             } ?: continue
+
+            println("DEBUG Rumble: yanıt uzunluğu=${body.length}")
+            if (body.isBlank() || body.length < 20) continue
+
+            val json = try {
+                JSONObject(body)
+            } catch (e: Exception) {
+                println("DEBUG Rumble: JSON parse hatası -> ${e.message}")
+                continue
+            }
 
             parseQualityMap(json.optJSONObject("u"), callback)?.let { anyLinkFound = true }
             parseQualityMap(json.optJSONObject("ua"), callback)?.let { anyLinkFound = true }
@@ -71,8 +88,13 @@ class RumbleExtractor : ExtractorApi() {
                 }
             }
 
-            if (anyLinkFound) break
+            if (anyLinkFound) {
+                println("DEBUG Rumble: link bulundu, döngüden çıkılıyor")
+                break
+            }
         }
+
+        println("DEBUG Rumble: sonuç anyLinkFound=$anyLinkFound")
     }
 
     private suspend fun parseQualityMap(
@@ -91,6 +113,7 @@ class RumbleExtractor : ExtractorApi() {
             val isMp4 = value.contains(".mp4")
 
             if (isM3u8 || isMp4) {
+                println("DEBUG Rumble: kalite=$key url=$value")
                 callback(
                     newExtractorLink(
                         source = this.name,
