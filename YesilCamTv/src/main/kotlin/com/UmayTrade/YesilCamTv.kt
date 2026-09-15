@@ -1,27 +1,8 @@
 package com.UmayTrade
 
-import com.lagradost.cloudstream3.Actor
-import com.lagradost.cloudstream3.ExtractorLink
-import com.lagradost.cloudstream3.ExtractorLinkType
-import com.lagradost.cloudstream3.HomePageResponse
-import com.lagradost.cloudstream3.LoadResponse
-import com.lagradost.cloudstream3.MainAPI
-import com.lagradost.cloudstream3.MainPageRequest
-import com.lagradost.cloudstream3.SearchResponse
-import com.lagradost.cloudstream3.SearchResponseList
-import com.lagradost.cloudstream3.SubtitleFile
-import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.utils.Qualities
-import com.lagradost.cloudstream3.utils.app
-import com.lagradost.cloudstream3.utils.fixUrlNull
-import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.cloudstream3.utils.newExtractorLink
-import com.lagradost.cloudstream3.utils.newHomePageResponse
-import com.lagradost.cloudstream3.utils.newMovieLoadResponse
-import com.lagradost.cloudstream3.utils.newMovieSearchResponse
-import com.lagradost.cloudstream3.utils.newSearchResponseList
-import com.lagradost.cloudstream3.utils.Score
+import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
+import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
@@ -29,13 +10,10 @@ import java.net.URLEncoder
 class YesilCamTv : MainAPI() {
 
     override var mainUrl = "https://yesilcamtv.com.tr"
-
     override var name = "YesilCamTv"
 
     override val hasMainPage = true
-
     override var lang = "tr"
-
     override val hasQuickSearch = true
 
     override val supportedTypes = setOf(
@@ -43,39 +21,13 @@ class YesilCamTv : MainAPI() {
     )
 
     override val mainPage = mainPageOf(
-
-        "${mainUrl}/" to "Son Eklenenler",
-
-        "${mainUrl}/film-arsivi/" to "Film Arşivi",
-
-        "${mainUrl}/category/komedi/" to "Komedi",
-
-        "${mainUrl}/category/dram/" to "Dram",
-
-        "${mainUrl}/category/aksiyon/" to "Aksiyon",
-
-        "${mainUrl}/category/macera/" to "Macera",
-
-        "${mainUrl}/category/romantik/" to "Romantik"
-    )
-
-    private val browserHeaders = mapOf(
-
-        "User-Agent" to
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-            "AppleWebKit/537.36 (KHTML, like Gecko) " +
-            "Chrome/140.0.0.0 Safari/537.36",
-
-        "Accept" to
-            "text/html,application/xhtml+xml,application/xml;q=0.9," +
-            "image/avif,image/webp,image/apng,*/*;q=0.8",
-
-        "Accept-Language" to
-            "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-
-        "Cache-Control" to "no-cache",
-
-        "Pragma" to "no-cache"
+        "$mainUrl/" to "Son Eklenenler",
+        "$mainUrl/film-arsivi/" to "Film Arşivi",
+        "$mainUrl/category/komedi/" to "Komedi",
+        "$mainUrl/category/dram/" to "Dram",
+        "$mainUrl/category/aksiyon/" to "Aksiyon",
+        "$mainUrl/category/macera/" to "Macera",
+        "$mainUrl/category/romantik/" to "Romantik"
     )
 
     override suspend fun getMainPage(
@@ -84,32 +36,39 @@ class YesilCamTv : MainAPI() {
     ): HomePageResponse {
 
         val targetUrl = if (page <= 1) {
-
             request.data
-
         } else {
-
             val base = request.data.removeSuffix("/")
-
             "$base/page/$page/"
         }
 
-        val doc = app.get(
-            targetUrl,
-            headers = browserHeaders
-        ).document
+        println(
+            "DEBUG YesilCamTv: getMainPage -> $targetUrl"
+        )
+
+        val doc = try {
+            app.get(
+                targetUrl,
+                referer = mainUrl
+            ).document
+        } catch (e: Exception) {
+            println(
+                "DEBUG YesilCamTv: main page error -> ${e.message}"
+            )
+            return newHomePageResponse(
+                request.name,
+                emptyList(),
+                hasNext = false
+            )
+        }
 
         val items = doc.select(
-            ".listmovie, article, div.item, div.post, div.video-item, " +
-                ".film, .movie-item, .movies, .film-item, " +
-                ".movie, .film"
+            ".listmovie, article, div.item, div.post, div.video-item"
         )
-            .mapNotNull {
-                parseSearchItem(it)
+            .mapNotNull { element ->
+                parseSearchItem(element)
             }
-            .distinctBy {
-                it.url
-            }
+            .distinctBy { it.url }
 
         return newHomePageResponse(
             request.name,
@@ -123,38 +82,43 @@ class YesilCamTv : MainAPI() {
         page: Int
     ): SearchResponseList {
 
-        /*
-         * CloudStream sürümünde urlEncode extension bulunmadığı
-         * için standart Java URL encoder kullanıyoruz.
-         */
         val encodedQuery = URLEncoder
             .encode(query, "UTF-8")
             .replace("+", "%20")
 
         val targetUrl = if (page <= 1) {
-
-            "${mainUrl}/?s=$encodedQuery"
-
+            "$mainUrl/?s=$encodedQuery"
         } else {
-
-            "${mainUrl}/page/$page/?s=$encodedQuery"
+            "$mainUrl/page/$page/?s=$encodedQuery"
         }
 
-        val doc = app.get(
-            targetUrl,
-            headers = browserHeaders
-        ).document
+        println(
+            "DEBUG YesilCamTv: search -> $targetUrl"
+        )
+
+        val doc = try {
+            app.get(
+                targetUrl,
+                referer = mainUrl
+            ).document
+        } catch (e: Exception) {
+            println(
+                "DEBUG YesilCamTv: search error -> ${e.message}"
+            )
+
+            return newSearchResponseList(
+                emptyList(),
+                hasNext = false
+            )
+        }
 
         val items = doc.select(
-            ".listmovie, article, div.item, div.post, div.search-result, " +
-                ".film, .movie-item, .film-item, .movie, .movies"
+            ".listmovie, article, div.item, div.post, div.search-result"
         )
-            .mapNotNull {
-                parseSearchItem(it)
+            .mapNotNull { element ->
+                parseSearchItem(element)
             }
-            .distinctBy {
-                it.url
-            }
+            .distinctBy { it.url }
 
         return newSearchResponseList(
             items,
@@ -165,11 +129,7 @@ class YesilCamTv : MainAPI() {
     override suspend fun quickSearch(
         query: String
     ): List<SearchResponse>? {
-
-        return search(
-            query = query,
-            page = 1
-        ).items
+        return search(query, 1).items
     }
 
     private fun parseSearchItem(
@@ -177,125 +137,57 @@ class YesilCamTv : MainAPI() {
     ): SearchResponse? {
 
         val linkEl = element.selectFirst(
-            ".poster a[href], " +
-                ".film-poster a[href], " +
-                ".movie-poster a[href], " +
-                ".thumb a[href], " +
-                "a[href]"
+            ".poster a[href], a[href]"
         ) ?: return null
 
         val href = fixUrlNull(
             linkEl.attr("href")
         ) ?: return null
 
-        if (
-            href.startsWith("#") ||
-            href.startsWith("javascript:")
-        ) {
+        val imgEl = element.selectFirst("img")
+
+        val title =
+            element.selectFirst(
+                "h2, h3, .title, .entry-title a, .film-ismi a, a[title]"
+            )?.text()?.trim()
+                ?: imgEl?.attr("alt")?.trim()
+                ?: linkEl.attr("title").trim()
+
+        if (title.isBlank()) {
             return null
         }
 
-        val imgEl = element.selectFirst("img")
-
-        val title = element.selectFirst(
-            "h2, h3, h4, " +
-                ".title, " +
-                ".entry-title a, " +
-                ".film-ismi a, " +
-                ".movie-title, " +
-                ".film-title, " +
-                ".movie-name, " +
-                ".film-name, " +
-                "a[title]"
-        )
-            ?.text()
-            ?.trim()
-            ?.takeIf {
-                it.isNotBlank()
-            }
-            ?: imgEl
-                ?.attr("alt")
-                ?.trim()
-                ?.takeIf {
-                    it.isNotBlank()
-                }
-            ?: linkEl
-                .attr("title")
-                .trim()
-                .takeIf {
-                    it.isNotBlank()
-                }
-            ?: return null
-
         val poster = fixUrlNull(
-
-            imgEl
-                ?.attr("data-src")
-                ?.ifBlank {
-                    null
-                }
-
-                ?: imgEl
-                    ?.attr("data-lazy-src")
-                    ?.ifBlank {
-                        null
-                    }
-
-                ?: imgEl
-                    ?.attr("data-original")
-                    ?.ifBlank {
-                        null
-                    }
-
-                ?: imgEl
-                    ?.attr("data-image")
-                    ?.ifBlank {
-                        null
-                    }
-
-                ?: imgEl
-                    ?.attr("src")
-                    ?.ifBlank {
-                        null
-                    }
+            imgEl?.attr("data-src")?.ifBlank { null }
+                ?: imgEl?.attr("data-lazy-src")?.ifBlank { null }
+                ?: imgEl?.attr("src")?.ifBlank { null }
         )
 
         val year = element.selectFirst(
-            ".film-yil, " +
-                ".year, " +
-                ".date, " +
-                ".film-year, " +
-                ".movie-year, " +
-                ".release-year"
+            ".film-yil, .year, .date, .release-year"
         )
             ?.text()
-            ?.filter {
-                it.isDigit()
-            }
+            ?.filter { it.isDigit() }
             ?.take(4)
             ?.toIntOrNull()
 
-        val score = element.selectFirst(
-            ".bolum-ust, " +
-                ".imdb-score, " +
-                ".score, " +
-                ".imdb, " +
-                ".rating"
-        )
-            ?.text()
-            ?.trim()
+        val scoreText = element.selectFirst(
+            ".bolum-ust, .imdb-score, .score"
+        )?.text()?.trim()
+
+        val numericScore = parseScore(scoreText)
 
         return newMovieSearchResponse(
             title,
             href,
             TvType.Movie
         ) {
-
-            posterUrl = poster
-
+            this.posterUrl = poster
             this.year = year
 
-            this.score = Score.from10(score)
+            if (numericScore != null) {
+                this.score = Score.from10(numericScore)
+            }
         }
     }
 
@@ -303,15 +195,19 @@ class YesilCamTv : MainAPI() {
         url: String
     ): LoadResponse? {
 
-        val doc = try {
+        println(
+            "DEBUG YesilCamTv: load -> $url"
+        )
 
+        val doc = try {
             app.get(
                 url,
-                headers = browserHeaders
+                referer = mainUrl
             ).document
-
-        } catch (_: Exception) {
-
+        } catch (e: Exception) {
+            println(
+                "DEBUG YesilCamTv: load error -> ${e.message}"
+            )
             return null
         }
 
@@ -321,138 +217,85 @@ class YesilCamTv : MainAPI() {
         )
     }
 
-    /*
-     * ÖNEMLİ:
-     *
-     * newMovieLoadResponse() suspend olduğu için
-     * bu fonksiyon da suspend olmalı.
-     */
     private suspend fun parseLoadMetadata(
         doc: Document,
         url: String
     ): LoadResponse? {
 
-        val title = doc.selectFirst(
+        val titleElement = doc.selectFirst(
             "h1.title-border, " +
-                "h1.entry-title, " +
-                "h1, " +
-                ".video-title, " +
-                ".film-title, " +
-                "meta[property='og:title']"
+                    "h1.entry-title, " +
+                    "h1, " +
+                    ".video-title, " +
+                    "meta[property='og:title']"
         )
-            ?.let {
 
-                if (it.tagName() == "meta") {
-
-                    it.attr("content")
-
-                } else {
-
-                    it.text().trim()
-                }
+        val title = titleElement?.let {
+            if (it.tagName() == "meta") {
+                it.attr("content")
+            } else {
+                it.text().trim()
             }
-            ?.replace(
-                " | YESILCAM TV",
-                "",
-                ignoreCase = true
-            )
-            ?.replace(
-                " - Yeşilçam TV",
-                "",
-                ignoreCase = true
-            )
-            ?.replace(
-                " İzle",
-                "",
-                ignoreCase = true
-            )
+        }
+            ?.replace(" | YESILCAM TV", "")
+            ?.replace(" | YEŞİLÇAM TV", "")
+            ?.replace(" - Yeşilçam TV", "")
+            ?.replace(" - YesilCamTv", "")
+            ?.replace(" İzle", "")
             ?.trim()
-            ?.takeIf {
-                it.isNotBlank()
-            }
             ?: return null
 
         val poster = fixUrlNull(
-
             doc.selectFirst(
                 "meta[property='og:image']"
-            )
-                ?.attr("content")
-
+            )?.attr("content")
                 ?: doc.selectFirst(
                     "div.film-afis img, " +
-                        "div.poster img, " +
-                        ".entry-content img, " +
-                        ".film-bilgi img, " +
-                        ".movie-poster img, " +
-                        ".film-poster img"
-                )
-                    ?.let {
-
-                        it.attr("data-src")
-                            .ifBlank {
-                                null
-                            }
-
-                            ?: it.attr("data-lazy-src")
-                                .ifBlank {
-                                    null
-                                }
-
-                            ?: it.attr("data-original")
-                                .ifBlank {
-                                    null
-                                }
-
-                            ?: it.attr("src")
-                                .ifBlank {
-                                    null
-                                }
+                            "div.poster img, " +
+                            ".entry-content img, " +
+                            ".film-bilgi img"
+                )?.let {
+                    it.attr("data-src").ifBlank {
+                        null
+                    } ?: it.attr("data-lazy-src").ifBlank {
+                        null
+                    } ?: it.attr("src").ifBlank {
+                        null
                     }
+                }
         )
 
         val description = doc.selectFirst(
             "#film-aciklama, " +
-                "div.singlecontent p, " +
-                "div.entry-content p, " +
-                "meta[property='og:description'], " +
-                ".video-desc, " +
-                ".film-description"
-        )
-            ?.let {
-
-                if (it.tagName() == "meta") {
-
-                    it.attr("content")
-
-                } else {
-
-                    it.text()
-                }
+                    "div.singlecontent p, " +
+                    "div.entry-content p, " +
+                    "meta[property='og:description'], " +
+                    ".video-desc"
+        )?.let {
+            if (it.tagName() == "meta") {
+                it.attr("content")
+            } else {
+                it.text()
             }
-            ?.trim()
+        }?.trim()
 
         val year = doc.selectFirst(
             "a[href*='/yil/'], " +
-                ".film-yil, " +
-                ".year, " +
-                ".entry-date, " +
-                "span.date, " +
-                ".film-year"
+                    ".film-yil, " +
+                    ".year, " +
+                    ".entry-date, " +
+                    "span.date"
         )
             ?.text()
-            ?.filter {
-                it.isDigit()
-            }
+            ?.filter { it.isDigit() }
             ?.take(4)
             ?.toIntOrNull()
 
         val tags = doc.select(
             "div#listelements a[href*='/category/'], " +
-                "a[href*='/category/'], " +
-                ".tags a, " +
-                ".categories a, " +
-                ".genres a"
+                    "a[href*='/category/'], " +
+                    ".tags a, " +
+                    ".categories a"
         )
             .map {
                 it.text().trim()
@@ -464,20 +307,16 @@ class YesilCamTv : MainAPI() {
 
         val actors = doc.select(
             "a[href*='/oyuncu/'], " +
-                ".actors a, " +
-                ".cast a, " +
-                ".oyuncular a"
+                    ".actors a, " +
+                    ".cast a"
         )
             .mapNotNull {
+                val actorName = it.text().trim()
 
-                val actorName = it
-                    .text()
-                    .trim()
-
-                actorName.takeIf {
-                    it.isNotBlank()
-                }?.let {
-                    Actor(it)
+                if (actorName.isBlank()) {
+                    null
+                } else {
+                    Actor(actorName)
                 }
             }
             .distinctBy {
@@ -486,32 +325,12 @@ class YesilCamTv : MainAPI() {
 
         val scoreText = doc.selectFirst(
             ".bolum-ust, " +
-                ".imdb-score, " +
-                ".score, " +
-                "#listelements .elements, " +
-                ".imdb, " +
-                ".rating"
-        )
-            ?.text()
-            ?.trim()
+                    ".imdb-score, " +
+                    ".score, " +
+                    "#listelements .elements"
+        )?.text()?.trim()
 
-        val score = scoreText?.let {
-
-            Regex(
-                """IMDb:\s*([\d.,]+)""",
-                RegexOption.IGNORE_CASE
-            )
-                .find(it)
-                ?.groupValues
-                ?.getOrNull(1)
-
-                ?: Regex(
-                    """\b([\d][\d.,]?)\s*/\s*10\b"""
-                )
-                    .find(it)
-                    ?.groupValues
-                    ?.getOrNull(1)
-        }
+        val score = parseScore(scoreText)
 
         val response = newMovieLoadResponse(
             name = title,
@@ -520,18 +339,19 @@ class YesilCamTv : MainAPI() {
             dataUrl = url
         ) {
 
-            posterUrl = poster
-
-            plot = description
-
+            this.posterUrl = poster
+            this.plot = description
             this.year = year
-
             this.tags = tags
 
-            this.score = Score.from10(score)
+            if (score != null) {
+                this.score = Score.from10(score)
+            }
         }
 
-        response.addActors(actors)
+        if (actors.isNotEmpty()) {
+            response.addActors(actors)
+        }
 
         return response
     }
@@ -543,57 +363,86 @@ class YesilCamTv : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
 
-        val doc = try {
+        println(
+            "DEBUG YesilCamTv: loadLinks -> $data"
+        )
 
+        val doc = try {
             app.get(
                 data,
-                headers = browserHeaders
+                referer = mainUrl
             ).document
-
-        } catch (_: Exception) {
-
+        } catch (e: Exception) {
+            println(
+                "DEBUG YesilCamTv: loadLinks document error -> ${e.message}"
+            )
             return false
         }
 
         var linksFound = false
 
-        val visited = HashSet<String>()
+        println(
+            "DEBUG YesilCamTv: iframe sayısı = " +
+                    doc.select("iframe").size
+        )
+
+        println(
+            "DEBUG YesilCamTv: video sayısı = " +
+                    doc.select("video").size
+        )
 
         /*
-         * loadExtractor suspend olduğu için
-         * yardımcı fonksiyon da suspend.
+         * =========================================================
+         * 1. IFRAME
+         * =========================================================
          */
-        suspend fun sendToExtractor(
-            rawUrl: String,
-            referer: String = data
-        ) {
 
-            val fixed = fixUrlNull(
-                rawUrl
-            ) ?: return
+        val iframeElements = doc.select(
+            "iframe[src], iframe[data-src]"
+        )
+
+        for (iframe in iframeElements) {
+
+            val src = iframe.attr("data-src")
+                .ifBlank {
+                    iframe.attr("src")
+                }
+                .trim()
+
+            if (src.isBlank()) {
+                continue
+            }
 
             if (
-                fixed.isBlank() ||
-                fixed.startsWith("about:") ||
-                fixed.startsWith("javascript:")
+                src.startsWith("about:", ignoreCase = true) ||
+                src.startsWith("javascript:", ignoreCase = true)
             ) {
-                return
+                continue
             }
 
-            if (!visited.add(fixed)) {
-                return
+            val fixed = try {
+                fixUrl(src)
+            } catch (_: Exception) {
+                src
             }
+
+            println(
+                "DEBUG YesilCamTv: iframe -> $fixed"
+            )
 
             try {
 
                 val success = loadExtractor(
-                    url = fixed,
-                    referer = referer,
+                    fixed,
+                    referer = data,
                     subtitleCallback = subtitleCallback
                 ) { link ->
 
-                    callback(link)
+                    println(
+                        "DEBUG YesilCamTv: extractor link -> ${link.url}"
+                    )
 
+                    callback(link)
                     linksFound = true
                 }
 
@@ -601,42 +450,58 @@ class YesilCamTv : MainAPI() {
                     linksFound = true
                 }
 
-            } catch (_: Exception) {
-                // Aşağıdaki direct-media kontrolleri devam eder.
+            } catch (e: Exception) {
+
+                println(
+                    "DEBUG YesilCamTv: iframe extractor error -> " +
+                            e.message
+                )
             }
         }
 
-        fun addDirect(
-            url: String
-        ) {
+        /*
+         * =========================================================
+         * 2. VIDEO SOURCE
+         * =========================================================
+         */
 
-            val fixed = fixUrlNull(
-                url
-            ) ?: return
+        val videoElements = doc.select(
+            "video source[src], video[src]"
+        )
 
-            if (!visited.add(fixed)) {
-                return
+        for (video in videoElements) {
+
+            val src = fixUrlNull(
+                video.attr("src")
+            ) ?: continue
+
+            if (src.isBlank()) {
+                continue
             }
 
-            val lower = fixed.lowercase()
-
-            val isM3u8 = lower.contains(
-                ".m3u8"
+            println(
+                "DEBUG YesilCamTv: direct video -> $src"
             )
 
-            val isMp4 = lower.contains(
-                ".mp4"
+            val isM3u8 = src.contains(
+                ".m3u8",
+                ignoreCase = true
+            )
+
+            val isMp4 = src.contains(
+                ".mp4",
+                ignoreCase = true
             )
 
             if (!isM3u8 && !isMp4) {
-                return
+                continue
             }
 
             callback(
                 newExtractorLink(
                     source = name,
                     name = "$name HD",
-                    url = fixed,
+                    url = src,
                     type = if (isM3u8) {
                         ExtractorLinkType.M3U8
                     } else {
@@ -645,8 +510,8 @@ class YesilCamTv : MainAPI() {
                 ) {
 
                     referer = data
-
                     quality = Qualities.P1080.value
+
                 }
             )
 
@@ -654,277 +519,116 @@ class YesilCamTv : MainAPI() {
         }
 
         /*
-         * 1) iframe / embed / lazy iframe
+         * =========================================================
+         * 3. HTML İÇERİSİNDEKİ MP4 / M3U8
+         * =========================================================
          */
-        val embedElements = doc.select(
-            "iframe, " +
-                "embed, " +
-                "object, " +
-                "[data-src], " +
-                "[data-url], " +
-                "[data-embed], " +
-                "[data-video], " +
-                "[data-player], " +
-                "[data-iframe], " +
-                "[data-source]"
-        )
 
-        for (element in embedElements) {
+        val html = try {
+            app.get(
+                data,
+                referer = mainUrl
+            ).text
+        } catch (_: Exception) {
+            ""
+        }
 
-            val candidates = listOf(
+        if (html.isNotBlank()) {
 
-                element.attr("src"),
-
-                element.attr("data-src"),
-
-                element.attr("data-url"),
-
-                element.attr("data-embed"),
-
-                element.attr("data-video"),
-
-                element.attr("data-player"),
-
-                element.attr("data-iframe"),
-
-                element.attr("data-source"),
-
-                element.attr("value")
+            val mediaRegex = Regex(
+                """https?://[^"'\\\s<>]+(?:\.m3u8|\.mp4)(?:\?[^"'\\\s<>]*)?""",
+                RegexOption.IGNORE_CASE
             )
 
-            for (candidate in candidates) {
+            for (match in mediaRegex.findAll(html)) {
 
-                if (candidate.isBlank()) {
-                    continue
-                }
+                val mediaUrl = match.value
+                    .replace("\\/", "/")
+                    .replace("\\u0026", "&")
 
-                val fixed = fixUrlNull(
-                    candidate
-                ) ?: continue
+                val isM3u8 = mediaUrl.contains(
+                    ".m3u8",
+                    ignoreCase = true
+                )
 
-                when {
+                callback(
+                    newExtractorLink(
+                        source = name,
+                        name = "$name Direct",
+                        url = mediaUrl,
+                        type = if (isM3u8) {
+                            ExtractorLinkType.M3U8
+                        } else {
+                            ExtractorLinkType.VIDEO
+                        }
+                    ) {
 
-                    isDirectMedia(fixed) -> {
-                        addDirect(fixed)
+                        referer = data
+                        quality = Qualities.P1080.value
+
                     }
+                )
 
-                    isSupportedEmbed(fixed) -> {
-                        sendToExtractor(
-                            rawUrl = fixed,
-                            referer = data
-                        )
-                    }
-                }
+                linksFound = true
             }
-        }
 
-        /*
-         * 2) HTML5 video/source
-         */
-        val videoElements = doc.select(
-            "video, video source, source"
-        )
-
-        for (element in videoElements) {
-
-            val candidates = listOf(
-
-                element.attr("src"),
-
-                element.attr("data-src"),
-
-                element.attr("data-url"),
-
-                element.attr("data-source")
+            /*
+             * HTML içindeki altyazılar
+             */
+            val subtitleRegex = Regex(
+                """https?://[^"'\\\s<>]+\.(?:vtt|srt)(?:\?[^"'\\\s<>]*)?""",
+                RegexOption.IGNORE_CASE
             )
 
-            candidates
-                .filter {
-                    it.isNotBlank()
-                }
-                .forEach {
-                    addDirect(it)
-                }
-        }
+            for (match in subtitleRegex.findAll(html)) {
 
-        /*
-         * 3) Sayfa HTML'i içinde bulunan player/provider URL'leri
-         */
-        val rawHtml = doc.html()
+                val subtitleUrl = match.value
+                    .replace("\\/", "/")
+                    .replace("\\u0026", "&")
 
-        val providerUrls = extractProviderUrls(
-            rawHtml
-        )
-
-        for (providerUrl in providerUrls) {
-
-            sendToExtractor(
-                rawUrl = providerUrl,
-                referer = data
-            )
-        }
-
-        /*
-         * 4) Sayfa kaynağındaki direkt MP4/M3U8
-         */
-        extractDirectMediaUrls(
-            rawHtml
-        ).forEach {
-            addDirect(it)
-        }
-
-        /*
-         * 5) Script JSON / JavaScript player kaynakları
-         */
-        val scripts = doc.select(
-            "script"
-        )
-
-        for (script in scripts) {
-
-            val scriptText = script
-                .data()
-                .ifBlank {
-                    script.html()
-                }
-
-            extractProviderUrls(
-                scriptText
-            ).forEach {
-
-                sendToExtractor(
-                    rawUrl = it,
-                    referer = data
+                subtitleCallback(
+                    newSubtitleFile(
+                        lang = "tr",
+                        url = subtitleUrl
+                    )
                 )
             }
-
-            extractDirectMediaUrls(
-                scriptText
-            ).forEach {
-                addDirect(it)
-            }
         }
+
+        println(
+            "DEBUG YesilCamTv: linksFound = $linksFound"
+        )
 
         return linksFound
     }
 
-    private fun isDirectMedia(
-        url: String
-    ): Boolean {
+    private fun parseScore(
+        value: String?
+    ): Double? {
 
-        val lower = url.lowercase()
+        if (value.isNullOrBlank()) {
+            return null
+        }
 
-        return lower.contains(".m3u8") ||
-            lower.contains(".mp4")
-    }
+        val imdbMatch = Regex(
+            """(?:IMDb|IMDB)?\s*:?\s*([0-9]+(?:[.,][0-9]+)?)"""
+        ).find(value)
 
-    private fun isSupportedEmbed(
-        url: String
-    ): Boolean {
-
-        val lower = url.lowercase()
-
-        return lower.contains(
-            "rumble.com/"
-        ) ||
-            lower.contains(
-                "youtube.com/"
-            ) ||
-            lower.contains(
-                "youtu.be/"
-            ) ||
-            lower.contains(
-                "dailymotion.com/"
-            ) ||
-            lower.contains(
-                "vimeo.com/"
+        val number = imdbMatch
+            ?.groupValues
+            ?.getOrNull(1)
+            ?: Regex(
+                """([0-9]+(?:[.,][0-9]+)?)"""
             )
-    }
+                .find(value)
+                ?.groupValues
+                ?.getOrNull(1)
 
-    private fun extractProviderUrls(
-        text: String
-    ): Set<String> {
-
-        val result = LinkedHashSet<String>()
-
-        val patterns = listOf(
-
-            /*
-             * Rumble
-             */
-            Regex(
-                """https?://(?:www\.)?rumble\.com/(?:embed/[^"'\\\s<>]+|v?[a-zA-Z0-9_-]+\.html)""",
-                RegexOption.IGNORE_CASE
-            ),
-
-            /*
-             * YouTube
-             */
-            Regex(
-                """https?://(?:www\.)?(?:youtube\.com/(?:embed/|watch\?v=)|youtu\.be/)[^"'\\\s<>]+""",
-                RegexOption.IGNORE_CASE
-            ),
-
-            /*
-             * Dailymotion
-             */
-            Regex(
-                """https?://(?:www\.)?dailymotion\.com/video/[^"'\\\s<>]+""",
-                RegexOption.IGNORE_CASE
-            ),
-
-            /*
-             * Vimeo
-             */
-            Regex(
-                """https?://(?:www\.)?vimeo\.com/[^"'\\\s<>]+""",
-                RegexOption.IGNORE_CASE
-            )
-        )
-
-        patterns.forEach { regex ->
-
-            regex.findAll(
-                text
-            ).forEach {
-
-                result.add(
-                    it.value
-                        .replace("\\/", "/")
-                        .replace("\\u0026", "&")
-                        .replace("&amp;", "&")
-                        .trim('"', '\'')
-                )
+        return number
+            ?.replace(",", ".")
+            ?.toDoubleOrNull()
+            ?.takeIf {
+                it in 0.0..10.0
             }
-        }
-
-        return result
-    }
-
-    private fun extractDirectMediaUrls(
-        text: String
-    ): Set<String> {
-
-        val result = LinkedHashSet<String>()
-
-        val regex = Regex(
-            """https?://[^"'\\\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\\\s<>]*)?""",
-            RegexOption.IGNORE_CASE
-        )
-
-        regex.findAll(
-            text
-        ).forEach {
-
-            result.add(
-                it.value
-                    .replace("\\/", "/")
-                    .replace("\\u0026", "&")
-                    .replace("&amp;", "&")
-                    .trim('"', '\'')
-            )
-        }
-
-        return result
     }
 }
