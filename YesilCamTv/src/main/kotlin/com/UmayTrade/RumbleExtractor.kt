@@ -1,13 +1,13 @@
 package com.UmayTrade
 
 import com.lagradost.cloudstream3.ExtractorLink
-import com.lagradost.cloudstream3.ExtractorLinkType
 import com.lagradost.cloudstream3.SubtitleFile
+import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.utils.ExtractorApi
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
-import com.lagradost.cloudstream3.utils.app
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import com.lagradost.cloudstream3.utils.newSubtitleFile
+import com.lagradost.cloudstream3.newSubtitleFile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLDecoder
@@ -15,7 +15,9 @@ import java.net.URLDecoder
 class RumbleExtractor : ExtractorApi() {
 
     override var mainUrl = "https://rumble.com"
+
     override var name = "Rumble"
+
     override val requiresReferer = true
 
     private val rumbleHeaders = mapOf(
@@ -34,33 +36,44 @@ class RumbleExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        val videoId = extractVideoId(url) ?: return
 
-        println("DEBUG RumbleExtractor: URL = $url")
-        println("DEBUG RumbleExtractor: videoId = $videoId")
+        println("RumbleExtractor URL: $url")
+
+        val videoId = extractVideoId(url)
+
+        if (videoId.isNullOrBlank()) {
+            println("RumbleExtractor: Video ID bulunamadı")
+            return
+        }
+
+        println("RumbleExtractor Video ID: $videoId")
 
         val endpoints = listOf(
             "https://rumble.com/embedJS/u3/?request=video&ver=2&v=$videoId",
             "https://rumble.com/embedJS/VideoPlayback/?request=video&ver=2&v=$videoId",
-            "https://rumble.com/-/api/video/$videoId",
-            "https://rumble.com/embed/$videoId/"
+            "https://rumble.com/-/api/video/$videoId"
         )
 
         var found = false
 
         for (endpoint in endpoints) {
-            println("DEBUG RumbleExtractor: endpoint = $endpoint")
+
+            println("RumbleExtractor endpoint: $endpoint")
 
             val responseText = try {
+
                 app.get(
                     endpoint,
                     referer = "https://rumble.com/",
                     headers = rumbleHeaders
                 ).text
+
             } catch (e: Exception) {
+
                 println(
-                    "DEBUG RumbleExtractor: request error = ${e.message}"
+                    "RumbleExtractor request error: ${e.message}"
                 )
+
                 continue
             }
 
@@ -68,48 +81,56 @@ class RumbleExtractor : ExtractorApi() {
                 continue
             }
 
-            println(
-                "DEBUG RumbleExtractor: response length = ${responseText.length}"
-            )
+            try {
 
-            val trimmed = responseText.trim()
+                val trimmed = responseText.trim()
 
-            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-                try {
-                    val json = if (trimmed.startsWith("[")) {
-                        JSONArray(trimmed)
-                    } else {
-                        JSONObject(trimmed)
-                    }
+                if (
+                    trimmed.startsWith("{") ||
+                    trimmed.startsWith("[")
+                ) {
 
-                    val streamFound = parseJsonForStreams(
-                        json = json,
-                        callback = callback,
-                        subtitleCallback = subtitleCallback
-                    )
+                    val json: Any =
+                        if (trimmed.startsWith("[")) {
+                            JSONArray(trimmed)
+                        } else {
+                            JSONObject(trimmed)
+                        }
 
-                    if (streamFound) {
+                    if (
+                        parseJson(
+                            json,
+                            subtitleCallback,
+                            callback
+                        )
+                    ) {
                         found = true
                     }
-                } catch (e: Exception) {
-                    println(
-                        "DEBUG RumbleExtractor: JSON parse error = ${e.message}"
-                    )
 
-                    if (parseRawTextForStreams(
+                } else {
+
+                    if (
+                        parseRawText(
                             responseText,
-                            callback,
-                            subtitleCallback
+                            subtitleCallback,
+                            callback
                         )
                     ) {
                         found = true
                     }
                 }
-            } else {
-                if (parseRawTextForStreams(
+
+            } catch (e: Exception) {
+
+                println(
+                    "RumbleExtractor JSON error: ${e.message}"
+                )
+
+                if (
+                    parseRawText(
                         responseText,
-                        callback,
-                        subtitleCallback
+                        subtitleCallback,
+                        callback
                     )
                 ) {
                     found = true
@@ -122,135 +143,181 @@ class RumbleExtractor : ExtractorApi() {
         }
 
         /*
-         * Son güvenlik: Rumble embed sayfasının HTML'ini doğrudan
-         * tarayalım.
+         * Son fallback:
+         * Embed sayfasının kendisini tara.
          */
         if (!found) {
+
             try {
+
                 val html = app.get(
                     url,
-                    referer = referer ?: mainUrl,
+                    referer = referer ?: "https://rumble.com/",
                     headers = rumbleHeaders
                 ).text
 
-                if (parseRawTextForStreams(
-                        html,
-                        callback,
-                        subtitleCallback
-                    )
-                ) {
-                    found = true
-                }
+                parseRawText(
+                    html,
+                    subtitleCallback,
+                    callback
+                )
+
             } catch (e: Exception) {
+
                 println(
-                    "DEBUG RumbleExtractor: HTML fallback error = ${e.message}"
+                    "RumbleExtractor HTML fallback error: ${e.message}"
                 )
             }
         }
-
-        println("DEBUG RumbleExtractor: found = $found")
     }
 
-    private fun extractVideoId(url: String): String? {
-        val cleanUrl = url.substringBefore("?").substringBefore("#")
+    private fun extractVideoId(
+        url: String
+    ): String? {
+
+        val cleanUrl = url
+            .substringBefore("?")
+            .substringBefore("#")
 
         /*
-         * Örnek:
-         * https://rumble.com/embed/v5o42le/
+         * Normal:
+         *
+         * /embed/v5o42le/
          */
-        Regex(
-            """rumble\.com/embed/([a-zA-Z0-9._-]+)"""
-        ).find(cleanUrl)?.groupValues?.getOrNull(1)?.let { raw ->
-            val id = raw
-                .trim('/')
-                .substringAfterLast(".")
-                .takeIf { it.isNotBlank() }
+        val normalEmbed = Regex(
+            """rumble\.com/embed/([a-zA-Z0-9_-]+)/?"""
+        ).find(cleanUrl)
 
-            if (!id.isNullOrBlank()) {
-                return id
+        if (normalEmbed != null) {
+
+            val value = normalEmbed
+                .groupValues
+                .getOrNull(1)
+
+            if (!value.isNullOrBlank()) {
+
+                /*
+                 * ucfsd.v5moylt gibi durumda
+                 * son parçayı al.
+                 */
+                return value
+                    .substringAfterLast(".")
+                    .trim()
             }
         }
 
         /*
          * Örnek:
-         * https://rumble.com/embed/ucfsd.v5moylt/
          *
-         * Burada gerçek video ID:
-         * v5moylt
+         * /embed/ucfsd.v5moylt/
          */
-        Regex(
+        val dottedEmbed = Regex(
             """rumble\.com/embed/[^/]*\.([a-zA-Z0-9_-]+)/?"""
-        ).find(cleanUrl)?.groupValues?.getOrNull(1)?.let {
-            return it
+        ).find(cleanUrl)
+
+        if (dottedEmbed != null) {
+
+            return dottedEmbed
+                .groupValues
+                .getOrNull(1)
+                ?.trim()
         }
 
         /*
          * Örnek:
-         * https://rumble.com/v5o42le-film-adi.html
+         *
+         * /v5o42le-video-title.html
          */
-        Regex(
+        val htmlUrl = Regex(
             """rumble\.com/([a-zA-Z0-9_-]+)-[^/]+\.html"""
-        ).find(cleanUrl)?.groupValues?.getOrNull(1)?.let {
-            return it
+        ).find(cleanUrl)
+
+        if (htmlUrl != null) {
+
+            return htmlUrl
+                .groupValues
+                .getOrNull(1)
+                ?.trim()
         }
 
         /*
-         * Daha genel .html desteği
+         * Basit .html
          */
-        Regex(
+        val simpleHtml = Regex(
             """rumble\.com/([a-zA-Z0-9_-]+)\.html"""
-        ).find(cleanUrl)?.groupValues?.getOrNull(1)?.let {
-            return it
+        ).find(cleanUrl)
+
+        if (simpleHtml != null) {
+
+            return simpleHtml
+                .groupValues
+                .getOrNull(1)
+                ?.trim()
         }
 
         return null
     }
 
-    private suspend fun parseJsonForStreams(
+    private suspend fun parseJson(
         json: Any,
-        callback: (ExtractorLink) -> Unit,
-        subtitleCallback: (SubtitleFile) -> Unit
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
     ): Boolean {
 
         var found = false
 
-        suspend fun scan(value: Any?) {
+        suspend fun scan(
+            value: Any?
+        ) {
+
             when (value) {
 
                 is JSONObject -> {
+
                     val keys = value.keys()
 
                     while (keys.hasNext()) {
+
                         val key = keys.next()
+
                         val child = value.opt(key)
 
                         if (child is String) {
-                            if (emitStream(
-                                    key = key,
-                                    value = child,
-                                    callback = callback
+
+                            if (
+                                addStream(
+                                    key,
+                                    child,
+                                    callback
                                 )
                             ) {
                                 found = true
                             }
 
-                            if (emitSubtitle(
-                                    key = key,
-                                    value = child,
-                                    subtitleCallback = subtitleCallback
+                            if (
+                                addSubtitle(
+                                    key,
+                                    child,
+                                    subtitleCallback
                                 )
                             ) {
                                 found = true
                             }
+
                         } else {
+
                             scan(child)
                         }
                     }
                 }
 
                 is JSONArray -> {
-                    for (i in 0 until value.length()) {
-                        scan(value.opt(i))
+
+                    for (index in 0 until value.length()) {
+
+                        scan(
+                            value.opt(index)
+                        )
                     }
                 }
             }
@@ -261,16 +328,16 @@ class RumbleExtractor : ExtractorApi() {
         return found
     }
 
-    private suspend fun parseRawTextForStreams(
+    private suspend fun parseRawText(
         text: String,
-        callback: (ExtractorLink) -> Unit,
-        subtitleCallback: (SubtitleFile) -> Unit
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
     ): Boolean {
 
         var found = false
 
         /*
-         * MP4 URL'leri
+         * MP4
          */
         val mp4Regex = Regex(
             """https?://[^"'\\\s<>]+\.mp4(?:\?[^"'\\\s<>]*)?""",
@@ -278,17 +345,19 @@ class RumbleExtractor : ExtractorApi() {
         )
 
         for (match in mp4Regex.findAll(text)) {
-            val url = decodeUrl(match.value)
+
+            val url = cleanUrl(match.value)
 
             callback(
                 newExtractorLink(
-                    source = this.name,
+                    source = name,
                     name = "Rumble MP4",
                     url = url,
                     type = ExtractorLinkType.VIDEO
                 ) {
+
                     referer = "https://rumble.com/"
-                    quality = guessQuality(url)
+                    quality = detectQuality(url)
                     headers = rumbleHeaders
                 }
             )
@@ -297,7 +366,7 @@ class RumbleExtractor : ExtractorApi() {
         }
 
         /*
-         * M3U8 URL'leri
+         * M3U8
          */
         val m3u8Regex = Regex(
             """https?://[^"'\\\s<>]+\.m3u8(?:\?[^"'\\\s<>]*)?""",
@@ -305,17 +374,19 @@ class RumbleExtractor : ExtractorApi() {
         )
 
         for (match in m3u8Regex.findAll(text)) {
-            val url = decodeUrl(match.value)
+
+            val url = cleanUrl(match.value)
 
             callback(
                 newExtractorLink(
-                    source = this.name,
+                    source = name,
                     name = "Rumble HLS",
                     url = url,
                     type = ExtractorLinkType.M3U8
                 ) {
+
                     referer = "https://rumble.com/"
-                    quality = guessQuality(url)
+                    quality = detectQuality(url)
                     headers = rumbleHeaders
                 }
             )
@@ -324,7 +395,7 @@ class RumbleExtractor : ExtractorApi() {
         }
 
         /*
-         * Altyazı
+         * VTT / SRT
          */
         val subtitleRegex = Regex(
             """https?://[^"'\\\s<>]+\.(?:vtt|srt)(?:\?[^"'\\\s<>]*)?""",
@@ -332,7 +403,10 @@ class RumbleExtractor : ExtractorApi() {
         )
 
         for (match in subtitleRegex.findAll(text)) {
-            val subtitleUrl = decodeUrl(match.value)
+
+            val subtitleUrl = cleanUrl(
+                match.value
+            )
 
             subtitleCallback(
                 newSubtitleFile(
@@ -347,29 +421,24 @@ class RumbleExtractor : ExtractorApi() {
         return found
     }
 
-    private suspend fun emitStream(
+    private suspend fun addStream(
         key: String,
         value: String,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
 
-        val cleaned = decodeUrl(
-            value
-                .replace("\\/", "/")
-                .replace("\\u0026", "&")
-                .trim()
-        )
+        val url = cleanUrl(value)
 
-        if (cleaned.isBlank()) {
+        if (url.isBlank()) {
             return false
         }
 
-        val isM3u8 = cleaned.contains(
+        val isM3u8 = url.contains(
             ".m3u8",
             ignoreCase = true
         )
 
-        val isMp4 = cleaned.contains(
+        val isMp4 = url.contains(
             ".mp4",
             ignoreCase = true
         )
@@ -378,22 +447,22 @@ class RumbleExtractor : ExtractorApi() {
             return false
         }
 
-        val quality = guessQuality(
-            key = key,
-            url = cleaned
+        val quality = detectQuality(
+            "$key $url"
         )
 
         callback(
             newExtractorLink(
-                source = this.name,
+                source = name,
                 name = "Rumble ${qualityName(quality)}",
-                url = cleaned,
+                url = url,
                 type = if (isM3u8) {
                     ExtractorLinkType.M3U8
                 } else {
                     ExtractorLinkType.VIDEO
                 }
             ) {
+
                 referer = "https://rumble.com/"
                 this.quality = quality
                 headers = rumbleHeaders
@@ -401,102 +470,139 @@ class RumbleExtractor : ExtractorApi() {
         )
 
         println(
-            "DEBUG RumbleExtractor: stream -> $key -> $cleaned"
+            "Rumble stream found: $key -> $url"
         )
 
         return true
     }
 
-    private suspend fun emitSubtitle(
+    private suspend fun addSubtitle(
         key: String,
         value: String,
         subtitleCallback: (SubtitleFile) -> Unit
     ): Boolean {
 
-        val cleaned = decodeUrl(
-            value
-                .replace("\\/", "/")
-                .replace("\\u0026", "&")
-                .trim()
-        )
+        val url = cleanUrl(value)
 
-        val isSubtitle = cleaned.contains(
-            ".vtt",
-            ignoreCase = true
-        ) || cleaned.contains(
-            ".srt",
-            ignoreCase = true
-        )
+        val isSubtitle =
+            url.contains(
+                ".vtt",
+                ignoreCase = true
+            ) ||
+                    url.contains(
+                        ".srt",
+                        ignoreCase = true
+                    )
 
         if (!isSubtitle) {
             return false
         }
 
         val language = when {
-            key.contains("tr", ignoreCase = true) -> "tr"
-            key.contains("turkish", ignoreCase = true) -> "tr"
-            key.contains("en", ignoreCase = true) -> "en"
-            key.contains("english", ignoreCase = true) -> "en"
-            else -> key.ifBlank { "und" }
+
+            key.contains(
+                "tr",
+                ignoreCase = true
+            ) -> "tr"
+
+            key.contains(
+                "turkish",
+                ignoreCase = true
+            ) -> "tr"
+
+            key.contains(
+                "en",
+                ignoreCase = true
+            ) -> "en"
+
+            key.contains(
+                "english",
+                ignoreCase = true
+            ) -> "en"
+
+            else -> "und"
         }
 
         subtitleCallback(
             newSubtitleFile(
                 lang = language,
-                url = cleaned
+                url = url
             )
         )
 
         return true
     }
 
-    private fun decodeUrl(value: String): String {
-        return try {
+    private fun cleanUrl(
+        value: String
+    ): String {
+
+        var result = value
+            .replace("\\/", "/")
+            .replace("\\u0026", "&")
+            .trim()
+
+        result = try {
+
             URLDecoder.decode(
-                value
-                    .replace("\\/", "/")
-                    .replace("\\u0026", "&"),
+                result,
                 "UTF-8"
             )
+
         } catch (_: Exception) {
-            value
+
+            result
         }
+
+        return result
     }
 
-    private fun guessQuality(
-        key: String = "",
-        url: String = ""
+    private fun detectQuality(
+        value: String
     ): Int {
 
-        val text = "$key $url"
-
         return when {
-            Regex("""2160|4k""", RegexOption.IGNORE_CASE)
-                .containsMatchIn(text) ->
+
+            Regex(
+                """2160|4k""",
+                RegexOption.IGNORE_CASE
+            ).containsMatchIn(value) ->
                 Qualities.P2160.value
 
-            Regex("""1440""", RegexOption.IGNORE_CASE)
-                .containsMatchIn(text) ->
+            Regex(
+                """1440""",
+                RegexOption.IGNORE_CASE
+            ).containsMatchIn(value) ->
                 Qualities.P1440.value
 
-            Regex("""1080""", RegexOption.IGNORE_CASE)
-                .containsMatchIn(text) ->
+            Regex(
+                """1080""",
+                RegexOption.IGNORE_CASE
+            ).containsMatchIn(value) ->
                 Qualities.P1080.value
 
-            Regex("""720""", RegexOption.IGNORE_CASE)
-                .containsMatchIn(text) ->
+            Regex(
+                """720""",
+                RegexOption.IGNORE_CASE
+            ).containsMatchIn(value) ->
                 Qualities.P720.value
 
-            Regex("""480""", RegexOption.IGNORE_CASE)
-                .containsMatchIn(text) ->
+            Regex(
+                """480""",
+                RegexOption.IGNORE_CASE
+            ).containsMatchIn(value) ->
                 Qualities.P480.value
 
-            Regex("""360""", RegexOption.IGNORE_CASE)
-                .containsMatchIn(text) ->
+            Regex(
+                """360""",
+                RegexOption.IGNORE_CASE
+            ).containsMatchIn(value) ->
                 Qualities.P360.value
 
-            Regex("""240""", RegexOption.IGNORE_CASE)
-                .containsMatchIn(text) ->
+            Regex(
+                """240""",
+                RegexOption.IGNORE_CASE
+            ).containsMatchIn(value) ->
                 Qualities.P240.value
 
             else ->
@@ -504,8 +610,12 @@ class RumbleExtractor : ExtractorApi() {
         }
     }
 
-    private fun qualityName(quality: Int): String {
+    private fun qualityName(
+        quality: Int
+    ): String {
+
         return when (quality) {
+
             Qualities.P2160.value -> "2160p"
             Qualities.P1440.value -> "1440p"
             Qualities.P1080.value -> "1080p"
@@ -513,6 +623,7 @@ class RumbleExtractor : ExtractorApi() {
             Qualities.P480.value -> "480p"
             Qualities.P360.value -> "360p"
             Qualities.P240.value -> "240p"
+
             else -> "Auto"
         }
     }
