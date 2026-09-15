@@ -1,19 +1,25 @@
 package com.UmayTrade
 
-import com.lagradost.cloudstream3.plugins.BasePlugin
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
+import com.lagradost.cloudstream3.plugins.Plugin
 
 @CloudstreamPlugin
-class YesilCamTvPlugin : BasePlugin() {
+class YesilCamTvPlugin : Plugin() {
 
-    override fun load() {
+    override fun load(context: android.content.Context) {
 
-        registerMainAPI(
-            YesilCamTv()
-        )
-
+        /*
+         * Rumble özel extractor
+         */
         registerExtractorAPI(
             RumbleExtractor()
+        )
+
+        /*
+         * Ana site provider
+         */
+        registerMainAPI(
+            YesilCamTv()
         )
     }
 }
