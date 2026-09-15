@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.net.URLEncoder
 
 class YesilCamTv : MainAPI() {
     override var mainUrl = "https://yesilcamtv.com.tr"
@@ -29,6 +30,8 @@ class YesilCamTv : MainAPI() {
             "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
         "Accept-Language" to "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
     )
+
+    private fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
 
     override suspend fun getMainPage(
         page: Int,
@@ -60,9 +63,9 @@ class YesilCamTv : MainAPI() {
         page: Int
     ): SearchResponseList {
         val targetUrl = if (page <= 1) {
-            "${mainUrl}/?s=${query.urlEncode()}"
+            "${mainUrl}/?s=${enc(query)}"
         } else {
-            "${mainUrl}/page/$page/?s=${query.urlEncode()}"
+            "${mainUrl}/page/$page/?s=${enc(query)}"
         }
 
         val doc = app.get(targetUrl, headers = browserHeaders).document
@@ -125,7 +128,7 @@ class YesilCamTv : MainAPI() {
         return parseLoadMetadata(doc, url)
     }
 
-    private fun parseLoadMetadata(
+    private suspend fun parseLoadMetadata(
         doc: Document,
         url: String
     ): LoadResponse? {
@@ -218,7 +221,7 @@ class YesilCamTv : MainAPI() {
         var linksFound = false
         val visited = HashSet<String>()
 
-        fun sendToExtractor(rawUrl: String, referer: String = data) {
+        suspend fun sendToExtractor(rawUrl: String, referer: String = data) {
             val fixed = fixUrlNull(rawUrl) ?: return
             if (fixed.isBlank() || fixed.startsWith("about:") || !visited.add(fixed)) return
 
@@ -238,7 +241,7 @@ class YesilCamTv : MainAPI() {
             }
         }
 
-        fun addDirect(url: String) {
+        suspend fun addDirect(url: String) {
             val fixed = fixUrlNull(url) ?: return
             if (!visited.add(fixed)) return
 
@@ -278,8 +281,9 @@ class YesilCamTv : MainAPI() {
                 element.attr("value")
             )
 
-            candidates.filter { it.isNotBlank() }.forEach { candidate ->
-                val fixed = fixUrlNull(candidate) ?: return@forEach
+            for (candidate in candidates) {
+                if (candidate.isBlank()) continue
+                val fixed = fixUrlNull(candidate) ?: continue
 
                 when {
                     isDirectMedia(fixed) -> addDirect(fixed)
@@ -299,12 +303,12 @@ class YesilCamTv : MainAPI() {
 
         // 3) Known provider URLs and player URLs embedded in attributes/text.
         val rawHtml = doc.html()
-        extractProviderUrls(rawHtml).forEach { providerUrl ->
+        for (providerUrl in extractProviderUrls(rawHtml)) {
             sendToExtractor(providerUrl, data)
         }
 
         // 4) Direct HLS/MP4 URLs inside page source.
-        extractDirectMediaUrls(rawHtml).forEach { directUrl ->
+        for (directUrl in extractDirectMediaUrls(rawHtml)) {
             addDirect(directUrl)
         }
 
@@ -312,11 +316,11 @@ class YesilCamTv : MainAPI() {
         doc.select("script").forEach { script ->
             val scriptText = script.data().ifBlank { script.html() }
 
-            extractProviderUrls(scriptText).forEach { providerUrl ->
+            for (providerUrl in extractProviderUrls(scriptText)) {
                 sendToExtractor(providerUrl, data)
             }
 
-            extractDirectMediaUrls(scriptText).forEach { directUrl ->
+            for (directUrl in extractDirectMediaUrls(scriptText)) {
                 addDirect(directUrl)
             }
         }
