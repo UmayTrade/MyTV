@@ -3,14 +3,14 @@ package com.UmayTrade
 import com.lagradost.cloudstream3.ExtractorLink
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.newSubtitleFile
+
 import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import com.lagradost.cloudstream3.newSubtitleFile
-import org.json.JSONArray
+
 import org.json.JSONObject
-import java.net.URLDecoder
 
 class RumbleExtractor : ExtractorApi() {
 
