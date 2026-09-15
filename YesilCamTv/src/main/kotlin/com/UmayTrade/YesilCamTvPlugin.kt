@@ -7,12 +7,11 @@ import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 class YesilCamTvPlugin : BasePlugin() {
 
     override fun load() {
-        // Yeşilçam TV ana sağlayıcısı
+
         registerMainAPI(
             YesilCamTv()
         )
 
-        // Rumble video oynatıcı extractor'ı
         registerExtractorAPI(
             RumbleExtractor()
         )
