@@ -1,5 +1,5 @@
 // ! Bu araç @SAKLImavi tarafından | @UmayTrade için yazılmıştır.
-version = 20
+version = 21
 
 cloudstream {
     authors     = listOf("UmayTrade")
@@ -15,5 +15,5 @@ cloudstream {
     **/
     status  = 1 // will be 3 if unspecified
     tvTypes = listOf("TvSeries")
-    iconUrl = "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://dizipal1581.com&size=128"
+    iconUrl = "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://dizipal1582.com&size=128"
 }
