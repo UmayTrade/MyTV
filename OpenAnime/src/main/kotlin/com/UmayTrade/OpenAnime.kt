@@ -4,6 +4,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -13,7 +14,13 @@ import java.net.URLEncoder
  * OpenAnime Sağlayıcısı
  *
  * Site: https://openani.me / https://openanime.org
- * Yapı: Next.js (Pages Router) tabanlı SPA
+ * Yapı: Next.js (Pages Router / App Router) tabanlı SPA
+ *
+ * Veri kaynakları (öncelik sırası):
+ *   1. /_next/data/{buildId}/... JSON endpoint
+ *   2. __NEXT_DATA__ script etiketi
+ *   3. React Server Components Flight Data (self.__next_f.push)
+ *   4. HTML DOM scraping (fallback)
  */
 class OpenAnime : MainAPI() {
 
@@ -50,6 +57,19 @@ class OpenAnime : MainAPI() {
         "adservice.google.com"
     )
 
+    // Poster için aranacak alan adları (öncelik sırasına göre)
+    private val posterKeys = listOf(
+        "coverImage", "cover", "poster", "image",
+        "thumbnail", "posterUrl", "coverUrl", "img",
+        "imageUrl", "posterImage", "cover_image"
+    )
+
+    // Bölüm listesi için aranacak alan adları
+    private val episodeKeys = listOf(
+        "episodes", "episodeList", "eps", "bolumler",
+        "episode_list", "episodeItems"
+    )
+
     // -------------------------------------------------------------------------
     // Header yardımcıları
     // -------------------------------------------------------------------------
@@ -82,6 +102,7 @@ class OpenAnime : MainAPI() {
         initMutex.withLock {
             if (isInitialized) return
             try {
+                // 1. Dinamik domain
                 runCatching {
                     val config = app.get(domainConfigUrl).text
                     JSONObject(config)
@@ -90,6 +111,7 @@ class OpenAnime : MainAPI() {
                         ?.let { mainUrl = it.trimEnd('/') }
                 }
 
+                // 2. buildId
                 runCatching {
                     val doc = app.get(mainUrl, headers = commonHeaders()).document
                     nextBuildId = extractBuildId(doc)
@@ -97,7 +119,7 @@ class OpenAnime : MainAPI() {
 
                 isInitialized = true
             } catch (_: Exception) {
-                // init başarısız — sonraki çağrıda tekrar denenir
+                // sonraki çağrıda tekrar denenir
             }
         }
     }
@@ -126,6 +148,113 @@ class OpenAnime : MainAPI() {
         adDomains.any { contains(it, ignoreCase = true) }
 
     // -------------------------------------------------------------------------
+    // JSON yardımcıları — poster ve episode için esnek tarama
+    // -------------------------------------------------------------------------
+
+    /** Bir JSONObject içinden poster URL'sini esnek şekilde çıkarır. */
+    private fun extractPoster(obj: JSONObject?): String? {
+        if (obj == null) return null
+
+        // 1. Doğrudan alan adları
+        for (key in posterKeys) {
+            val v = obj.optString(key).takeIf { it.isNotBlank() && it.startsWith("http") }
+            if (v != null) return fixUrlNull(v)
+        }
+
+        // 2. İç içe objeler (anime, data, detail, series, info)
+        val nestedKeys = listOf("anime", "data", "detail", "series", "info", "attributes")
+        for (nk in nestedKeys) {
+            val nested = obj.optJSONObject(nk) ?: continue
+            val v = extractPoster(nested)
+            if (v != null) return v
+        }
+
+        // 3. images / posters array
+        val imgArr = obj.optJSONArray("images") ?: obj.optJSONArray("posters")
+        if (imgArr != null && imgArr.length() > 0) {
+            val first = imgArr.opt(0)
+            when (first) {
+                is String -> if (first.startsWith("http")) return fixUrlNull(first)
+                is JSONObject -> {
+                    val v = first.optString("url").takeIf { it.isNotBlank() }
+                        ?: first.optString("src").takeIf { it.isNotBlank() }
+                    if (v != null) return fixUrlNull(v)
+                }
+            }
+        }
+
+        return null
+    }
+
+    /** Bir JSONObject içinden bölüm dizisini esnek şekilde bulur. */
+    private fun findEpisodesArray(obj: JSONObject?): JSONArray? {
+        if (obj == null) return null
+
+        // 1. Doğrudan alan adları
+        for (key in episodeKeys) {
+            val arr = obj.optJSONArray(key)
+            if (arr != null && arr.length() > 0) return arr
+        }
+
+        // 2. İç içe objeler
+        val nestedKeys = listOf("anime", "data", "detail", "series", "info")
+        for (nk in nestedKeys) {
+            val nested = obj.optJSONObject(nk) ?: continue
+            val arr = findEpisodesArray(nested)
+            if (arr != null) return arr
+        }
+
+        // 3. Herhangi bir JSONArray içinde "number" veya "episode" alanı olan
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            val v = obj.opt(k)
+            if (v is JSONArray && v.length() > 0) {
+                val first = v.optJSONObject(0)
+                if (first != null &&
+                    (first.has("number") || first.has("episode") || first.has("episodeNumber"))
+                ) {
+                    return v
+                }
+            }
+        }
+
+        return null
+    }
+
+    /** Bir bölüm objesinden URL çıkarır. */
+    private fun extractEpisodeUrl(
+        ep: JSONObject,
+        slug: String,
+        epNum: Int
+    ): String? {
+        // 1. Doğrudan URL alanları
+        val urlKeys = listOf("url", "link", "watchUrl", "href", "path")
+        for (key in urlKeys) {
+            val v = ep.optString(key).takeIf { it.isNotBlank() }
+            if (v != null) {
+                return when {
+                    v.startsWith("http") -> v
+                    v.startsWith("/")    -> "$mainUrl$v"
+                    else                 -> "$mainUrl/$v"
+                }
+            }
+        }
+
+        // 2. slug alanı
+        val epSlug = ep.optString("slug").takeIf { it.isNotBlank() }
+            ?: ep.optString("episodeSlug").takeIf { it.isNotBlank() }
+
+        return when {
+            epSlug == null -> null
+            epSlug.startsWith("http") -> epSlug
+            epSlug.startsWith("/")    -> "$mainUrl$epSlug"
+            epSlug.contains("/")      -> "$mainUrl/$epSlug"
+            else                      -> "$mainUrl/anime/$slug/$epSlug"
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Ana Sayfa
     // -------------------------------------------------------------------------
 
@@ -142,6 +271,7 @@ class OpenAnime : MainAPI() {
         ensureInit()
         val items = mutableListOf<SearchResponse>()
 
+        // 1. Next.js data endpoint
         val nextUrl = "${nextApiUrl(request.data)}?page=$page"
         val jsonItems = runCatching {
             val resp = app.get(nextUrl, headers = jsonHeaders()).text
@@ -151,6 +281,7 @@ class OpenAnime : MainAPI() {
         if (!jsonItems.isNullOrEmpty()) {
             items.addAll(jsonItems)
         } else {
+            // 2. HTML fallback
             val htmlUrl = "$mainUrl${request.data}?page=$page"
             val doc = runCatching {
                 app.get(htmlUrl, headers = commonHeaders()).document
@@ -169,11 +300,15 @@ class OpenAnime : MainAPI() {
 
     private fun parseAnimeListFromJson(raw: String): List<SearchResponse> {
         val json = runCatching { JSONObject(raw) }.getOrNull() ?: return emptyList()
-        val props = json.optJSONObject("pageProps") ?: return emptyList()
+        val props = json.optJSONObject("props")?.optJSONObject("pageProps")
+            ?: json.optJSONObject("pageProps")
+            ?: return emptyList()
 
         val arr = props.optJSONArray("animes")
             ?: props.optJSONArray("items")
             ?: props.optJSONArray("data")
+            ?: props.optJSONArray("results")
+            ?: findFirstAnimeArray(props)
             ?: return emptyList()
 
         val result = mutableListOf<SearchResponse>()
@@ -187,11 +322,7 @@ class OpenAnime : MainAPI() {
                 ?: item.optInt("id").toString().takeIf { it != "0" }
                 ?: continue
 
-            val poster = fixUrlNull(
-                item.optString("coverImage").takeIf { it.isNotBlank() }
-                    ?: item.optString("image")
-                    ?: item.optString("poster")
-            )
+            val poster = extractPoster(item)
 
             result.add(
                 newAnimeSearchResponse(title, "$mainUrl/anime/$slug", TvType.Anime) {
@@ -200,6 +331,20 @@ class OpenAnime : MainAPI() {
             )
         }
         return result
+    }
+
+    private fun findFirstAnimeArray(obj: JSONObject): JSONArray? {
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val v = obj.opt(keys.next())
+            if (v is JSONArray && v.length() > 0) {
+                val first = v.optJSONObject(0) ?: continue
+                if (first.has("title") || first.has("name") || first.has("slug")) {
+                    return v
+                }
+            }
+        }
+        return null
     }
 
     private fun parseAnimeListFromHtml(doc: Document): List<SearchResponse> {
@@ -254,6 +399,7 @@ class OpenAnime : MainAPI() {
         val arr = json.optJSONArray("results")
             ?: json.optJSONArray("data")
             ?: json.optJSONArray("animes")
+            ?: findFirstAnimeArray(json)
             ?: return emptyList()
 
         val result = mutableListOf<SearchResponse>()
@@ -267,10 +413,7 @@ class OpenAnime : MainAPI() {
                 ?: item.optInt("id").toString().takeIf { it != "0" }
                 ?: continue
 
-            val poster = fixUrlNull(
-                item.optString("coverImage").takeIf { it.isNotBlank() }
-                    ?: item.optString("image")
-            )
+            val poster = extractPoster(item)
 
             result.add(
                 newAnimeSearchResponse(title, "$mainUrl/anime/$slug", TvType.Anime) {
@@ -290,6 +433,7 @@ class OpenAnime : MainAPI() {
 
         val slug = url.substringAfterLast("/").substringBefore("?")
 
+        // 1. Next.js data endpoint
         val jsonResp = runCatching {
             val apiUrl = nextApiUrl("/anime/$slug")
             app.get(apiUrl, headers = jsonHeaders()).text
@@ -300,7 +444,85 @@ class OpenAnime : MainAPI() {
             if (parsed != null) return parsed
         }
 
-        return parseAnimeDetailFromHtml(url)
+        // 2. HTML scraping (__NEXT_DATA__ dahil)
+        val doc = runCatching {
+            app.get(url, headers = commonHeaders()).document
+        }.getOrNull()
+
+        if (doc != null) {
+            // 2a. __NEXT_DATA__ içinden
+            val nextData = doc.selectFirst(nextDataSelector)?.data()
+            if (!nextData.isNullOrBlank()) {
+                val parsed = parseAnimeDetailFromJson(nextData, url, slug)
+                if (parsed != null) return parsed
+            }
+
+            // 2b. Flight Data (self.__next_f.push)
+            val flightData = extractFlightData(doc)
+            if (flightData != null) {
+                val parsed = parseAnimeDetailFromJson(flightData, url, slug)
+                if (parsed != null) return parsed
+            }
+        }
+
+        // 3. Saf HTML DOM fallback
+        return parseAnimeDetailFromHtml(url, doc)
+    }
+
+    /**
+     * React Server Components Flight Data'yı çıkarır.
+     * Next.js App Router, veriyi `self.__next_f.push([1, "..."])` script'lerine yazar.
+     */
+    private fun extractFlightData(doc: Document): String? {
+        val scripts = doc.select("script")
+        val sb = StringBuilder()
+
+        for (script in scripts) {
+            val content = script.data()
+            if (content.contains("__next_f.push")) {
+                // JSON string'lerini birleştir
+                val regex = Regex("""__next_f\.push\(\[\d+,\s*"((?:[^"\\]|\\.)*)"\]\)""")
+                regex.findAll(content).forEach { match ->
+                    val raw = match.groupValues[1]
+                    // Unescape
+                    sb.append(
+                        raw.replace("\\\"", "\"")
+                            .replace("\\n", "\n")
+                            .replace("\\\\", "\\")
+                    )
+                }
+            }
+        }
+
+        if (sb.isEmpty()) return null
+
+        // Flight Data'da JSON objeleri aranır — en kapsamlı olanı döndür
+        val text = sb.toString()
+        val startIdx = text.indexOf("{\"pageProps\"")
+        if (startIdx < 0) return null
+
+        // Dengeli parantez sayarak JSON objesini çıkar
+        var depth = 0
+        var inStr = false
+        var esc = false
+        val start = startIdx
+
+        for (i in start until text.length) {
+            val c = text[i]
+            when {
+                esc -> esc = false
+                c == '\\' && inStr -> esc = true
+                c == '"' -> inStr = !inStr
+                !inStr && c == '{' -> depth++
+                !inStr && c == '}' -> {
+                    depth--
+                    if (depth == 0) {
+                        return text.substring(start, i + 1)
+                    }
+                }
+            }
+        }
+        return null
     }
 
     private suspend fun parseAnimeDetailFromJson(
@@ -309,67 +531,92 @@ class OpenAnime : MainAPI() {
         slug: String
     ): LoadResponse? {
         val json = runCatching { JSONObject(raw) }.getOrNull() ?: return null
-        val props = json.optJSONObject("pageProps") ?: return null
 
-        val anime = props.optJSONObject("anime")
-            ?: props.optJSONObject("data")?.optJSONObject("anime")
-            ?: props
+        // Farklı Next.js yapılarını dene
+        val pageProps = json.optJSONObject("props")?.optJSONObject("pageProps")
+            ?: json.optJSONObject("pageProps")
+            ?: json.optJSONObject("props")
+            ?: json
 
+        // Anime objesini bul
+        val anime = pageProps.optJSONObject("anime")
+            ?: pageProps.optJSONObject("data")?.optJSONObject("anime")
+            ?: pageProps.optJSONObject("data")
+            ?: pageProps.optJSONObject("detail")
+            ?: pageProps.optJSONObject("series")
+            ?: pageProps
+
+        // Title
         val title = anime.optString("title").takeIf { it.isNotBlank() }
             ?: anime.optString("name").takeIf { it.isNotBlank() }
+            ?: anime.optString("animeTitle").takeIf { it.isNotBlank() }
             ?: return null
 
-        val poster = fixUrlNull(
-            anime.optString("coverImage").takeIf { it.isNotBlank() }
-                ?: anime.optString("image")
-                ?: anime.optString("poster")
-        )
+        // Poster — esnek tarama
+        val poster = extractPoster(anime)
+            ?: extractPoster(pageProps)
+            ?: extractPoster(json)
 
-        val description = anime.optString("description")
-            .takeIf { it.isNotBlank() }
+        // Plot
+        val description = anime.optString("description").takeIf { it.isNotBlank() }
             ?: anime.optString("synopsis").takeIf { it.isNotBlank() }
+            ?: anime.optString("overview").takeIf { it.isNotBlank() }
+            ?: anime.optString("summary").takeIf { it.isNotBlank() }
 
+        // Tags
         val tags = mutableListOf<String>()
-        anime.optJSONArray("genres")?.let { genres ->
-            for (i in 0 until genres.length()) {
-                val g = genres.optString(i).takeIf { it.isNotBlank() }
-                if (g != null) tags.add(g)
+        val genreArr = anime.optJSONArray("genres")
+            ?: anime.optJSONArray("tags")
+            ?: anime.optJSONArray("categories")
+        genreArr?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val g = arr.opt(i)
+                when (g) {
+                    is String -> if (g.isNotBlank()) tags.add(g)
+                    is JSONObject -> {
+                        val name = g.optString("name").takeIf { it.isNotBlank() }
+                            ?: g.optString("title").takeIf { it.isNotBlank() }
+                        if (name != null) tags.add(name)
+                    }
+                }
             }
         }
 
+        // Episodes — esnek tarama (pageProps ve anime içinde ara)
         val episodes = mutableListOf<Episode>()
-        val epsArray = anime.optJSONArray("episodes")
+        val epsArray = findEpisodesArray(pageProps)
+            ?: findEpisodesArray(anime)
+            ?: findEpisodesArray(json)
+
         if (epsArray != null) {
             for (i in 0 until epsArray.length()) {
                 val ep = epsArray.optJSONObject(i) ?: continue
-                val epNum = ep.optInt("number", i + 1)
+
+                val epNum = ep.optInt("number",
+                    ep.optInt("episode",
+                        ep.optInt("episodeNumber",
+                            ep.optInt("ep", i + 1))))
 
                 val rawTitle = ep.optString("title").trim()
+                    .ifBlank { ep.optString("name").trim() }
                 val cleanTitle = cleanEpisodeTitle(rawTitle, epNum)
 
-                val epSlug = ep.optString("slug").takeIf { it.isNotBlank() }
-                    ?: epNum.toString()
+                val epUrl = extractEpisodeUrl(ep, slug, epNum) ?: continue
 
-                val epUrl = if (epSlug.contains("/")) {
-                    "$mainUrl/$epSlug"
-                } else {
-                    "$mainUrl/anime/$slug/$epSlug"
-                }
+                val epPoster = extractPoster(ep) ?: poster
 
                 episodes.add(
                     newEpisode(epUrl) {
                         this.name = cleanTitle
                         this.episode = epNum
                         this.season = ep.optInt("season", 1)
-                        this.posterUrl = fixUrlNull(
-                            ep.optString("thumbnail").takeIf { it.isNotBlank() }
-                                ?: ep.optString("image")
-                        )
+                        this.posterUrl = epPoster
                     }
                 )
             }
         }
 
+        // Hiç bölüm bulunamadıysa, yine de LoadResponse döndür (poster + plot ile)
         return newAnimeLoadResponse(title, url, TvType.Anime) {
             this.posterUrl = poster
             this.plot = description
@@ -378,33 +625,45 @@ class OpenAnime : MainAPI() {
         }
     }
 
-    private suspend fun parseAnimeDetailFromHtml(url: String): LoadResponse {
-        val doc = runCatching {
+    private suspend fun parseAnimeDetailFromHtml(
+        url: String,
+        docInput: Document?
+    ): LoadResponse {
+        val doc = docInput ?: runCatching {
             app.get(url, headers = commonHeaders()).document
         }.getOrNull() ?: return newAnimeLoadResponse("Bilinmeyen Anime", url, TvType.Anime) {}
 
-        val title = doc.selectFirst("h1, h2.anime-title, .anime-title h1")
+        val title = doc.selectFirst("h1, h2.anime-title, .anime-title h1, h1.title")
             ?.text()?.trim()
             ?.takeIf { it.isNotBlank() }
             ?: "Bilinmeyen Anime"
 
+        // Poster: birden fazla selector ve öznitelik dene
         val poster = fixUrlNull(
-            doc.selectFirst("img.cover, div.poster img, .anime-poster img")
-                ?.attr("src")
+            doc.selectFirst("img.cover")?.attr("src")
+                ?: doc.selectFirst("div.poster img")?.attr("src")
+                ?: doc.selectFirst(".anime-poster img")?.attr("src")
+                ?: doc.selectFirst("img[alt*='cover' i]")?.attr("src")
+                ?: doc.selectFirst("img[alt*='poster' i]")?.attr("src")
+                ?: doc.selectFirst("meta[property='og:image']")?.attr("content")
+                ?: doc.selectFirst("img")?.attr("src")?.takeIf { !it.startsWith("data:") }
         )
 
-        val plot = doc.selectFirst("div.desc, p.description, .synopsis")
+        val plot = doc.selectFirst("div.desc, p.description, .synopsis, .summary")
             ?.text()?.trim()
+            ?: doc.selectFirst("meta[name='description']")?.attr("content")?.trim()
 
-        val tags = doc.select("div.genres a, .tags a, span.genre")
+        val tags = doc.select("div.genres a, .tags a, span.genre, a[href*='/genre/']")
             .map { it.text().trim() }
             .filter { it.isNotBlank() }
 
-        val slug = url.substringAfterLast("/")
+        val slug = url.substringAfterLast("/").substringBefore("?")
         val episodeElements = doc.select(
             "ul.episodes li a, " +
             "div.episode-list a, " +
-            "a[href*='/anime/$slug/']"
+            "div.episodes a, " +
+            "a[href*='/anime/$slug/'], " +
+            "a[href*='/watch/']"
         )
 
         val episodes = mutableListOf<Episode>()
@@ -490,11 +749,19 @@ class OpenAnime : MainAPI() {
 
         val extractedUrls = mutableSetOf<String>()
 
+        // 1. __NEXT_DATA__
         val nextDataText = doc.selectFirst(nextDataSelector)?.data()
         if (!nextDataText.isNullOrBlank()) {
             processNextDataSources(nextDataText, subtitleCallback, callback, extractedUrls)
         }
 
+        // 2. Flight Data
+        val flightData = extractFlightData(doc)
+        if (!flightData.isNullOrBlank()) {
+            processNextDataSources(flightData, subtitleCallback, callback, extractedUrls)
+        }
+
+        // 3. Iframe / data-* öznitelikleri
         processIframeSources(doc, subtitleCallback, callback, extractedUrls)
 
         return extractedUrls.isNotEmpty()
@@ -510,12 +777,13 @@ class OpenAnime : MainAPI() {
 
         val pageProps = json.optJSONObject("props")?.optJSONObject("pageProps")
             ?: json.optJSONObject("pageProps")
-            ?: return
+            ?: json
 
         val sources = pageProps.optJSONArray("sources")
             ?: pageProps.optJSONArray("videos")
             ?: pageProps.optJSONArray("players")
             ?: pageProps.optJSONObject("episode")?.optJSONArray("sources")
+            ?: pageProps.optJSONObject("data")?.optJSONArray("sources")
             ?: return
 
         for (i in 0 until sources.length()) {
@@ -645,6 +913,7 @@ class OpenAnime : MainAPI() {
             img?.attr("src")?.takeIf { it.isNotBlank() && !it.startsWith("data:") }
                 ?: img?.attr("data-src")?.takeIf { it.isNotBlank() }
                 ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
+                ?: img?.attr("data-original")?.takeIf { it.isNotBlank() }
         )
 
         return newAnimeSearchResponse(title, url, TvType.Anime) {
