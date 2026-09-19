@@ -26,7 +26,7 @@ data class HDFilmizlePart(
 )
 
 class HDFilmizle : MainAPI() {
-    override var mainUrl              = RemoteConfig.getDomain("https://www.hdfilmizle.vip")
+    override var mainUrl              = "https://www.hdfilmizle.vip"
     override var name                 = "HDFilmizle"
     override val hasMainPage          = true
     override var lang                 = "tr"
@@ -37,8 +37,8 @@ class HDFilmizle : MainAPI() {
         mainUrl                                          to "HD Filmler",
         "$mainUrl/film-robotu/"                          to "Keşfet",
         "$mainUrl/yabanci-dizi-izle-3/"                  to "Diziler",
-        "$mainUrl/en-cok-izlenen-filmler-hd-2/"           to "En Çok İzlenenler",
-        "$mainUrl/imdb-puani-yuksek-500/"                 to "IMDb 500",
+        "$mainUrl/en-cok-izlenen-filmler-hd-2/"          to "En Çok İzlenenler",
+        "$mainUrl/imdb-puani-yuksek-500/"                to "IMDb 500",
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
