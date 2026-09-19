@@ -1,7 +1,7 @@
 version = 28
 
 cloudstream {
-    authors     = listOf("kraptor")
+    authors     = listOf("UmayTrade")
     language    = "tr"
     description = "Türkçe Altyazılı Anime İzle."
 
