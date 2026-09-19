@@ -1,13 +1,18 @@
-package com.nikyokki
+package com.Blockades
 
-import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
+import com.lagradost.cloudstream3.plugins.BasePlugin
 import com.lagradost.cloudstream3.plugins.Plugin
-import android.content.Context
+import com.lagradost.cloudstream3.APIHolder
+import com.lagradost.cloudstream3.MainAPI
 
-@CloudstreamPlugin
-class HDFilmIzlePlugin: Plugin() {
-    override fun load(context: Context) {
-        registerMainAPI(HDFilmIzle())
-        registerExtractorAPI(VidRameExtractor())
+@Plugin
+class FilmizleChPlugin : BasePlugin() {
+    override fun load() {
+        val providers: List<MainAPI> = listOf(
+            FilmizleCh()
+        )
+        providers.forEach { provider ->
+            APIHolder.addPlugin(provider)
+        }
     }
 }
