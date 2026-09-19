@@ -29,7 +29,7 @@ import com.lagradost.cloudstream3.utils.getQualityFromName
 import com.lagradost.cloudstream3.utils.newExtractorLink
 
 class XPrime : MainAPI() {
-    override var mainUrl = "https://api.themoviedb.org/3"
+    override var mainUrl = "https://developer.themoviedb.org"
     override var name = "XPrime"
     override val hasMainPage = true
     override var lang = "tr"
