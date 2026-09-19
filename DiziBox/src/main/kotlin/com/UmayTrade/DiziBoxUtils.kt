@@ -1,4 +1,4 @@
-// ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
+// ! Bu araç @SAKLImavi tarafından | @UmayTrade için yazılmıştır.
 
 package com.UmayTrade
 
