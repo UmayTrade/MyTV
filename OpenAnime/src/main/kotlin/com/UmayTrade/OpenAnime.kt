@@ -2,605 +2,380 @@ package com.UmayTrade
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import org.json.JSONArray
-import org.json.JSONObject
+import com.fasterxml.jackson.module.kotlin.readValue
 import java.net.URLEncoder
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.awaitAll
 
-/**
- * OpenAnime Sağlayıcısı
- *
- * Site: https://openani.me
- * Framework: SvelteKit
- * API: https://api.openani.me
- * Veri: Inline JSON (script içinde data = [{type:"data", data:{...}}])
- * Poster: TMDB (image.tmdb.org)
- * Oynatıcı: HLS (m3u8) + harici embed
- */
+private inline fun <reified T> parseJson(json: String): T {
+    return mapper.readValue<T>(json)
+}
+
 class OpenAnime : MainAPI() {
+    override var mainUrl              = "https://openani.me"
+    override var name                 = "OpenAnime"
+    override val hasMainPage          = true
+    override var lang                 = "tr"
+    override val hasDownloadSupport   = true
+    override val supportedTypes       = setOf(TvType.Anime)
 
-    override var mainUrl = "https://openani.me"
-    override var name = "OpenAnime"
-    override val hasMainPage = true
-    override var lang = "tr"
-    override val hasQuickSearch = true
-    override val hasDownloadSupport = true
-    override val supportedTypes = setOf(
-        TvType.Anime,
-        TvType.AnimeMovie,
-        TvType.OVA
+    private val apiHeaders = mapOf(
+        "Client-Protocol-Model" to "RCSA-14402/05",
+        "User-Agent"            to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Origin"                to "https://openani.me",
+        "Referer"               to "https://openani.me/"
     )
 
-    // -------------------------------------------------------------------------
-    // Sabitler — HTML'den alındı
-    // -------------------------------------------------------------------------
+    private var cachedCdnHost: String? = null
 
-    private val apiLink = "https://api.openani.me"
-    private val kmsLink = "https://kms.openani.me"
-    private val cdnLinkTemplate = "https://de2---vn-t9g4tsan-5qcl.yeshi.eu.org"
-    private val tmdbImageBase = "https://image.tmdb.org/t/p/original"
-
-    private val userAgent =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-        "AppleWebKit/537.36 (KHTML, like Gecko) " +
-        "Chrome/120.0.0.0 Safari/537.36"
-
-    private val adDomains = setOf(
-        "a-ads.com",
-        "googlesyndication.com",
-        "doubleclick.net",
-        "adservice.google.com"
-    )
-
-    private fun headers(): Map<String, String> = mapOf(
-        "User-Agent" to userAgent,
-        "Referer" to "$mainUrl/",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8"
-    )
-
-    private fun apiHeaders(): Map<String, String> = mapOf(
-        "User-Agent" to userAgent,
-        "Referer" to "$mainUrl/",
-        "Origin" to mainUrl,
-        "Accept" to "application/json, text/plain, */*"
-    )
-
-    // -------------------------------------------------------------------------
-    // JSON Çıkarma Yardımcıları
-    // -------------------------------------------------------------------------
-
-    /**
-     * SvelteKit HTML içindeki `data = [...]` JSON dizisini çıkarır.
-     * Format: `const data = [{"type":"data","data":{...}},...];`
-     */
-    private fun extractSvelteData(html: String): JSONArray? {
-        val dataMatch = Regex("""(?:const|let|var)?\s*data\s*=\s*\[""")
-            .find(html)
-            ?: Regex("""\bdata\s*=\s*\[""").find(html)
-            ?: return null
-
-        val arrayStart = html.indexOf('[', dataMatch.range.first)
-        if (arrayStart < 0) return null
-
-        var depth = 0
-        var inString = false
-        var escaped = false
-        var end = -1
-
-        for (i in arrayStart until html.length) {
-            val c = html[i]
-
-            if (inString) {
-                if (escaped) {
-                    escaped = false
-                } else if (c == '\\') {
-                    escaped = true
-                } else if (c == '"') {
-                    inString = false
-                }
-                continue
+    private suspend fun getCdnHost(): String {
+        cachedCdnHost?.let { return it }
+        try {
+            val html = app.get(mainUrl, headers = mapOf("User-Agent" to "Mozilla/5.0")).text
+            Regex("""random_cdn_host:"(https://[^"]+)"""").find(html)?.groupValues?.get(1)?.let {
+                cachedCdnHost = it
+                return it
             }
-
-            when (c) {
-                '"' -> inString = true
-                '[' -> depth++
-                ']' -> {
-                    depth--
-                    if (depth == 0) {
-                        end = i
-                        break
-                    }
-                }
-            }
-        }
-
-        if (end < 0) return null
-
-        var source = html.substring(arrayStart, end + 1)
-
-        source = source.replace(
-            Regex("""([\{,])\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:"""),
-            "$1\"$2\":"
-        )
-
-        source = source
-            .replace(Regex("""\bvoid\s+0\b"""), "null")
-            .replace(Regex("""\bundefined\b"""), "null")
-            .replace(Regex("""\bNaN\b"""), "null")
-            .replace(Regex("""\bInfinity\b"""), "null")
-
-        return runCatching {
-            JSONArray(source)
-        }.getOrNull()
+        } catch (e: Exception) { e.printStackTrace() }
+        val defaultHost = "https://de2---vn-t9g4tsan-5qcl.yeshi.eu.org"
+        cachedCdnHost = defaultHost
+        return defaultHost
     }
-
-    /**
-     * SvelteKit data dizisinden asıl anime objesini bulur.
-     * Yapı: [{type:"data", data:{animes:[...], popularAnimes:[...]}}]
-     */
-    private fun extractDataObject(jsonArray: JSONArray): JSONObject? {
-        for (i in 0 until jsonArray.length()) {
-            val item = jsonArray.optJSONObject(i) ?: continue
-            if (item.optString("type") == "data") {
-                return item.optJSONObject("data")
-            }
-        }
-        return null
-    }
-
-    /**
-     * Belirli bir data index'indeki data objesini döndürür.
-     */
-    private fun extractDataObjectAt(jsonArray: JSONArray, index: Int): JSONObject? {
-        if (index < 0 || index >= jsonArray.length()) return null
-        val item = jsonArray.optJSONObject(index) ?: return null
-        if (item.optString("type") != "data") return null
-        return item.optJSONObject("data")
-    }
-
-    /**
-     * Poster URL'sini anime veya season objesinden çıkarır.
-     */
-    private fun buildPosterUrl(obj: JSONObject?): String? {
-        if (obj == null) return null
-
-        obj.optString("poster")
-            .takeIf { it.isNotBlank() && it != "null" }
-            ?.let { return it }
-
-        obj.optString("poster_path")
-            .takeIf { it.isNotBlank() && it != "null" }
-            ?.let {
-                return if (it.startsWith("http")) {
-                    it
-                } else {
-                    "$tmdbImageBase${if (it.startsWith("/")) it else "/$it"}"
-                }
-            }
-
-        val pictures = obj.optJSONObject("pictures")
-
-        pictures?.optString("avatar")
-            ?.takeIf { it.isNotBlank() && it != "null" }
-            ?.let { return it }
-
-        pictures?.optString("banner")
-            ?.takeIf { it.isNotBlank() && it != "null" }
-            ?.let { return it }
-
-        return null
-    }
-
-    /** Anime objesinden SearchResponse oluşturur. */
-    private fun animeToSearchResponse(anime: JSONObject): SearchResponse? {
-        val slug = anime.optString("slug").takeIf { it.isNotBlank() } ?: return null
-        val title = anime.optString("turkish").takeIf { it.isNotBlank() }
-            ?: anime.optString("english").takeIf { it.isNotBlank() }
-            ?: anime.optString("romaji").takeIf { it.isNotBlank() }
-            ?: anime.optString("originalName").takeIf { it.isNotBlank() }
-            ?: return null
-
-        val poster = buildPosterUrl(anime)
-
-        return newAnimeSearchResponse(title, "$mainUrl/anime/$slug", TvType.Anime) {
-            this.posterUrl = poster
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Ana Sayfa
-    // -------------------------------------------------------------------------
 
     override val mainPage = mainPageOf(
-        "/explore" to "Keşfet",
-        "/popular" to "Popüler",
-        "/all"     to "Tüm Animeler"
+        "latest-episodes" to "En Son Eklenen Bölümler",
+        "popular-episodes" to "Popüler Bölümler",
+        "popular-series" to "Popüler Seriler",
+        "4k-releases" to "4K Çözünürlüklü Animeler",
+        "all-anime" to "Tüm Animeler",
+        "genre_Aksiyon & Macera" to "Aksiyon & Macera Animeleri",
+        "genre_Bilim Kurgu & Fantazi" to "Bilim Kurgu & Fantastik Animeler",
+        "genre_Komedi" to "Komedi Animeleri",
+        "genre_Dram" to "Dram Animeleri",
+        "genre_Gizem" to "Gizem Animeleri",
+        "genre_Romantik" to "Romantik Animeler",
+        "genre_Doğaüstü & Büyü" to "Doğaüstü & Büyü Animeleri"
     )
 
-    override suspend fun getMainPage(
-        page: Int,
-        request: MainPageRequest
-    ): HomePageResponse {
-        val url = "$mainUrl${request.data}"
-        val html = app.get(url, headers = headers()).text
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
+        val searchItems = mutableListOf<OpenAnimeSearchItem>()
 
-        val jsonArray = extractSvelteData(html) ?: return newHomePageResponse(
-            HomePageList(request.name, emptyList()),
-            hasNext = false
-        )
-        val dataObj = extractDataObject(jsonArray) ?: return newHomePageResponse(
-            HomePageList(request.name, emptyList()),
-            hasNext = false
-        )
-
-        val items = mutableListOf<SearchResponse>()
-        val seen = mutableSetOf<String>()
-
-        val animes = dataObj.optJSONArray("animes")
-        if (animes != null) {
-            for (i in 0 until animes.length()) {
-                val anime = animes.optJSONObject(i) ?: continue
-                val res = animeToSearchResponse(anime) ?: continue
-                if (seen.add(res.url)) items.add(res)
+        when (request.data) {
+            "latest-episodes" -> {
+                val url = "https://api.openani.me/anime/episodes/latest?limit=30&page=$page"
+                val response = app.get(url, headers = apiHeaders).parsedSafe<OpenAnimeEpisodesResponse>()
+                response?.episodes?.let { searchItems.addAll(it) }
             }
-        }
-
-        val popular = dataObj.optJSONArray("popularAnimes")
-        if (popular != null) {
-            for (i in 0 until popular.length()) {
-                val anime = popular.optJSONObject(i) ?: continue
-                val res = animeToSearchResponse(anime) ?: continue
-                if (seen.add(res.url)) items.add(res)
+            "popular-episodes" -> {
+                val url = "https://api.openani.me/anime/episodes/latest/populars?limit=30&page=$page"
+                val response = app.get(url, headers = apiHeaders).parsedSafe<OpenAnimeEpisodesResponse>()
+                response?.episodes?.let { searchItems.addAll(it) }
             }
-        }
-
-        return newHomePageResponse(
-            HomePageList(request.name, items),
-            hasNext = items.isNotEmpty()
-        )
-    }
-
-    // -------------------------------------------------------------------------
-    // Arama
-    // -------------------------------------------------------------------------
-
-    override suspend fun quickSearch(query: String): List<SearchResponse> =
-        search(query)
-
-    override suspend fun search(query: String): List<SearchResponse> {
-        if (query.isBlank()) return emptyList()
-
-        val searchUrl = "$apiLink/anime/search?q=${query.encodeUrl()}"
-        val apiResult = runCatching {
-            val resp = app.get(searchUrl, headers = apiHeaders()).text
-            parseSearchApiResponse(resp)
-        }.getOrNull()
-
-        if (!apiResult.isNullOrEmpty()) return apiResult
-
-        val html = runCatching {
-            app.get("$mainUrl/explore", headers = headers()).text
-        }.getOrNull() ?: return emptyList()
-
-        val jsonArray = extractSvelteData(html) ?: return emptyList()
-        val dataObj = extractDataObject(jsonArray) ?: return emptyList()
-        val animes = dataObj.optJSONArray("animes") ?: return emptyList()
-
-        val queryLower = query.lowercase()
-        val results = mutableListOf<SearchResponse>()
-        for (i in 0 until animes.length()) {
-            val anime = animes.optJSONObject(i) ?: continue
-            val title = anime.optString("turkish").takeIf { it.isNotBlank() }
-                ?: anime.optString("english").takeIf { it.isNotBlank() }
-                ?: anime.optString("romaji").takeIf { it.isNotBlank() }
-                ?: continue
-            if (title.lowercase().contains(queryLower)) {
-                animeToSearchResponse(anime)?.let { results.add(it) }
+            "popular-series" -> {
+                val url = "https://api.openani.me/anime?sort=popular&limit=30&page=$page"
+                val response = app.get(url, headers = apiHeaders).parsedSafe<OpenAnimeListResponse>()
+                response?.animes?.let { searchItems.addAll(it) }
             }
-        }
-        return results
-    }
-
-    private fun parseSearchApiResponse(raw: String): List<SearchResponse> {
-        val json = runCatching { JSONObject(raw) }.getOrNull() ?: return emptyList()
-        val arr = json.optJSONArray("results")
-            ?: json.optJSONArray("data")
-            ?: json.optJSONArray("animes")
-            ?: return emptyList()
-
-        val result = mutableListOf<SearchResponse>()
-        for (i in 0 until arr.length()) {
-            val anime = arr.optJSONObject(i) ?: continue
-            animeToSearchResponse(anime)?.let { result.add(it) }
-        }
-        return result
-    }
-
-    private fun String.encodeUrl(): String =
-        URLEncoder.encode(this, "UTF-8")
-
-    // -------------------------------------------------------------------------
-    // Detay Sayfası
-    // -------------------------------------------------------------------------
-
-    override suspend fun load(url: String): LoadResponse {
-        val html = app.get(url, headers = headers()).text
-
-        val jsonArray = extractSvelteData(html)
-        val dataObj = if (jsonArray != null) extractDataObject(jsonArray) else null
-
-        val anime = findAnimeInData(dataObj, url)
-            ?: return fallbackLoad(url, html)
-
-        val slug = anime.optString("slug").takeIf { it.isNotBlank() }
-            ?: url.substringAfterLast("/")
-
-        val title = anime.optString("turkish").takeIf { it.isNotBlank() }
-            ?: anime.optString("english").takeIf { it.isNotBlank() }
-            ?: anime.optString("romaji").takeIf { it.isNotBlank() }
-            ?: anime.optString("originalName").takeIf { it.isNotBlank() }
-            ?: "Bilinmeyen Anime"
-
-        val poster = buildPosterUrl(anime)
-
-        val plot = anime.optString("summary").takeIf { it.isNotBlank() }
-
-        val tags = mutableListOf<String>()
-        anime.optJSONArray("genres")?.let { arr ->
-            for (i in 0 until arr.length()) {
-                arr.optString(i).takeIf { it.isNotBlank() }?.let { tags.add(it) }
+            "4k-releases" -> {
+                if (page > 1) return null
+                val url = "https://api.openani.me/anime/4k-releases"
+                val responseText = app.get(url, headers = apiHeaders).text
+                parseJson<OpenAnime4kResponse>(responseText).animes?.let { searchItems.addAll(it) }
             }
-        }
-
-        val episodes = mutableListOf<Episode>()
-        val seasons = anime.optJSONArray("seasons")
-
-        if (seasons != null && seasons.length() > 0) {
-            for (s in 0 until seasons.length()) {
-                val season = seasons.optJSONObject(s) ?: continue
-                val seasonNum = season.optInt(
-                    "season_number",
-                    season.optInt("tmdb_season_number", s + 1)
-                )
-                val seasonName = season.optString("name").takeIf { it.isNotBlank() }
-                val episodeCount = season.optInt("episode_count", 0)
-
-                val seasonPoster = buildPosterUrl(season) ?: poster
-
-                for (ep in 1..episodeCount) {
-                    val epUrl = "$mainUrl/anime/$slug/$seasonNum/$ep"
-                    val epTitle = if (episodeCount > 1) {
-                        seasonName?.let { "$it - $ep. Bölüm" } ?: "$ep. Bölüm"
-                    } else {
-                        seasonName
-                    }
-
-                    episodes.add(
-                        newEpisode(epUrl) {
-                            this.name = epTitle
-                            this.episode = ep
-                            this.season = seasonNum
-                            this.posterUrl = seasonPoster
-                        }
-                    )
-                }
-            }
-        }
-
-        return newAnimeLoadResponse(title, url, TvType.Anime) {
-            this.posterUrl = poster
-            this.plot = plot
-            this.tags = tags
-            addEpisodes(DubStatus.Subbed, episodes)
-        }
-    }
-
-    /** Data objesi içinde slug'a göre anime bulur. */
-    private fun findAnimeInData(dataObj: JSONObject?, url: String): JSONObject? {
-        if (dataObj == null) return null
-        val slug = url.substringAfterLast("/")
-
-        val arrays = listOf("animes", "popularAnimes", "data", "results")
-        for (key in arrays) {
-            val arr = dataObj.optJSONArray(key) ?: continue
-            for (i in 0 until arr.length()) {
-                val anime = arr.optJSONObject(i) ?: continue
-                if (anime.optString("slug") == slug) return anime
-            }
-        }
-
-        val direct = dataObj.optJSONObject("anime")
-        if (direct != null && direct.optString("slug") == slug) return direct
-
-        return null
-    }
-
-    private suspend fun fallbackLoad(url: String, html: String): LoadResponse {
-        val doc = org.jsoup.Jsoup.parse(html)
-
-        val title = doc.selectFirst("h1")?.text()?.trim()
-            ?: doc.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
-            ?: "Bilinmeyen Anime"
-
-        val poster = fixUrlNull(
-            doc.selectFirst("meta[property='og:image']")?.attr("content")
-        )
-
-        return newAnimeLoadResponse(title, url, TvType.Anime) {
-            this.posterUrl = poster
-            this.plot = doc.selectFirst("meta[name='description']")?.attr("content")
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Video Linkleri
-    // -------------------------------------------------------------------------
-
-    override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        val html = app.get(data, headers = headers()).text
-
-        var found = false
-
-        // SvelteKit data dizisini çıkar
-        val jsonArray = extractSvelteData(html)
-
-        if (jsonArray != null) {
-            // Tüm data objelerini dolaş, requestResponse içereni bul
-            for (i in 0 until jsonArray.length()) {
-                val dataObj = extractDataObjectAt(jsonArray, i) ?: continue
-
-                val requestResponse = dataObj.optJSONObject("requestResponse") ?: continue
-                val episodeData = requestResponse.optJSONObject("episodeData") ?: continue
-
-                // CDN_LINK hem data kökünde hem requestResponse içinde olabilir
-                val cdnLink = dataObj.optString("CDN_LINK").takeIf { it.isNotBlank() }
-                    ?: requestResponse.optString("CDN_LINK").takeIf { it.isNotBlank() }
-                    ?: "$cdnLinkTemplate/animes/"
-
-                val files = episodeData.optJSONArray("files") ?: continue
-
-                for (j in 0 until files.length()) {
-                    val fileObj = files.optJSONObject(j) ?: continue
-                    val fileName = fileObj.optString("file").takeIf { it.isNotBlank() } ?: continue
-                    val resolution = fileObj.optInt("resolution", 0)
-
-                    // CDN linkini oluştur
-                    val videoUrl = if (fileName.startsWith("http")) {
-                        fileName
-                    } else {
-                        cdnLink.trimEnd('/') + "/" + fileName.trimStart('/')
-                    }
-
-                    if (videoUrl.isAdUrl()) continue
-
-                    val label = if (resolution > 0) "${resolution}p" else "Video"
-
-                    callback(
-                        newExtractorLink(
-                            source = name,
-                            name = "$name [$label]",
-                            url = videoUrl,
-                            type = ExtractorLinkType.VIDEO
-                        ) {
-                            this.quality = when (resolution) {
-                                2160 -> Qualities.P2160.value
-                                1440 -> Qualities.P1440.value
-                                1080 -> Qualities.P1080.value
-                                720  -> Qualities.P720.value
-                                480  -> Qualities.P480.value
-                                360  -> Qualities.P360.value
-                                240  -> Qualities.P240.value
-                                else -> Qualities.Unknown.value
-                            }
-                            this.referer = "$mainUrl/"
-                            this.headers = headers()
-                        }
-                    )
-                    found = true
-                }
-            }
-        }
-
-        // Fallback: HTML'de doğrudan video/iframe araması
-        if (!found) {
-            val doc = org.jsoup.Jsoup.parse(html)
-
-            doc.select("video source[src], video[src]").forEach { el ->
-                val src = fixUrlNull(
-                    el.attr("src").takeIf { it.isNotBlank() }
-                        ?: el.attr("data-src")
-                ) ?: return@forEach
-                if (src.isAdUrl()) return@forEach
-                emitSource(src, "Direct", subtitleCallback, callback)
-                found = true
-            }
-
-            val urlRegex = Regex("""["'](https?://[^"']+\.(?:m3u8|mp4)[^"']*)["']""")
-            doc.select("script:not([src])").forEach { script ->
-                urlRegex.findAll(script.data()).forEach { match ->
-                    val videoUrl = match.groupValues[1]
-                    if (videoUrl.isAdUrl()) return@forEach
-                    emitSource(videoUrl, "Script", subtitleCallback, callback)
-                    found = true
-                }
-            }
-
-            doc.select("iframe[src], iframe[data-src]").forEach { iframe ->
-                val src = fixUrlNull(
-                    iframe.attr("src").takeIf { it.isNotBlank() }
-                        ?: iframe.attr("data-src")
-                ) ?: return@forEach
-                if (src.isAdUrl()) return@forEach
-
-                loadExtractor(src, "$mainUrl/", subtitleCallback, callback)
-                found = true
-            }
-        }
-
-        return found
-    }
-
-    private suspend fun emitSource(
-        url: String,
-        label: String,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ) {
-        val lower = url.lowercase()
-        when {
-            lower.contains(".m3u8") -> {
-                callback(
-                    newExtractorLink(
-                        source = name,
-                        name = "$name [$label]",
-                        url = url,
-                        type = ExtractorLinkType.M3U8
-                    ) {
-                        this.quality = parseQuality(label)
-                        this.referer = "$mainUrl/"
-                        this.headers = headers()
-                    }
-                )
-            }
-            lower.contains(".mp4") || lower.contains(".webm") -> {
-                callback(
-                    newExtractorLink(
-                        source = name,
-                        name = "$name [$label]",
-                        url = url,
-                        type = ExtractorLinkType.VIDEO
-                    ) {
-                        this.quality = parseQuality(label)
-                        this.referer = "$mainUrl/"
-                        this.headers = headers()
-                    }
-                )
+            "all-anime" -> {
+                val url = "https://api.openani.me/anime?limit=30&page=$page"
+                val response = app.get(url, headers = apiHeaders).parsedSafe<OpenAnimeListResponse>()
+                response?.animes?.let { searchItems.addAll(it) }
             }
             else -> {
-                loadExtractor(url, "$mainUrl/", subtitleCallback, callback)
+                if (request.data.startsWith("genre_")) {
+                    val targetGenre = request.data.substringAfter("genre_")
+                    val startPage = (page - 1) * 2 + 1
+                    val endPage = page * 2
+                    val allAnimes = mutableListOf<OpenAnimeSearchItem>()
+                    coroutineScope {
+                        val deferred = (startPage..endPage).map { p ->
+                            async {
+                                try {
+                                    app.get("https://api.openani.me/anime?limit=30&page=$p", headers = apiHeaders).parsedSafe<OpenAnimeListResponse>()
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            }
+                        }
+                        deferred.awaitAll().forEach { res ->
+                            res?.animes?.let { allAnimes.addAll(it) }
+                        }
+                    }
+                    val filtered = allAnimes.filter { item ->
+                        item.genres?.any { g -> g.contains(targetGenre, ignoreCase = true) || (targetGenre == "Doğaüstü & Büyü" && g.contains("Doğaüstü", ignoreCase = true)) } == true
+                    }
+                    searchItems.addAll(filtered.distinctBy { it.slug })
+                }
+            }
+        }
+
+        val homeItems = searchItems.mapNotNull { item ->
+            val slug = item.slug ?: return@mapNotNull null
+            val titleVal = item.turkish ?: item.english ?: item.originalName ?: "Anime"
+            val poster = item.pictures?.avatar ?: item.pictures?.banner ?: "https://openani.me/favicon512.png"
+
+            newAnimeSearchResponse(titleVal, "https://api.openani.me/anime/$slug", TvType.Anime) {
+                this.posterUrl = poster
+                addSub(null)
+                addDub(null)
+                item.score?.takeIf { it > 0 }?.let { this.score = Score.from10(it) } ?:
+                item.tmdbScore?.takeIf { it > 0 }?.let { this.score = Score.from10(it) }
+            }
+        }
+
+        if (homeItems.isEmpty()) return null
+        val hasNext = homeItems.isNotEmpty()
+        return newHomePageResponse(request.name, homeItems, hasNext = hasNext)
+    }
+
+    override suspend fun search(query: String): List<SearchResponse> {
+        val cleanQuery = query.lowercase().trim()
+            .replace(Regex("""\s*(?:animesi|animeleri|izle)$"""), "")
+            .trim()
+
+        val targetGenre = when (cleanQuery) {
+            "aksiyon", "macera", "aksiyon macera", "aksiyon & macera" -> "Aksiyon & Macera"
+            "bilim kurgu", "bilimkurgu", "fantastik", "fantazi", "bilim kurgu & fantazi" -> "Bilim Kurgu & Fantazi"
+            "komedi" -> "Komedi"
+            "dram" -> "Dram"
+            "gizem" -> "Gizem"
+            "romantik", "aşk", "ask", "romantizm" -> "Romantik"
+            "doğaüstü", "dogaustu", "büyü", "buyu", "doğaüstü & büyü" -> "Doğaüstü & Büyü"
+            else -> null
+        }
+
+        val searchItems = mutableListOf<OpenAnimeSearchItem>()
+
+        if (targetGenre != null) {
+            val allAnimes = mutableListOf<OpenAnimeSearchItem>()
+            coroutineScope {
+                val deferred = (1..5).map { p ->
+                    async {
+                        try {
+                            app.get("https://api.openani.me/anime?limit=30&page=$p", headers = apiHeaders).parsedSafe<OpenAnimeListResponse>()
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                }
+                deferred.awaitAll().forEach { res ->
+                    res?.animes?.let { allAnimes.addAll(it) }
+                }
+            }
+            val filtered = allAnimes.filter { item ->
+                item.genres?.any { g -> g.contains(targetGenre, ignoreCase = true) || (targetGenre == "Doğaüstü & Büyü" && g.contains("Doğaüstü", ignoreCase = true)) } == true
+            }
+            searchItems.addAll(filtered.distinctBy { it.slug })
+        } else {
+            val searchQuery = query.trim()
+            if (searchQuery.length >= 2) {
+                val url = "https://api.openani.me/anime/search?q=${URLEncoder.encode(searchQuery, "UTF-8")}"
+                try {
+                    val res = app.get(url, headers = apiHeaders)
+                    if (res.code == 200) {
+                        parseJson<List<OpenAnimeSearchItem>>(res.text).let { searchItems.addAll(it) }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+
+        return searchItems.mapNotNull { item ->
+            val slug = item.slug ?: return@mapNotNull null
+            val titleVal = item.turkish ?: item.english ?: item.originalName ?: "Anime"
+            val poster = item.pictures?.avatar ?: item.pictures?.banner ?: "https://openani.me/favicon512.png"
+
+            newAnimeSearchResponse(titleVal, "https://api.openani.me/anime/$slug", TvType.Anime) {
+                this.posterUrl = poster
+                addSub(null)
+                addDub(null)
+                item.score?.takeIf { it > 0 }?.let { this.score = Score.from10(it) } ?:
+                item.tmdbScore?.takeIf { it > 0 }?.let { this.score = Score.from10(it) }
             }
         }
     }
 
-    private fun parseQuality(label: String): Int {
-        val l = label.lowercase()
-        return when {
-            l.contains("2160") || l.contains("4k") -> Qualities.P2160.value
-            l.contains("1440") -> Qualities.P1440.value
-            l.contains("1080") -> Qualities.P1080.value
-            l.contains("720")  -> Qualities.P720.value
-            l.contains("480")  -> Qualities.P480.value
-            l.contains("360")  -> Qualities.P360.value
-            l.contains("240")  -> Qualities.P240.value
+    override suspend fun load(url: String): LoadResponse? {
+        val res = app.get(url, headers = apiHeaders).parsedSafe<OpenAnimeDetail>() ?: return null
+
+        val title = res.turkish ?: res.english ?: res.originalName ?: "Anime"
+        val poster = res.pictures?.avatar ?: res.pictures?.banner ?: "https://openani.me/favicon512.png"
+        val banner = res.pictures?.banner
+        val summary = res.summary
+        val scoreVal = res.tmdbScore?.let { if (it > 0) Score.from(it, 10) else null }
+        val tracker = res.malID?.let { mapOf("MyAnimeList" to it.toString()) }
+
+        val episodeList = mutableListOf<Episode>()
+        val animeType = res.type ?: "tv"
+
+        if (animeType == "movie" || (res.numberOfEpisodes == 1 && res.seasons.isNullOrEmpty())) {
+            episodeList.add(
+                newEpisode("$url/season/1/episode/1") {
+                    this.name = title
+                    this.season = 1
+                    this.episode = 1
+                    this.posterUrl = poster
+                    this.description = summary
+                }
+            )
+        } else {
+            res.seasons?.forEach { season ->
+                val sNum = season.seasonNumber ?: return@forEach
+                val seasonUrl = "$url/season/$sNum"
+                try {
+                    val sRes = app.get(seasonUrl, headers = apiHeaders).parsedSafe<OpenAnimeSeasonResponse>()
+                    sRes?.season?.episodes?.forEach { ep ->
+                        val eNum = ep.episodeNumber ?: return@forEach
+                        val epTitle = ep.name?.takeIf { it.isNotBlank() } ?: "Bölüm $eNum"
+                        episodeList.add(
+                            newEpisode("$url/season/$sNum/episode/$eNum") {
+                                this.name = epTitle
+                                this.season = sNum
+                                this.episode = eNum
+                                this.description = ep.summary
+                                this.posterUrl = ep.avatar ?: poster
+                            }
+                        )
+                    }
+                } catch (e: Exception) {
+                    // Skip failed seasons
+                }
+            }
+        }
+
+        return newAnimeLoadResponse(title, url, TvType.Anime) {
+            this.posterUrl = poster
+            this.backgroundPosterUrl = banner
+            this.plot = summary
+            this.score = scoreVal
+            tracker?.let { this.syncData = it.toMutableMap() }
+            this.tags = res.genres
+            this.year = res.firstAirDate?.substringAfterLast(".")?.toIntOrNull()
+            addEpisodes(DubStatus.Subbed, episodeList)
+        }
+    }
+
+    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
+        val cdnHost = getCdnHost()
+        val slug = data.substringBefore("/season/").substringAfterLast("/")
+        val sNum = data.substringAfter("/season/").substringBefore("/episode/")
+
+        val res = app.get(data, headers = apiHeaders).parsedSafe<OpenAnimeStreamResponse>() ?: return false
+
+        val fansubs = res.fansubs
+        if (!fansubs.isNullOrEmpty()) {
+            coroutineScope {
+                fansubs.map { f ->
+                    async {
+                        val fId = f.id ?: return@async
+                        val fName = f.name ?: "Fansub"
+                        val subUrl = if (data.contains("?")) "$data&fansub=$fId" else "$data?fansub=$fId"
+                        try {
+                            val subRes = app.get(subUrl, headers = apiHeaders).parsedSafe<OpenAnimeStreamResponse>() ?: return@async
+                            subRes.episodeData?.files?.forEach { file ->
+                                val fileName = file.file ?: return@forEach
+                                val resInt = file.resolution ?: 1080
+                                val streamUrl = "$cdnHost/animes/$slug/$sNum/$fileName"
+                                val qualityName = "$fName (${resInt}p)"
+                                callback.invoke(
+                                    newExtractorLink(
+                                        source = this@OpenAnime.name,
+                                        name = qualityName,
+                                        url = streamUrl,
+                                        type = if (streamUrl.endsWith(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                                    ) {
+                                        this.quality = getQuality(resInt)
+                                        this.headers = mapOf("Referer" to "https://openani.me/")
+                                    }
+                                )
+                            }
+                        } catch (e: Exception) {
+                            // Skip failed fansub
+                        }
+                    }
+                }.awaitAll()
+            }
+        } else {
+            val files = res.episodeData?.files ?: return false
+            files.forEach { file ->
+                val fileName = file.file ?: return@forEach
+                val resInt = file.resolution ?: 1080
+                val streamUrl = "$cdnHost/animes/$slug/$sNum/$fileName"
+                callback.invoke(
+                    newExtractorLink(
+                        source = this@OpenAnime.name,
+                        name = "${this@OpenAnime.name} (${resInt}p)",
+                        url = streamUrl,
+                        type = if (streamUrl.endsWith(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                    ) {
+                        this.quality = getQuality(resInt)
+                        this.headers = mapOf("Referer" to "https://openani.me/")
+                    }
+                )
+            }
+        }
+        return true
+    }
+
+    suspend fun loadTags(): List<HomePageResponse>? {
+        return listOfNotNull(
+            loadTypeCategory("tv", "TV Serileri"),
+            loadTypeCategory("movie", "Filmler"),
+            loadTypeCategory("ova", "OVA'lar"),
+            loadTypeCategory("special", "Özel Bölümler")
+        )
+    }
+
+    private suspend fun loadTypeCategory(type: String, label: String): HomePageResponse? {
+        try {
+            val allItems = mutableListOf<OpenAnimeSearchItem>()
+            for (page in 1..5) {
+                val url = "https://api.openani.me/anime?limit=30&page=$page"
+                val response = app.get(url, headers = apiHeaders).parsedSafe<OpenAnimeListResponse>() ?: break
+                val animes = response.animes ?: break
+                allItems.addAll(animes)
+                if (animes.size < 30) break
+            }
+
+            val filteredItems = allItems.filter { it.type == type }
+
+            val homeItems = filteredItems.mapNotNull { item ->
+                val slug = item.slug ?: return@mapNotNull null
+                val titleVal = item.turkish ?: item.english ?: item.originalName ?: "Anime"
+                val poster = item.pictures?.avatar ?: item.pictures?.banner ?: "https://openani.me/favicon512.png"
+
+                newAnimeSearchResponse(titleVal, "https://api.openani.me/anime/$slug", TvType.Anime) {
+                    this.posterUrl = poster
+                    item.episode?.let { addSub(it) } ?: addSub(1)
+                    addDub(1)
+                    item.score?.takeIf { it > 0 }?.let { this.score = Score.from10(it) } ?:
+                    item.tmdbScore?.takeIf { it > 0 }?.let { this.score = Score.from10(it) }
+                }
+            }
+
+            if (homeItems.isEmpty()) return null
+            return newHomePageResponse(label, homeItems)
+        } catch (e: Exception) {
+            return null
+        }
+    }
+
+    private fun getQuality(res: Int): Int {
+        return when (res) {
+            2160 -> Qualities.P2160.value
+            1080 -> Qualities.P1080.value
+            720  -> Qualities.P720.value
+            480  -> Qualities.P480.value
+            360  -> Qualities.P360.value
             else -> Qualities.Unknown.value
         }
     }
-
-    private fun String.isAdUrl(): Boolean =
-        adDomains.any { contains(it, ignoreCase = true) }
 }
