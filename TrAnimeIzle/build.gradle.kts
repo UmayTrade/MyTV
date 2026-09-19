@@ -5,7 +5,7 @@ fun Project.cloudstream(configuration: CloudstreamExtension.() -> Unit) = extens
 version = 1
 
 cloudstream {
-    authors = listOf("ulgenzade")
+    authors = listOf("UmayTrade")
     language = "tr"
     description = "TrAnimeİzle - Türkçe Anime İzleme Platformu"
     status = 1
