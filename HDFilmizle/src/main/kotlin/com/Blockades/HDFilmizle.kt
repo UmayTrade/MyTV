@@ -1,22 +1,4 @@
-// ! Bu araç NeO tarafından yazılmıştır.
-// ! hdfilmizle.vip canlı sitesi üzerinde 2026-08 itibarıyla doğrulanmıştır. Hazır referans eklenti
-// ! bulunmadığından seçiciler canlı site incelemesiyle sıfırdan çıkarılmıştır.
-// ! - Film kartları "a.poster[title][href]" ile bulunur; dizi linkleri "/dizi/{slug}/" öneki taşır,
-// !   filmler kök dizinde "/{slug}/" şeklindedir.
-// ! - Sayfalama: "{kategoriUrl}page/{n}/" (WordPress standardı).
-// ! - Arama: POST "/search/" (form: query=<sorgu>, header: X-Requested-With: XMLHttpRequest) düz
-// !   JSON dizisi döner: [{id,name,slug,year,type("dizi"|"film"),thumb_url,...}].
-// ! - Dizi bölümleri tek sayfada "div.card-list a[href*=/bolum-]" ile, href örneği:
-// !   "/dizi/{slug}/sezon-{n}/bolum-{m}/".
-// ! - Video kaynakları AJAX DEĞİL, sayfanın kendi içine gömülü bir "let parts = [...]" JS dizisinde
-// !   sunucu tarafından hazır JSON olarak gelir (id, video_id, episode_id, name, lang, data). "data"
-// !   alanı ya tam bir "<iframe src=\"...\">" HTML'i ya da düz bir URL'dir (site kodundaki lazyifr()
-// !   fonksiyonuyla aynı mantık burada da uygulanır).
-// ! - NOT: "vidrame.pro/vr/{hash}" gibi bazı kaynak URL'leri sunucu tarafında yalnızca gerçek iframe
-// !   navigasyonlarını kabul ediyor gibi görünüyor (düz fetch/XHR isteği 404 döndü); CloudStream'in
-// !   HTTP istemcisiyle bu kaynaklardan bazıları çalışmayabilir. loadExtractor() yine de denenir.
-
-package com.neo.hdfilmizle
+package com.Blockades
 
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
@@ -44,7 +26,7 @@ data class HDFilmizlePart(
 )
 
 class HDFilmizle : MainAPI() {
-    override var mainUrl              = RemoteConfig.getDomain("hdfilmizle", "https://www.hdfilmizle.vip")
+    override var mainUrl              = RemoteConfig.getDomain("https://www.hdfilmizle.vip")
     override var name                 = "HDFilmizle"
     override val hasMainPage          = true
     override var lang                 = "tr"
