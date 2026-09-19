@@ -3,8 +3,6 @@ package com.UmayTrade
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
-import com.cloudstream.tr.core.concurrency.BoundedParallelResolver
-import com.cloudstream.tr.core.model.ProviderModels
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
@@ -52,10 +50,9 @@ class YesilCamTv : MainAPI() {
         val doc = app.get(targetUrl).document
         val items = doc.select(".listmovie, article, div.item, div.post, div.search-result").mapNotNull { el ->
             parseSearchItem(el)
-        }
-        val deduped = ProviderModels.dedupSearchResults(items)
+        }.distinctBy { it.url }
 
-        return newSearchResponseList(deduped, hasNext = deduped.isNotEmpty())
+        return newSearchResponseList(items, hasNext = items.isNotEmpty())
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query, 1).items
@@ -153,47 +150,43 @@ class YesilCamTv : MainAPI() {
         val iframes = mutableListOf<String>()
         doc.select("iframe").forEach { iframe ->
             val src = iframe.attr("data-src").ifEmpty { iframe.attr("src") }
-            if (src.isNotBlank() && !src.contains("wp-embedded-content") && !src.contains("youtube.com") && !src.contains("youtu.be")) {
+            if (src.isNotBlank() && !src.contains("wp-embedded-content") &&
+                !src.contains("youtube.com") && !src.contains("youtu.be")) {
                 fixUrlNull(src)?.let { iframes.add(it) }
             }
         }
 
-        val resolved = BoundedParallelResolver.resolveProgressive(
-            candidates = iframes.distinct(),
-            maxConcurrency = 4,
-            resolver = { iframeUrl, emitLink ->
-                val fixed = fixUrl(iframeUrl)
-                if (fixed.contains("rumble.com/embed/")) {
-                    try {
-                        val rumbleHtml = app.get(fixed, referer = mainUrl).text
-                        val mp4Matches = Regex("""https?:[\\/]+[^\s"\'<>]+\.mp4[^\s"\'<>]*""").findAll(rumbleHtml)
-                        mp4Matches.forEach { match ->
-                            val cleanUrl = match.value.replace("""\/""", "/")
-                            if (cleanUrl.startsWith("http")) {
-                                emitLink(
-                                    newExtractorLink(
-                                        source = name,
-                                        name = "$name Rumble MP4",
-                                        url = cleanUrl,
-                                        type = ExtractorLinkType.VIDEO
-                                    ) {
-                                        this.referer = "https://rumble.com/"
-                                        this.quality = Qualities.P1080.value
-                                    }
-                                )
-                            }
+        for (iframeUrl in iframes.distinct()) {
+            val fixed = fixUrl(iframeUrl)
+            if (fixed.contains("rumble.com/embed/")) {
+                try {
+                    val rumbleHtml = app.get(fixed, referer = mainUrl).text
+                    val mp4Matches = Regex("""https?:[\\/]+[^\s"\'<>]+\.mp4[^\s"\'<>]*""").findAll(rumbleHtml)
+                    mp4Matches.forEach { match ->
+                        val cleanUrl = match.value.replace("""\/""", "/")
+                        if (cleanUrl.startsWith("http")) {
+                            callback(
+                                newExtractorLink(
+                                    source = name,
+                                    name = "$name Rumble MP4",
+                                    url = cleanUrl,
+                                    type = ExtractorLinkType.VIDEO
+                                ) {
+                                    this.referer = "https://rumble.com/"
+                                    this.quality = Qualities.P1080.value
+                                }
+                            )
+                            linksFound = true
                         }
-                    } catch (_: Exception) {}
-                } else {
-                    loadExtractor(fixed, referer = mainUrl, subtitleCallback, emitLink)
+                    }
+                } catch (_: Exception) {}
+            } else {
+                if (loadExtractor(fixed, referer = mainUrl, subtitleCallback, callback)) {
+                    linksFound = true
                 }
-            },
-            onLinkFound = { link ->
-                callback(link)
-                linksFound = true
             }
-        )
+        }
 
-        return linksFound || resolved > 0
+        return linksFound
     }
 }
