@@ -4,7 +4,6 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.json.JSONArray
 import org.json.JSONObject
-import org.jsoup.nodes.Document
 import java.net.URLEncoder
 
 /**
@@ -75,19 +74,79 @@ class OpenAnime : MainAPI() {
      * Format: `const data = [{"type":"data","data":{...}},...];`
      */
     private fun extractSvelteData(html: String): JSONArray? {
-        // `data = [` veya `const data = [` veya `let data = [`
-        val patterns = listOf(
-            Regex("""const\s+data\s*=\s*(\[.*?\]);""", RegexOption.DOT_MATCHES_ALL),
-            Regex("""let\s+data\s*=\s*(\[.*?\]);""", RegexOption.DOT_MATCHES_ALL),
-            Regex("""\bdata\s*=\s*(\[\{.*?\}\]);""", RegexOption.DOT_MATCHES_ALL)
+        /*
+         * OpenAnime SvelteKit verisi saf JSON değildir.
+         * Örnek:
+         *   data = [{type:"data",data:{animes:[{type:"tv", ...}]}}];
+         *
+         * org.json doğrudan bunu parse edemez. Önce JavaScript
+         * object-literal sözdizimini JSON'a yaklaştırıyoruz.
+         */
+        val start = Regex("""(?:const|let|var)?\s*data\s*=\s*\[""")
+            .find(html)?.range?.first
+            ?: Regex("""data\s*=\s*\[""").find(html)?.range?.first
+            ?: return null
+
+        val arrayStart = html.indexOf('[', start)
+        if (arrayStart < 0) return null
+
+        // En dıştaki [] bloğunu dengeli şekilde bul.
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var end = -1
+
+        for (i in arrayStart until html.length) {
+            val c = html[i]
+
+            if (inString) {
+                if (escaped) {
+                    escaped = false
+                } else if (c == '\\') {
+                    escaped = true
+                } else if (c == '"') {
+                    inString = false
+                }
+                continue
+            }
+
+            if (c == '"') {
+                inString = true
+                continue
+            }
+
+            when (c) {
+                '[' -> depth++
+                ']' -> {
+                    depth--
+                    if (depth == 0) {
+                        end = i
+                        break
+                    }
+                }
+            }
+        }
+
+        if (end <= arrayStart) return null
+
+        var source = html.substring(arrayStart, end + 1)
+
+        // JavaScript object key'lerini JSON key'lerine çevir.
+        source = source.replace(
+            Regex("""([\{,])\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:"""),
+            "$1\"$2\":"
         )
 
-        for (pattern in patterns) {
-            val match = pattern.find(html) ?: continue
-            val jsonStr = match.groupValues[1]
-            return runCatching { JSONArray(jsonStr) }.getOrNull()
-        }
-        return null
+        // JavaScript özel değerleri JSON null'a çevir.
+        source = source
+            .replace(Regex("""\bvoid\s+0\b"""), "null")
+            .replace(Regex("""\bundefined\b"""), "null")
+            .replace(Regex("""\bNaN\b"""), "null")
+            .replace(Regex("""\bInfinity\b"""), "null")
+
+        return runCatching {
+            JSONArray(source)
+        }.getOrNull()
     }
 
     /**
@@ -104,13 +163,42 @@ class OpenAnime : MainAPI() {
         return null
     }
 
-    /** TMDB poster yolu → tam URL */
-    private fun buildPosterUrl(pictures: JSONObject?): String? {
-        if (pictures == null) return null
-        val avatar = pictures.optString("avatar").takeIf { it.isNotBlank() }
-        if (avatar != null) return avatar
-        val banner = pictures.optString("banner").takeIf { it.isNotBlank() }
-        if (banner != null) return banner
+    /**
+     * Poster URL'sini anime veya season objesinden çıkarır.
+     *
+     * Desteklenen alanlar:
+     *   poster
+     *   poster_path
+     *   pictures.avatar
+     *   pictures.banner
+     */
+    private fun buildPosterUrl(obj: JSONObject?): String? {
+        if (obj == null) return null
+
+        obj.optString("poster")
+            .takeIf { it.isNotBlank() && it != "null" }
+            ?.let { return it }
+
+        obj.optString("poster_path")
+            .takeIf { it.isNotBlank() && it != "null" }
+            ?.let {
+                return if (it.startsWith("http")) {
+                    it
+                } else {
+                    "$tmdbImageBase${if (it.startsWith("/")) it else "/$it"}"
+                }
+            }
+
+        val pictures = obj.optJSONObject("pictures")
+
+        pictures?.optString("avatar")
+            ?.takeIf { it.isNotBlank() && it != "null" }
+            ?.let { return it }
+
+        pictures?.optString("banner")
+            ?.takeIf { it.isNotBlank() && it != "null" }
+            ?.let { return it }
+
         return null
     }
 
@@ -123,7 +211,7 @@ class OpenAnime : MainAPI() {
             ?: anime.optString("originalName").takeIf { it.isNotBlank() }
             ?: return null
 
-        val poster = buildPosterUrl(anime.optJSONObject("pictures"))
+        val poster = buildPosterUrl(anime)
 
         return newAnimeSearchResponse(title, "$mainUrl/anime/$slug", TvType.Anime) {
             this.posterUrl = poster
@@ -269,7 +357,7 @@ class OpenAnime : MainAPI() {
             ?: anime.optString("originalName").takeIf { it.isNotBlank() }
             ?: "Bilinmeyen Anime"
 
-        val poster = buildPosterUrl(anime.optJSONObject("pictures"))
+        val poster = buildPosterUrl(anime)
 
         val plot = anime.optString("summary").takeIf { it.isNotBlank() }
 
@@ -288,9 +376,15 @@ class OpenAnime : MainAPI() {
         if (seasons != null && seasons.length() > 0) {
             for (s in 0 until seasons.length()) {
                 val season = seasons.optJSONObject(s) ?: continue
-                val seasonNum = season.optInt("season_number", s + 1)
+                val seasonNum = season.optInt(
+                    "season_number",
+                    season.optInt("tmdb_season_number", s + 1)
+                )
                 val seasonName = season.optString("name").takeIf { it.isNotBlank() }
                 val episodeCount = season.optInt("episode_count", 0)
+
+                // Sezonun kendi posteri varsa onu kullan.
+                val seasonPoster = buildPosterUrl(season) ?: poster
 
                 // Her bölüm için episode oluştur
                 for (ep in 1..episodeCount) {
@@ -308,7 +402,7 @@ class OpenAnime : MainAPI() {
                             this.name = epTitle
                             this.episode = ep
                             this.season = seasonNum
-                            this.posterUrl = poster
+                            this.posterUrl = seasonPoster
                         }
                     )
                 }
