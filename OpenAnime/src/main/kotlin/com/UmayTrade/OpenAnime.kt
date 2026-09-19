@@ -75,22 +75,21 @@ class OpenAnime : MainAPI() {
      */
     private fun extractSvelteData(html: String): JSONArray? {
         /*
-         * OpenAnime SvelteKit verisi saf JSON değildir.
-         * Örnek:
-         *   data = [{type:"data",data:{animes:[{type:"tv", ...}]}}];
+         * OpenAnime'nin SvelteKit verisi saf JSON değildir:
+         * data = [{type:"data",data:{...}}];
          *
-         * org.json doğrudan bunu parse edemez. Önce JavaScript
-         * object-literal sözdizimini JSON'a yaklaştırıyoruz.
+         * Bu nedenle önce [] bloğunu dengeli şekilde çıkarıyor,
+         * sonra JavaScript object-literal key'lerini JSON key'lerine
+         * dönüştürüyoruz.
          */
-        val start = Regex("""(?:const|let|var)?\s*data\s*=\s*\[""")
-            .find(html)?.range?.first
-            ?: Regex("""data\s*=\s*\[""").find(html)?.range?.first
+        val dataMatch = Regex("""(?:const|let|var)?\s*data\s*=\s*\[""")
+            .find(html)
+            ?: Regex("""\bdata\s*=\s*\[""").find(html)
             ?: return null
 
-        val arrayStart = html.indexOf('[', start)
+        val arrayStart = html.indexOf('[', dataMatch.range.first)
         if (arrayStart < 0) return null
 
-        // En dıştaki [] bloğunu dengeli şekilde bul.
         var depth = 0
         var inString = false
         var escaped = false
@@ -110,12 +109,8 @@ class OpenAnime : MainAPI() {
                 continue
             }
 
-            if (c == '"') {
-                inString = true
-                continue
-            }
-
             when (c) {
+                '"' -> inString = true
                 '[' -> depth++
                 ']' -> {
                     depth--
@@ -127,17 +122,15 @@ class OpenAnime : MainAPI() {
             }
         }
 
-        if (end <= arrayStart) return null
+        if (end < 0) return null
 
         var source = html.substring(arrayStart, end + 1)
 
-        // JavaScript object key'lerini JSON key'lerine çevir.
         source = source.replace(
             Regex("""([\{,])\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:"""),
             "$1\"$2\":"
         )
 
-        // JavaScript özel değerleri JSON null'a çevir.
         source = source
             .replace(Regex("""\bvoid\s+0\b"""), "null")
             .replace(Regex("""\bundefined\b"""), "null")
@@ -538,7 +531,7 @@ class OpenAnime : MainAPI() {
         return found
     }
 
-    private fun emitSource(
+    private suspend fun emitSource(
         url: String,
         label: String,
         subtitleCallback: (SubtitleFile) -> Unit,
