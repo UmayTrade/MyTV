@@ -1,5 +1,5 @@
 package com.Blockades
-import Video
+
 import android.util.Log
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -26,9 +26,9 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import org.jsoup.nodes.Element
 
-class HDFilmIzle : MainAPI() {
+class FilmizleCh : MainAPI() {
     override var mainUrl = "https://www.hdfilmizle.to"
-    override var name = "HDFilmİzle"
+    override var name = "FilmizleCh"
     override val hasMainPage = true
     override var lang = "tr"
     override val hasQuickSearch = true
@@ -59,11 +59,7 @@ class HDFilmIzle : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
-
-        val home: List<SearchResponse>?
-
-        home = document.select("div#moviesListResult a.poster").mapNotNull { it.toSearchResult() }
-
+        val home = document.select("div#moviesListResult a.poster").mapNotNull { it.toSearchResult() }
         return newHomePageResponse(request.name, home)
     }
 
@@ -88,13 +84,14 @@ class HDFilmIzle : MainAPI() {
             referer = mainUrl,
             data = mapOf("query" to query)
         ).document
-        val searchResults = mutableListOf<SearchResponse>()
 
+        val searchResults = mutableListOf<SearchResponse>()
         val objectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
+
         try {
-            val videos: List<Video> = objectMapper.readValue(response.body().text())
+            val videos: List<VideoItem> = objectMapper.readValue(response.body().text())
             videos.forEach { video ->
-                val title = video.name
+                val title = video.name ?: return@forEach
                 val href = fixUrlNull(video.slug) ?: return@forEach
                 val posterUrl = fixUrlNull(video.thumbUrl) ?: fixUrlNull(video.thumbWebp)
 
@@ -118,17 +115,17 @@ class HDFilmIzle : MainAPI() {
                 ?: ""
         val title =
             if (altTitle.isNotEmpty() && orgTitle != altTitle) "$orgTitle - $altTitle" else orgTitle
+
         val poster = fixUrlNull(document.selectFirst("picture.poster-auto img")?.attr("data-src"))
         val tags = document.select("div.pb-2.genres a").map { it.text() }
         val year = document.selectFirst("div.page-title")?.selectFirst("small.text-muted")?.text()
             ?.replace("(", "")?.replace(")", "")?.toIntOrNull()
         val description = document.selectFirst("article.text-white > p")?.text()?.trim()
         val rating = document.selectFirst("div.rate.mb-2 span")?.text()
-        val actors = document.select("div.stories-wrapper a").map {
-            Actor(
-                it.selectFirst("div.story-item-title")!!.text(),
-                fixUrlNull(it.select("img").attr("data-src"))
-            )
+
+        val actors = document.select("div.stories-wrapper a").mapNotNull {
+            val actorName = it.selectFirst("div.story-item-title")?.text() ?: return@mapNotNull null
+            Actor(actorName, fixUrlNull(it.select("img").attr("data-src")))
         }
 
         val recommendations = document.select("div#swiper-wrapper-benzer").mapNotNull {
@@ -141,6 +138,7 @@ class HDFilmIzle : MainAPI() {
                 this.posterUrl = recPosterUrl
             }
         }
+
         val trailer = document.selectFirst("div.nav-link")?.attr("data-trailer")
 
         return newMovieLoadResponse(title, url, TvType.Movie, url) {
@@ -155,22 +153,27 @@ class HDFilmIzle : MainAPI() {
         }
     }
 
-
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("HDF", "data » ${data}")
+        Log.d("FilmizleCh", "data » $data")
         val document = app.get(data).document
-
         val iframe = document.selectFirst("iframe")?.attr("data-src") ?: ""
-        Log.d("HDF", "iframe » ${iframe}")
+        Log.d("FilmizleCh", "iframe » $iframe")
         loadExtractor(iframe, mainUrl, subtitleCallback, callback)
-
         return true
     }
+
+    // Jackson'ın JSON'u parse edebilmesi için gerekli veri sınıfı
+    private data class VideoItem(
+        @JsonProperty("name") val name: String? = null,
+        @JsonProperty("slug") val slug: String? = null,
+        @JsonProperty("thumb_url") val thumbUrl: String? = null,
+        @JsonProperty("thumb_webp") val thumbWebp: String? = null
+    )
 
     private data class SubSource(
         @JsonProperty("file") val file: String? = null,
