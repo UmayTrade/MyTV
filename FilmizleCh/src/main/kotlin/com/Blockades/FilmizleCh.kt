@@ -75,27 +75,69 @@ class FilmizleCh : MainAPI() {
         return newHomePageResponse(request.name, items.distinctBy { it.url }, hasNext = items.isNotEmpty())
     }
 
-    private fun Element.toSearchResult(): SearchResponse? {
-        val href = attr("href") ?: return null
-        val urlVal = if (href.startsWith("http")) href else "$mainUrl$href"
+private fun Element.toSearchResult(): SearchResponse? {
+    val href = attr("href") ?: return null
+    val urlVal = if (href.startsWith("http")) href else "$mainUrl$href"
 
-        val isTv = urlVal.contains("/dizi/") || urlVal.contains("/anime/")
-        if (!isTv) return null
+    val isTv = urlVal.contains("/dizi/") || urlVal.contains("/anime/")
+    if (!isTv) return null
 
-        val title = selectFirst(".cc-info strong")?.text()?.trim() ?: return null
+    val title = selectFirst(".cc-info strong")?.text()?.trim()
+        ?: selectFirst(".cc-title")?.text()?.trim()
+        ?: selectFirst("h3")?.text()?.trim()
+        ?: return null
 
-        val styleAttr = selectFirst(".cc-bg")?.attr("style") ?: ""
-        val posterUrl = Regex("""url\(['"]?([^'")]+)['"]?\)""").find(styleAttr)?.groupValues?.getOrNull(1)
+    // --- POSTER ÇEKME: Çoklu fallback ---
+    var posterUrl: String? = null
 
-        val rating = selectFirst(".cc-rating-inline")?.text()?.replace("★", "")?.trim()?.toDoubleOrNull()
+    // 1. .cc-bg style içindeki background-image
+    val styleAttr = selectFirst(".cc-bg")?.attr("style") ?: ""
+    posterUrl = Regex("""url\(['"]?([^'")]+)['"]?\)""")
+        .find(styleAttr)?.groupValues?.getOrNull(1)
 
-        return newTvSeriesSearchResponse(title, urlVal, TvType.TvSeries) {
-            this.posterUrl = posterUrl
-            rating?.takeIf { it > 0.0 }?.let {
-                this.score = Score.from10(it)
-            }
+    // 2. img src / data-src
+    if (posterUrl.isNullOrBlank()) {
+        val img = selectFirst(".cc-bg img")
+            ?: selectFirst("img.cc-img")
+            ?: selectFirst(".cc-poster img")
+            ?: selectFirst("img")
+        posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() }
+            ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
+            ?: img?.attr("src")?.takeIf { it.isNotBlank() }
+    }
+
+    // 3. data-bg / data-background
+    if (posterUrl.isNullOrBlank()) {
+        posterUrl = selectFirst(".cc-bg")?.attr("data-bg")?.takeIf { it.isNotBlank() }
+            ?: selectFirst(".cc-bg")?.attr("data-background")?.takeIf { it.isNotBlank() }
+    }
+
+    // 4. Tüm elementte style ara
+    if (posterUrl.isNullOrBlank()) {
+        val allStyle = attr("style")
+        posterUrl = Regex("""url\(['"]?([^'")]+)['"]?\)""")
+            .find(allStyle)?.groupValues?.getOrNull(1)
+    }
+
+    // URL düzeltme
+    posterUrl = posterUrl?.let {
+        when {
+            it.startsWith("http") -> it
+            it.startsWith("//") -> "https:$it"
+            it.startsWith("/") -> "$mainUrl$it"
+            else -> "$mainUrl/$it"
         }
     }
+
+    val rating = selectFirst(".cc-rating-inline")?.text()?.replace("★", "")?.trim()?.toDoubleOrNull()
+
+    return newTvSeriesSearchResponse(title, urlVal, TvType.TvSeries) {
+        this.posterUrl = posterUrl
+        rating?.takeIf { it > 0.0 }?.let {
+            this.score = Score.from10(it)
+        }
+    }
+}
 
     override suspend fun search(query: String): List<SearchResponse> {
         val encodedQuery = java.net.URLEncoder.encode(query.trim(), "UTF-8")
