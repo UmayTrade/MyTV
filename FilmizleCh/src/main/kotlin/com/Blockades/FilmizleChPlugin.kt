@@ -12,7 +12,7 @@ class FilmizleChPlugin : BasePlugin() {
             FilmizleCh()
         )
         providers.forEach { provider ->
-            APIHolder.addPlugin(provider)
+            APIHolder.addPluginProvider(provider)
         }
     }
 }
