@@ -74,14 +74,6 @@ class OpenAnime : MainAPI() {
      * Format: `const data = [{"type":"data","data":{...}},...];`
      */
     private fun extractSvelteData(html: String): JSONArray? {
-        /*
-         * OpenAnime'nin SvelteKit verisi saf JSON değildir:
-         * data = [{type:"data",data:{...}}];
-         *
-         * Bu nedenle önce [] bloğunu dengeli şekilde çıkarıyor,
-         * sonra JavaScript object-literal key'lerini JSON key'lerine
-         * dönüştürüyoruz.
-         */
         val dataMatch = Regex("""(?:const|let|var)?\s*data\s*=\s*\[""")
             .find(html)
             ?: Regex("""\bdata\s*=\s*\[""").find(html)
@@ -157,13 +149,17 @@ class OpenAnime : MainAPI() {
     }
 
     /**
+     * Belirli bir data index'indeki data objesini döndürür.
+     */
+    private fun extractDataObjectAt(jsonArray: JSONArray, index: Int): JSONObject? {
+        if (index < 0 || index >= jsonArray.length()) return null
+        val item = jsonArray.optJSONObject(index) ?: return null
+        if (item.optString("type") != "data") return null
+        return item.optJSONObject("data")
+    }
+
+    /**
      * Poster URL'sini anime veya season objesinden çıkarır.
-     *
-     * Desteklenen alanlar:
-     *   poster
-     *   poster_path
-     *   pictures.avatar
-     *   pictures.banner
      */
     private fun buildPosterUrl(obj: JSONObject?): String? {
         if (obj == null) return null
@@ -240,7 +236,6 @@ class OpenAnime : MainAPI() {
         val items = mutableListOf<SearchResponse>()
         val seen = mutableSetOf<String>()
 
-        // Animes ana liste
         val animes = dataObj.optJSONArray("animes")
         if (animes != null) {
             for (i in 0 until animes.length()) {
@@ -250,7 +245,6 @@ class OpenAnime : MainAPI() {
             }
         }
 
-        // Popular animes (bazı sayfalarda ayrı)
         val popular = dataObj.optJSONArray("popularAnimes")
         if (popular != null) {
             for (i in 0 until popular.length()) {
@@ -276,7 +270,6 @@ class OpenAnime : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         if (query.isBlank()) return emptyList()
 
-        // API üzerinden arama
         val searchUrl = "$apiLink/anime/search?q=${query.encodeUrl()}"
         val apiResult = runCatching {
             val resp = app.get(searchUrl, headers = apiHeaders()).text
@@ -285,7 +278,6 @@ class OpenAnime : MainAPI() {
 
         if (!apiResult.isNullOrEmpty()) return apiResult
 
-        // Fallback: keşfet sayfasını çek ve filtrele
         val html = runCatching {
             app.get("$mainUrl/explore", headers = headers()).text
         }.getOrNull() ?: return emptyList()
@@ -337,7 +329,6 @@ class OpenAnime : MainAPI() {
         val jsonArray = extractSvelteData(html)
         val dataObj = if (jsonArray != null) extractDataObject(jsonArray) else null
 
-        // Data objesinde anime ara
         val anime = findAnimeInData(dataObj, url)
             ?: return fallbackLoad(url, html)
 
@@ -354,7 +345,6 @@ class OpenAnime : MainAPI() {
 
         val plot = anime.optString("summary").takeIf { it.isNotBlank() }
 
-        // Türler
         val tags = mutableListOf<String>()
         anime.optJSONArray("genres")?.let { arr ->
             for (i in 0 until arr.length()) {
@@ -362,7 +352,6 @@ class OpenAnime : MainAPI() {
             }
         }
 
-        // Bölümler — "seasons" dizisinden
         val episodes = mutableListOf<Episode>()
         val seasons = anime.optJSONArray("seasons")
 
@@ -376,13 +365,9 @@ class OpenAnime : MainAPI() {
                 val seasonName = season.optString("name").takeIf { it.isNotBlank() }
                 val episodeCount = season.optInt("episode_count", 0)
 
-                // Sezonun kendi posteri varsa onu kullan.
                 val seasonPoster = buildPosterUrl(season) ?: poster
 
-                // Her bölüm için episode oluştur
                 for (ep in 1..episodeCount) {
-                    // OpenAni URL formatı: /anime/{slug}/{season}/{episode} olabilir
-                    // veya /watch/{slug}/{ep} — kesin format API'den gelmeli
                     val epUrl = "$mainUrl/anime/$slug/$seasonNum/$ep"
                     val epTitle = if (episodeCount > 1) {
                         seasonName?.let { "$it - $ep. Bölüm" } ?: "$ep. Bölüm"
@@ -424,7 +409,6 @@ class OpenAnime : MainAPI() {
             }
         }
 
-        // Doğrudan obje olabilir
         val direct = dataObj.optJSONObject("anime")
         if (direct != null && direct.optString("slug") == slug) return direct
 
@@ -432,7 +416,6 @@ class OpenAnime : MainAPI() {
     }
 
     private suspend fun fallbackLoad(url: String, html: String): LoadResponse {
-        // HTML'den title/postercıkar
         val doc = org.jsoup.Jsoup.parse(html)
 
         val title = doc.selectFirst("h1")?.text()?.trim()
@@ -463,69 +446,100 @@ class OpenAnime : MainAPI() {
 
         var found = false
 
-        // 1. SvelteKit data içinde video kaynakları
+        // SvelteKit data dizisini çıkar
         val jsonArray = extractSvelteData(html)
-        val dataObj = if (jsonArray != null) extractDataObject(jsonArray) else null
 
-        if (dataObj != null) {
-            // sources / videos / players
-            val sources = dataObj.optJSONArray("sources")
-                ?: dataObj.optJSONArray("videos")
-                ?: dataObj.optJSONArray("players")
-                ?: dataObj.optJSONObject("episode")?.optJSONArray("sources")
+        if (jsonArray != null) {
+            // Tüm data objelerini dolaş, requestResponse içereni bul
+            for (i in 0 until jsonArray.length()) {
+                val dataObj = extractDataObjectAt(jsonArray, i) ?: continue
 
-            if (sources != null) {
-                for (i in 0 until sources.length()) {
-                    val src = sources.optJSONObject(i) ?: continue
-                    val url = src.optString("url").takeIf { it.isNotBlank() }
-                        ?: src.optString("file").takeIf { it.isNotBlank() }
-                        ?: continue
-                    if (url.isAdUrl()) continue
+                val requestResponse = dataObj.optJSONObject("requestResponse") ?: continue
+                val episodeData = requestResponse.optJSONObject("episodeData") ?: continue
 
-                    val label = src.optString("label").takeIf { it.isNotBlank() }
-                        ?: src.optString("name").takeIf { it.isNotBlank() }
-                        ?: "Player"
+                // CDN_LINK hem data kökünde hem requestResponse içinde olabilir
+                val cdnLink = dataObj.optString("CDN_LINK").takeIf { it.isNotBlank() }
+                    ?: requestResponse.optString("CDN_LINK").takeIf { it.isNotBlank() }
+                    ?: "$cdnLinkTemplate/animes/"
 
-                    emitSource(url, label, subtitleCallback, callback)
+                val files = episodeData.optJSONArray("files") ?: continue
+
+                for (j in 0 until files.length()) {
+                    val fileObj = files.optJSONObject(j) ?: continue
+                    val fileName = fileObj.optString("file").takeIf { it.isNotBlank() } ?: continue
+                    val resolution = fileObj.optInt("resolution", 0)
+
+                    // CDN linkini oluştur
+                    val videoUrl = if (fileName.startsWith("http")) {
+                        fileName
+                    } else {
+                        cdnLink.trimEnd('/') + "/" + fileName.trimStart('/')
+                    }
+
+                    if (videoUrl.isAdUrl()) continue
+
+                    val label = if (resolution > 0) "${resolution}p" else "Video"
+
+                    callback(
+                        newExtractorLink(
+                            source = name,
+                            name = "$name [$label]",
+                            url = videoUrl,
+                            type = ExtractorLinkType.VIDEO
+                        ) {
+                            this.quality = when (resolution) {
+                                2160 -> Qualities.P2160.value
+                                1440 -> Qualities.P1440.value
+                                1080 -> Qualities.P1080.value
+                                720  -> Qualities.P720.value
+                                480  -> Qualities.P480.value
+                                360  -> Qualities.P360.value
+                                240  -> Qualities.P240.value
+                                else -> Qualities.Unknown.value
+                            }
+                            this.referer = "$mainUrl/"
+                            this.headers = headers()
+                        }
+                    )
                     found = true
                 }
             }
         }
 
-        // 2. HTML'de <video> ve <source>
-        val doc = org.jsoup.Jsoup.parse(html)
-        doc.select("video source[src], video[src]").forEach { el ->
-            val src = fixUrlNull(
-                el.attr("src").takeIf { it.isNotBlank() }
-                    ?: el.attr("data-src")
-            ) ?: return@forEach
-            if (src.isAdUrl()) return@forEach
-            emitSource(src, "Direct", subtitleCallback, callback)
-            found = true
-        }
+        // Fallback: HTML'de doğrudan video/iframe araması
+        if (!found) {
+            val doc = org.jsoup.Jsoup.parse(html)
 
-        // 3. Script içinde m3u8/mp4
-        val urlRegex = Regex("""["'](https?://[^"']+\.(?:m3u8|mp4)[^"']*)["']""")
-        doc.select("script:not([src])").forEach { script ->
-            val content = script.data()
-            urlRegex.findAll(content).forEach { match ->
-                val videoUrl = match.groupValues[1]
-                if (videoUrl.isAdUrl()) return@forEach
-                emitSource(videoUrl, "Script", subtitleCallback, callback)
+            doc.select("video source[src], video[src]").forEach { el ->
+                val src = fixUrlNull(
+                    el.attr("src").takeIf { it.isNotBlank() }
+                        ?: el.attr("data-src")
+                ) ?: return@forEach
+                if (src.isAdUrl()) return@forEach
+                emitSource(src, "Direct", subtitleCallback, callback)
                 found = true
             }
-        }
 
-        // 4. iframe embed
-        doc.select("iframe[src], iframe[data-src]").forEach { iframe ->
-            val src = fixUrlNull(
-                iframe.attr("src").takeIf { it.isNotBlank() }
-                    ?: iframe.attr("data-src")
-            ) ?: return@forEach
-            if (src.isAdUrl()) return@forEach
+            val urlRegex = Regex("""["'](https?://[^"']+\.(?:m3u8|mp4)[^"']*)["']""")
+            doc.select("script:not([src])").forEach { script ->
+                urlRegex.findAll(script.data()).forEach { match ->
+                    val videoUrl = match.groupValues[1]
+                    if (videoUrl.isAdUrl()) return@forEach
+                    emitSource(videoUrl, "Script", subtitleCallback, callback)
+                    found = true
+                }
+            }
 
-            loadExtractor(src, "$mainUrl/", subtitleCallback, callback)
-            found = true
+            doc.select("iframe[src], iframe[data-src]").forEach { iframe ->
+                val src = fixUrlNull(
+                    iframe.attr("src").takeIf { it.isNotBlank() }
+                        ?: iframe.attr("data-src")
+                ) ?: return@forEach
+                if (src.isAdUrl()) return@forEach
+
+                loadExtractor(src, "$mainUrl/", subtitleCallback, callback)
+                found = true
+            }
         }
 
         return found
