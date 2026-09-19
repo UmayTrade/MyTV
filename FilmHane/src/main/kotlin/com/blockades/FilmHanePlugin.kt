@@ -1,15 +1,13 @@
-package com.blockades
+// ! Bu araç @SAKLImavi tarafından | @Kuralsiz için yazılmıştır.
+package com.Blockades
 
-import android.content.Context
-import com.blockades.Ag2m4Extractor
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
+import android.content.Context
 
 @CloudstreamPlugin
 class FilmHanePlugin: Plugin() {
     override fun load(context: Context) {
         registerMainAPI(FilmHane())
-
-        registerExtractorAPI(Ag2m4Extractor())
     }
 }
