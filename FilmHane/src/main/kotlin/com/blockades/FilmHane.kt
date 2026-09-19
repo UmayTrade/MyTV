@@ -1,6 +1,5 @@
 // ! Bu araç @SAKLImavi tarafından | @Kuralsiz için yazılmıştır.
-
-package com.blockades
+package com.Blockades
 
 import android.util.Log
 import org.jsoup.nodes.Element
