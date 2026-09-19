@@ -2,13 +2,12 @@ package com.Blockades
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.providers.getBrowserHeaders
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.json.JSONObject
 
 class FilmizleCh : MainAPI() {
-    override var mainUrl = "https://filmizlech.org"
+    override var mainUrl = "https://filmizlech.com"
     override var name = "FilmizleCh"
     override var lang = "tr"
     override val hasMainPage = true
@@ -279,7 +278,7 @@ class FilmizleCh : MainAPI() {
                     streamUrl,
                     type = if (streamUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                 ) {
-                    headers = getBrowserHeaders(subIframeUrl)
+                    headers = buildBrowserHeaders(subIframeUrl)
                 }
             )
 
@@ -308,4 +307,12 @@ class FilmizleCh : MainAPI() {
             false
         }
     }
+}
+
+// getBrowserHeaders fonksiyonu projede bulunmadığı için burada tanımlıyoruz
+private fun buildBrowserHeaders(referer: String): Map<String, String> {
+    return mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer" to referer
+    )
 }
