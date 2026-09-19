@@ -7,7 +7,7 @@ import org.jsoup.nodes.Element
 import org.json.JSONObject
 
 class FilmizleCh : MainAPI() {
-    override var mainUrl = "https://filmizlech.org"
+    override var mainUrl = "https://filmizlech.com"
     override var name = "FilmizleCh"
     override var lang = "tr"
     override val hasMainPage = true
@@ -23,8 +23,8 @@ class FilmizleCh : MainAPI() {
     override val mainPage = mainPageOf(
         "$mainUrl/diziler" to "Diziler",
         "$mainUrl/animeler" to "Animeler",
-        "$mainUrl/filmler" to "Filmler",
-        "$mainUrl/diziler?cats=yerli-dizi" to "Yerli Dizileri",
+        "$mainUrl/diziler?cats=yerli-dizi" to "Yerli Diziler",
+        "$mainUrl/diziler?cats=kore-dizi" to "Kore Dizileri",
         "$mainUrl/diziler?cats=asya-dizi" to "Asya Dizileri",
         "$mainUrl/diziler?cats=hint-dizi" to "Hint Dizileri",
         "$mainUrl/diziler?cats=aile" to "Aile",
