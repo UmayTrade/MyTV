@@ -160,52 +160,85 @@ private fun Element.toSearchResult(): SearchResponse? {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val res = app.get(url, headers = defaultHeaders, cacheTime = 0)
-        if (!res.isSuccessful) return null
+    val res = app.get(url, headers = defaultHeaders, cacheTime = 0)
+    if (!res.isSuccessful) return null
 
-        val doc = Jsoup.parse(res.text)
+    val doc = Jsoup.parse(res.text)
 
-        val title = doc.selectFirst("h1")?.text()?.trim() ?: doc.title().trim()
-        val poster = doc.selectFirst(".detail-poster img")?.attr("src")
-        val plot = doc.selectFirst("p.description")?.text()?.trim()
+    val title = doc.selectFirst("h1")?.text()?.trim() ?: doc.title().trim()
 
-        val year = doc.select(".meta-badges .badge").firstOrNull {
-            it.text().contains("20") || it.text().contains("19")
-        }?.text()?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
+    // --- POSTER: Çoklu fallback ---
+    var poster: String? = null
 
-        val tags = doc.select("a.badge-cat").map { it.text().trim() }
+    val posterImg = doc.selectFirst(".detail-poster img")
+        ?: doc.selectFirst("picture.poster-auto img")
+        ?: doc.selectFirst(".poster img")
+        ?: doc.selectFirst("img.poster")
 
-        val episodes = doc.select(".episode-item").mapNotNull { el ->
-            val href = el.attr("href") ?: return@mapNotNull null
-            val epUrl = if (href.startsWith("http")) href else "$mainUrl$href"
+    poster = posterImg?.attr("data-src")?.takeIf { it.isNotBlank() }
+        ?: posterImg?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
+        ?: posterImg?.attr("src")?.takeIf { it.isNotBlank() }
 
-            val epNumText = el.selectFirst(".ep-num")?.text()
-            val parts = epNumText?.split("x")
+    if (poster.isNullOrBlank()) {
+        val styleAttr = doc.selectFirst(".detail-poster")?.attr("style") ?: ""
+        poster = Regex("""url\(['"]?([^'")]+)['"]?\)""")
+            .find(styleAttr)?.groupValues?.getOrNull(1)
+    }
 
-            val seasonFromUrl = Regex("""sezon-(\d+)""", RegexOption.IGNORE_CASE).find(epUrl)?.groupValues?.getOrNull(1)?.toIntOrNull()
-            val episodeFromUrl = Regex("""bolum-(\d+)""", RegexOption.IGNORE_CASE).find(epUrl)?.groupValues?.getOrNull(1)?.toIntOrNull()
-
-            val season = parts?.getOrNull(0)?.toIntOrNull() ?: seasonFromUrl
-            val episode = parts?.getOrNull(1)?.toIntOrNull() ?: episodeFromUrl
-
-            val epTitle = el.selectFirst("strong")?.text()?.trim() ?: "Bölüm ${episode ?: 1}"
-            val epPoster = el.selectFirst(".ep-thumb img")?.attr("src") ?: poster
-
-            newEpisode(epUrl) {
-                this.name = epTitle
-                this.season = season
-                this.episode = episode
-                this.posterUrl = epPoster
-            }
-        }
-
-        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
-            this.posterUrl = poster
-            this.plot = plot
-            this.year = year
-            this.tags = tags
+    // URL düzeltme
+    poster = poster?.let {
+        when {
+            it.startsWith("http") -> it
+            it.startsWith("//") -> "https:$it"
+            it.startsWith("/") -> "$mainUrl$it"
+            else -> "$mainUrl/$it"
         }
     }
+
+    val plot = doc.selectFirst("p.description")?.text()?.trim()
+
+    val year = doc.select(".meta-badges .badge").firstOrNull {
+        it.text().contains("20") || it.text().contains("19")
+    }?.text()?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
+
+    val tags = doc.select("a.badge-cat").map { it.text().trim() }
+
+    val episodes = doc.select(".episode-item").mapNotNull { el ->
+        val href = el.attr("href") ?: return@mapNotNull null
+        val epUrl = if (href.startsWith("http")) href else "$mainUrl$href"
+
+        val epNumText = el.selectFirst(".ep-num")?.text()
+        val parts = epNumText?.split("x")
+
+        val seasonFromUrl = Regex("""sezon-(\d+)""", RegexOption.IGNORE_CASE).find(epUrl)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val episodeFromUrl = Regex("""bolum-(\d+)""", RegexOption.IGNORE_CASE).find(epUrl)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+        val season = parts?.getOrNull(0)?.toIntOrNull() ?: seasonFromUrl
+        val episode = parts?.getOrNull(1)?.toIntOrNull() ?: episodeFromUrl
+
+        val epTitle = el.selectFirst("strong")?.text()?.trim() ?: "Bölüm ${episode ?: 1}"
+
+        // Bölüm posteri için de fallback
+        val epImg = el.selectFirst(".ep-thumb img")
+        val epPoster = epImg?.attr("data-src")?.takeIf { it.isNotBlank() }
+            ?: epImg?.attr("src")?.takeIf { it.isNotBlank() }
+            ?: poster
+
+        newEpisode(epUrl) {
+            this.name = epTitle
+            this.season = season
+            this.episode = episode
+            this.posterUrl = epPoster
+        }
+    }
+
+    return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+        this.posterUrl = poster
+        this.plot = plot
+        this.year = year
+        this.tags = tags
+    }
+}
 
     override suspend fun loadLinks(
         data: String,
