@@ -303,7 +303,7 @@ class OpenAnime : MainAPI() {
         return parseAnimeDetailFromHtml(url)
     }
 
-    private fun parseAnimeDetailFromJson(
+    private suspend fun parseAnimeDetailFromJson(
         raw: String,
         url: String,
         slug: String
