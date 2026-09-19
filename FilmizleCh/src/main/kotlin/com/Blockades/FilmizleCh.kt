@@ -1,13 +1,19 @@
-package com.Blockades
+package com.lagradost.cloudstream3.providers
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
+import org.jsoup.nodes.Document
 import org.json.JSONObject
+import org.json.JSONArray
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import java.net.URLDecoder
 
-class FilmizleCh : MainAPI() {
-    override var mainUrl = "https://filmizlech.org"
+class FilmizleChProvider : MainAPI() {
+    override var mainUrl = "https://filmizlech.com"
     override var name = "FilmizleCh"
     override var lang = "tr"
     override val hasMainPage = true
@@ -79,59 +85,18 @@ class FilmizleCh : MainAPI() {
     private fun Element.toSearchResult(): SearchResponse? {
         val href = attr("href") ?: return null
         val urlVal = if (href.startsWith("http")) href else "$mainUrl$href"
-
+        
+        // Exclude movies
         val isTv = urlVal.contains("/dizi/") || urlVal.contains("/anime/")
         if (!isTv) return null
 
-        val title = selectFirst(".cc-info strong")?.text()?.trim()
-            ?: selectFirst(".cc-title")?.text()?.trim()
-            ?: selectFirst("h3")?.text()?.trim()
-            ?: return null
-
-        // --- POSTER: Çoklu fallback ---
-        var posterUrl: String? = null
-
-        // 1. .cc-bg style içindeki background-image
+        val title = selectFirst(".cc-info strong")?.text()?.trim() ?: return null
+        
         val styleAttr = selectFirst(".cc-bg")?.attr("style") ?: ""
-        posterUrl = Regex("""url\(['"]?([^'")]+)['"]?\)""")
-            .find(styleAttr)?.groupValues?.getOrNull(1)
-
-        // 2. img src / data-src
-        if (posterUrl.isNullOrBlank()) {
-            val img = selectFirst(".cc-bg img")
-                ?: selectFirst("img.cc-img")
-                ?: selectFirst(".cc-poster img")
-                ?: selectFirst("img")
-            posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() }
-                ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
-                ?: img?.attr("src")?.takeIf { it.isNotBlank() }
-        }
-
-        // 3. data-bg / data-background
-        if (posterUrl.isNullOrBlank()) {
-            posterUrl = selectFirst(".cc-bg")?.attr("data-bg")?.takeIf { it.isNotBlank() }
-                ?: selectFirst(".cc-bg")?.attr("data-background")?.takeIf { it.isNotBlank() }
-        }
-
-        // 4. Tüm elementte style ara
-        if (posterUrl.isNullOrBlank()) {
-            val allStyle = attr("style")
-            posterUrl = Regex("""url\(['"]?([^'")]+)['"]?\)""")
-                .find(allStyle)?.groupValues?.getOrNull(1)
-        }
-
-        // URL düzeltme
-        posterUrl = posterUrl?.let {
-            when {
-                it.startsWith("http") -> it
-                it.startsWith("//") -> "https:$it"
-                it.startsWith("/") -> "$mainUrl$it"
-                else -> "$mainUrl/$it"
-            }
-        }
+        val posterUrl = Regex("""url\(['"]?([^'")]+)['"]?\)""").find(styleAttr)?.groupValues?.getOrNull(1)
 
         val rating = selectFirst(".cc-rating-inline")?.text()?.replace("★", "")?.trim()?.toDoubleOrNull()
-
+        
         return newTvSeriesSearchResponse(title, urlVal, TvType.TvSeries) {
             this.posterUrl = posterUrl
             rating?.takeIf { it > 0.0 }?.let {
@@ -167,39 +132,11 @@ class FilmizleCh : MainAPI() {
         val doc = Jsoup.parse(res.text)
 
         val title = doc.selectFirst("h1")?.text()?.trim() ?: doc.title().trim()
-
-        // --- POSTER: Çoklu fallback ---
-        var poster: String? = null
-
-        val posterImg = doc.selectFirst(".detail-poster img")
-            ?: doc.selectFirst("picture.poster-auto img")
-            ?: doc.selectFirst(".poster img")
-            ?: doc.selectFirst("img.poster")
-
-        poster = posterImg?.attr("data-src")?.takeIf { it.isNotBlank() }
-            ?: posterImg?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
-            ?: posterImg?.attr("src")?.takeIf { it.isNotBlank() }
-
-        if (poster.isNullOrBlank()) {
-            val styleAttr = doc.selectFirst(".detail-poster")?.attr("style") ?: ""
-            poster = Regex("""url\(['"]?([^'")]+)['"]?\)""")
-                .find(styleAttr)?.groupValues?.getOrNull(1)
-        }
-
-        // URL düzeltme
-        poster = poster?.let {
-            when {
-                it.startsWith("http") -> it
-                it.startsWith("//") -> "https:$it"
-                it.startsWith("/") -> "$mainUrl$it"
-                else -> "$mainUrl/$it"
-            }
-        }
-
+        val poster = doc.selectFirst(".detail-poster img")?.attr("src")
         val plot = doc.selectFirst("p.description")?.text()?.trim()
 
-        val year = doc.select(".meta-badges .badge").firstOrNull {
-            it.text().contains("20") || it.text().contains("19")
+        val year = doc.select(".meta-badges .badge").firstOrNull { 
+            it.text().contains("20") || it.text().contains("19") 
         }?.text()?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
 
         val tags = doc.select("a.badge-cat").map { it.text().trim() }
@@ -208,9 +145,9 @@ class FilmizleCh : MainAPI() {
             val href = el.attr("href") ?: return@mapNotNull null
             val epUrl = if (href.startsWith("http")) href else "$mainUrl$href"
 
-            val epNumText = el.selectFirst(".ep-num")?.text()
+            val epNumText = el.selectFirst(".ep-num")?.text() // e.g. "1x01"
             val parts = epNumText?.split("x")
-
+            
             val seasonFromUrl = Regex("""sezon-(\d+)""", RegexOption.IGNORE_CASE).find(epUrl)?.groupValues?.getOrNull(1)?.toIntOrNull()
             val episodeFromUrl = Regex("""bolum-(\d+)""", RegexOption.IGNORE_CASE).find(epUrl)?.groupValues?.getOrNull(1)?.toIntOrNull()
 
@@ -218,22 +155,7 @@ class FilmizleCh : MainAPI() {
             val episode = parts?.getOrNull(1)?.toIntOrNull() ?: episodeFromUrl
 
             val epTitle = el.selectFirst("strong")?.text()?.trim() ?: "Bölüm ${episode ?: 1}"
-
-            // Bölüm posteri için de fallback
-            val epImg = el.selectFirst(".ep-thumb img")
-            var epPoster = epImg?.attr("data-src")?.takeIf { it.isNotBlank() }
-                ?: epImg?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
-                ?: epImg?.attr("src")?.takeIf { it.isNotBlank() }
-                ?: poster
-
-            epPoster = epPoster?.let {
-                when {
-                    it.startsWith("http") -> it
-                    it.startsWith("//") -> "https:$it"
-                    it.startsWith("/") -> "$mainUrl$it"
-                    else -> "$mainUrl/$it"
-                }
-            }
+            val epPoster = el.selectFirst(".ep-thumb img")?.attr("src") ?: poster
 
             newEpisode(epUrl) {
                 this.name = epTitle
@@ -364,10 +286,11 @@ class FilmizleCh : MainAPI() {
                     streamUrl,
                     type = if (streamUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                 ) {
-                    headers = buildBrowserHeaders(subIframeUrl)
+                    headers = getBrowserHeaders(subIframeUrl)
                 }
             )
 
+            // Extract subtitles
             try {
                 val subtitleMatch = Regex(""""subtitle"\s*:\s*"([^"]+)"""").find(subIframeHtml)
                 if (subtitleMatch != null) {
@@ -393,12 +316,4 @@ class FilmizleCh : MainAPI() {
             false
         }
     }
-}
-
-// getBrowserHeaders projede bulunmadığı için burada tanımlıyoruz
-private fun buildBrowserHeaders(referer: String): Map<String, String> {
-    return mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Referer" to referer
-    )
 }
