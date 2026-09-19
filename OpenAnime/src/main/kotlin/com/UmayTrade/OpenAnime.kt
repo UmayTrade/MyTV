@@ -2,8 +2,6 @@ package com.UmayTrade
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.utils.AppUtils.parseJson
-import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
@@ -16,14 +14,6 @@ import java.net.URLEncoder
  *
  * Site: https://openani.me / https://openanime.org
  * Yapı: Next.js (Pages Router) tabanlı SPA
- *       - __NEXT_DATA__ script etiketi ile SSR verisi
- *       - /_next/data/{buildId}/... JSON endpoint'leri
- *       - /api/* API Route'ları
- *
- * Oynatıcılar:
- *   - Doğrudan HLS (.m3u8) — clear, DRM yok
- *   - Progressive MP4 (.mp4)
- *   - Harici embed: Vidmoly, Sibnet, Doodstream vb.
  */
 class OpenAnime : MainAPI() {
 
@@ -40,92 +30,85 @@ class OpenAnime : MainAPI() {
     )
 
     // -------------------------------------------------------------------------
-    // Sabitler ve Yardımcı Alanlar
+    // Sabitler
     // -------------------------------------------------------------------------
 
-    companion object {
-        private const val DOMAIN_CONFIG_URL =
-            "https://raw.githubusercontent.com/ulgenzade/ulgencs3/master/domains.json"
+    private val domainConfigUrl =
+        "https://raw.githubusercontent.com/ulgenzade/ulgencs3/master/domains.json"
 
-        private const val USER_AGENT =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-            "AppleWebKit/537.36 (KHTML, like Gecko) " +
-            "Chrome/120.0.0.0 Safari/537.36"
+    private val userAgent =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+        "AppleWebKit/537.36 (KHTML, like Gecko) " +
+        "Chrome/120.0.0.0 Safari/537.36"
 
-        private const val NEXT_DATA_SELECTOR = "script#__NEXT_DATA__"
+    private val nextDataSelector = "script#__NEXT_DATA__"
 
-        // Reklam domainleri — filtrelenir
-        private val AD_DOMAINS = setOf(
-            "a-ads.com",
-            "googlesyndication.com",
-            "doubleclick.net",
-            "adservice.google.com"
-        )
-    }
+    private val adDomains = setOf(
+        "a-ads.com",
+        "googlesyndication.com",
+        "doubleclick.net",
+        "adservice.google.com"
+    )
 
-    private val commonHeaders: Map<String, String>
-        get() = mapOf(
-            "User-Agent" to USER_AGENT,
-            "Referer" to "$mainUrl/",
-            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8"
-        )
+    // -------------------------------------------------------------------------
+    // Header yardımcıları
+    // -------------------------------------------------------------------------
 
-    private val jsonHeaders: Map<String, String>
-        get() = commonHeaders + mapOf(
-            "Accept" to "application/json, text/plain, */*",
-            "X-Requested-With" to "XMLHttpRequest"
-        )
+    private fun commonHeaders(): Map<String, String> = mapOf(
+        "User-Agent" to userAgent,
+        "Referer" to "$mainUrl/",
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8"
+    )
 
-    // Init kilidi — race condition önler
+    private fun jsonHeaders(): Map<String, String> = commonHeaders() + mapOf(
+        "Accept" to "application/json, text/plain, */*",
+        "X-Requested-With" to "XMLHttpRequest"
+    )
+
+    // -------------------------------------------------------------------------
+    // Init
+    // -------------------------------------------------------------------------
+
     private val initMutex = Mutex()
+
+    @Volatile
+    private var isInitialized = false
+
     private var nextBuildId: String? = null
-    @Volatile private var isInitialized = false
 
-    // -------------------------------------------------------------------------
-    // Başlatma
-    // -------------------------------------------------------------------------
-
-    /**
-     * Domain config'ini çeker ve Next.js buildId'sini alır.
-     * Thread-safe; başarısız olursa tekrar denenebilir.
-     */
     private suspend fun ensureInit() {
         if (isInitialized) return
         initMutex.withLock {
             if (isInitialized) return
             try {
-                // 1. Dinamik domain güncellemesi
                 runCatching {
-                    val config = app.get(DOMAIN_CONFIG_URL).text
+                    val config = app.get(domainConfigUrl).text
                     JSONObject(config)
                         .optString("openanime")
-                        ?.takeIf { it.isNotBlank() }
+                        .takeIf { it.isNotBlank() }
                         ?.let { mainUrl = it.trimEnd('/') }
                 }
 
-                // 2. Next.js buildId'sini al
                 runCatching {
-                    val doc = app.get(mainUrl, headers = commonHeaders).document
+                    val doc = app.get(mainUrl, headers = commonHeaders()).document
                     nextBuildId = extractBuildId(doc)
                 }
 
                 isInitialized = true
             } catch (_: Exception) {
-                // init başarısız — bir sonraki çağrıda tekrar denenir
+                // init başarısız — sonraki çağrıda tekrar denenir
             }
         }
     }
 
-    /** __NEXT_DATA__ içinden buildId çıkarır. */
     private fun extractBuildId(doc: Document): String? {
-        val raw = doc.selectFirst(NEXT_DATA_SELECTOR)?.data() ?: return null
+        val raw = doc.selectFirst(nextDataSelector)?.data() ?: return null
         return runCatching {
             JSONObject(raw).optString("buildId").takeIf { it.isNotBlank() }
         }.getOrNull()
     }
 
-    /** Next.js data endpoint URL'i üretir. */
     private fun nextApiUrl(path: String): String {
         val cleanPath = path.trimStart('/')
         val bid = nextBuildId
@@ -136,22 +119,20 @@ class OpenAnime : MainAPI() {
         }
     }
 
-    /** URL encode yardımcı fonksiyonu. */
     private fun String.urlEncode(): String =
         URLEncoder.encode(this, "UTF-8")
 
-    /** Reklam URL'i mi? */
     private fun String.isAdUrl(): Boolean =
-        AD_DOMAINS.any { contains(it, ignoreCase = true) }
+        adDomains.any { contains(it, ignoreCase = true) }
 
     // -------------------------------------------------------------------------
     // Ana Sayfa
     // -------------------------------------------------------------------------
 
     override val mainPage = mainPageOf(
-        "/explore"  to "Son Bölümler",
-        "/popular"  to "Popüler Animeler",
-        "/all"      to "Tüm Animeler"
+        "/explore" to "Son Bölümler",
+        "/popular" to "Popüler Animeler",
+        "/all"     to "Tüm Animeler"
     )
 
     override suspend fun getMainPage(
@@ -161,20 +142,18 @@ class OpenAnime : MainAPI() {
         ensureInit()
         val items = mutableListOf<SearchResponse>()
 
-        // Önce Next.js data endpoint'i dene
         val nextUrl = "${nextApiUrl(request.data)}?page=$page"
         val jsonItems = runCatching {
-            val resp = app.get(nextUrl, headers = jsonHeaders).text
+            val resp = app.get(nextUrl, headers = jsonHeaders()).text
             parseAnimeListFromJson(resp)
         }.getOrNull()
 
         if (!jsonItems.isNullOrEmpty()) {
             items.addAll(jsonItems)
         } else {
-            // Fallback: HTML scraping
             val htmlUrl = "$mainUrl${request.data}?page=$page"
             val doc = runCatching {
-                app.get(htmlUrl, headers = commonHeaders).document
+                app.get(htmlUrl, headers = commonHeaders()).document
             }.getOrNull()
 
             if (doc != null) {
@@ -188,7 +167,6 @@ class OpenAnime : MainAPI() {
         )
     }
 
-    /** Next.js data endpoint'inden anime listesi çıkarır. */
     private fun parseAnimeListFromJson(raw: String): List<SearchResponse> {
         val json = runCatching { JSONObject(raw) }.getOrNull() ?: return emptyList()
         val props = json.optJSONObject("pageProps") ?: return emptyList()
@@ -224,7 +202,6 @@ class OpenAnime : MainAPI() {
         return result
     }
 
-    /** HTML'den anime listesi çıkarır (fallback). */
     private fun parseAnimeListFromHtml(doc: Document): List<SearchResponse> {
         val selectors = listOf(
             "div.anime-card",
@@ -256,19 +233,17 @@ class OpenAnime : MainAPI() {
         ensureInit()
         if (query.isBlank()) return emptyList()
 
-        // 1. API endpoint
         val apiUrl = "$mainUrl/api/search?q=${query.urlEncode()}"
         val apiItems = runCatching {
-            val resp = app.get(apiUrl, headers = jsonHeaders).text
+            val resp = app.get(apiUrl, headers = jsonHeaders()).text
             parseSearchFromJson(resp)
         }.getOrNull()
 
         if (!apiItems.isNullOrEmpty()) return apiItems
 
-        // 2. HTML fallback
         val htmlUrl = "$mainUrl/search?q=${query.urlEncode()}"
         val doc = runCatching {
-            app.get(htmlUrl, headers = commonHeaders).document
+            app.get(htmlUrl, headers = commonHeaders()).document
         }.getOrNull() ?: return emptyList()
 
         return parseAnimeListFromHtml(doc)
@@ -307,7 +282,7 @@ class OpenAnime : MainAPI() {
     }
 
     // -------------------------------------------------------------------------
-    // Detay & Bölümler
+    // Detay
     // -------------------------------------------------------------------------
 
     override suspend fun load(url: String): LoadResponse {
@@ -315,10 +290,9 @@ class OpenAnime : MainAPI() {
 
         val slug = url.substringAfterLast("/").substringBefore("?")
 
-        // 1. Next.js data endpoint
         val jsonResp = runCatching {
             val apiUrl = nextApiUrl("/anime/$slug")
-            app.get(apiUrl, headers = jsonHeaders).text
+            app.get(apiUrl, headers = jsonHeaders()).text
         }.getOrNull()
 
         if (!jsonResp.isNullOrBlank()) {
@@ -326,7 +300,6 @@ class OpenAnime : MainAPI() {
             if (parsed != null) return parsed
         }
 
-        // 2. HTML fallback
         return parseAnimeDetailFromHtml(url)
     }
 
@@ -338,7 +311,6 @@ class OpenAnime : MainAPI() {
         val json = runCatching { JSONObject(raw) }.getOrNull() ?: return null
         val props = json.optJSONObject("pageProps") ?: return null
 
-        // pageProps.anime veya pageProps.data.anime veya doğrudan pageProps
         val anime = props.optJSONObject("anime")
             ?: props.optJSONObject("data")?.optJSONObject("anime")
             ?: props
@@ -406,9 +378,9 @@ class OpenAnime : MainAPI() {
         }
     }
 
-    private fun parseAnimeDetailFromHtml(url: String): LoadResponse {
+    private suspend fun parseAnimeDetailFromHtml(url: String): LoadResponse {
         val doc = runCatching {
-            app.get(url, headers = commonHeaders).document
+            app.get(url, headers = commonHeaders()).document
         }.getOrNull() ?: return newAnimeLoadResponse("Bilinmeyen Anime", url, TvType.Anime) {}
 
         val title = doc.selectFirst("h1, h2.anime-title, .anime-title h1")
@@ -428,14 +400,14 @@ class OpenAnime : MainAPI() {
             .map { it.text().trim() }
             .filter { it.isNotBlank() }
 
+        val slug = url.substringAfterLast("/")
         val episodeElements = doc.select(
             "ul.episodes li a, " +
             "div.episode-list a, " +
-            "a[href*='/anime/$url']"
+            "a[href*='/anime/$slug/']"
         )
 
         val episodes = mutableListOf<Episode>()
-        val slug = url.substringAfterLast("/")
         val seen = mutableSetOf<String>()
 
         episodeElements.forEach { el ->
@@ -467,12 +439,29 @@ class OpenAnime : MainAPI() {
         }
     }
 
-    /** Bölüm başlığından "1. Bölüm", "Bölüm 1" gibi önekleri temizler. */
     private fun cleanEpisodeTitle(raw: String, epNum: Int): String? {
         val cleaned = raw
-            .replace(Regex("""^\s*\d+\s*[\.\-–:]?\s*Bölüm\s*[:\-–]?\s*""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""^\s*Bölüm\s*\d+\s*[:\-–]?\s*""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""^\s*Episode\s*\d+\s*[:\-–]?\s*""", RegexOption.IGNORE_CASE), "")
+            .replace(
+                Regex(
+                    """^\s*\d+\s*[\.\-–:]?\s*Bölüm\s*[:\-–]?\s*""",
+                    RegexOption.IGNORE_CASE
+                ),
+                ""
+            )
+            .replace(
+                Regex(
+                    """^\s*Bölüm\s*\d+\s*[:\-–]?\s*""",
+                    RegexOption.IGNORE_CASE
+                ),
+                ""
+            )
+            .replace(
+                Regex(
+                    """^\s*Episode\s*\d+\s*[:\-–]?\s*""",
+                    RegexOption.IGNORE_CASE
+                ),
+                ""
+            )
             .trim()
 
         return cleaned.takeIf {
@@ -484,7 +473,7 @@ class OpenAnime : MainAPI() {
     }
 
     // -------------------------------------------------------------------------
-    // Video Bağlantıları
+    // Video Linkleri
     // -------------------------------------------------------------------------
 
     override suspend fun loadLinks(
@@ -496,24 +485,21 @@ class OpenAnime : MainAPI() {
         ensureInit()
 
         val doc = runCatching {
-            app.get(data, headers = commonHeaders).document
+            app.get(data, headers = commonHeaders()).document
         }.getOrNull() ?: return false
 
         val extractedUrls = mutableSetOf<String>()
 
-        // 1. __NEXT_DATA__ içindeki video kaynakları
-        val nextDataText = doc.selectFirst(NEXT_DATA_SELECTOR)?.data()
+        val nextDataText = doc.selectFirst(nextDataSelector)?.data()
         if (!nextDataText.isNullOrBlank()) {
             processNextDataSources(nextDataText, subtitleCallback, callback, extractedUrls)
         }
 
-        // 2. Iframe / data-* öznitelikleri
         processIframeSources(doc, subtitleCallback, callback, extractedUrls)
 
         return extractedUrls.isNotEmpty()
     }
 
-    /** __NEXT_DATA__ içindeki sources/videos/players dizilerini işler. */
     private suspend fun processNextDataSources(
         raw: String,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -522,7 +508,6 @@ class OpenAnime : MainAPI() {
     ) {
         val json = runCatching { JSONObject(raw) }.getOrNull() ?: return
 
-        // Next.js Pages Router: props.pageProps
         val pageProps = json.optJSONObject("props")?.optJSONObject("pageProps")
             ?: json.optJSONObject("pageProps")
             ?: return
@@ -548,7 +533,6 @@ class OpenAnime : MainAPI() {
         }
     }
 
-    /** Sayfadaki iframe ve data-video özniteliklerini işler. */
     private suspend fun processIframeSources(
         doc: Document,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -577,7 +561,6 @@ class OpenAnime : MainAPI() {
         }
     }
 
-    /** Bir kaynağı tipine göre callback'e gönderir. */
     private suspend fun emitSource(
         url: String,
         label: String,
@@ -597,7 +580,7 @@ class OpenAnime : MainAPI() {
                     ) {
                         this.quality = parseQuality(label)
                         this.referer = "$mainUrl/"
-                        this.headers = commonHeaders
+                        this.headers = commonHeaders()
                     }
                 )
             }
@@ -612,19 +595,17 @@ class OpenAnime : MainAPI() {
                     ) {
                         this.quality = parseQuality(label)
                         this.referer = "$mainUrl/"
-                        this.headers = commonHeaders
+                        this.headers = commonHeaders()
                     }
                 )
             }
 
             else -> {
-                // Harici embed — extractor'a devret
                 loadExtractor(url, "$mainUrl/", subtitleCallback, callback)
             }
         }
     }
 
-    /** Etiketten kalite değeri çıkarır. */
     private fun parseQuality(label: String): Int {
         val l = label.lowercase()
         return when {
@@ -644,7 +625,6 @@ class OpenAnime : MainAPI() {
     // -------------------------------------------------------------------------
 
     private fun Element.toSearchResult(): SearchResponse? {
-        // Kart içindeki link
         val a = selectFirst("a[href*='/anime/']")
             ?: selectFirst("a")
             ?: return null
