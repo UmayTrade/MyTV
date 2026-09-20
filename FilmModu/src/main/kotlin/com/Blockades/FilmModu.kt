@@ -1,6 +1,6 @@
 package com.Blockades
 
-import com.aethelon.network.CommonHeaders
+import com.Blockades.CommonHeaders
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
