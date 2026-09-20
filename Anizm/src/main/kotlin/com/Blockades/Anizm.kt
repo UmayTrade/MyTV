@@ -13,7 +13,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-class AnizmProvider : MainAPI() {
+class Anizm : MainAPI() {
 
     override var mainUrl = "https://anizm.com.tr"
     override var name = "Anizm"
