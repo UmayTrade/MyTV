@@ -1,4 +1,4 @@
-package com.aethelon.network
+package com.keyiflerolsun
 
 /**
  * Standard User-Agent, Referer, and Anti-Hotlinking Headers for Aethelon-TV.
