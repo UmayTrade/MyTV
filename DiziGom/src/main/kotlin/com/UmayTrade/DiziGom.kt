@@ -1,4 +1,5 @@
 package com.UmayTrade
+
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
@@ -77,7 +78,10 @@ class DiziGom : MainAPI() {
         val document = app.get(url).document
 
         val rawTitle = document.selectFirst("h1")?.text()?.trim() ?: return null
-        val title = rawTitle.substringBefore(" izle -").trim().ifBlank { rawTitle }
+        val title = rawTitle
+            .replace(Regex("""\s*[-–]?\s*izle.*$""", RegexOption.IGNORE_CASE), "")
+            .trim()
+            .ifBlank { rawTitle }
 
         val poster = fixUrlNull(document.selectFirst("meta[property=og:image]")?.attr("content"))
         val description = document.selectFirst("meta[name=description]")?.attr("content")?.trim()
@@ -117,15 +121,41 @@ class DiziGom : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
         val document = app.get(data).document
-        val iframeSrc = document.selectFirst("iframe")?.attr("src")?.ifBlank { null } ?: return false
+        val iframes = document.select("iframe[src]")
 
-        return try {
-            loadExtractor(fixUrl(iframeSrc), data, subtitleCallback, callback)
-            true
-        } catch (e: Exception) {
-            false
+        if (iframes.isEmpty()) {
+            // Bazı sayfalarda iframe yerine doğrudan embed link olabilir
+            val embedLink = document.selectFirst("a[href*='embed'], a[href*='player']")
+                ?.attr("href")
+                ?.ifBlank { null }
+            if (embedLink != null) {
+                return try {
+                    loadExtractor(fixUrl(embedLink), data, subtitleCallback, callback)
+                    true
+                } catch (e: Exception) {
+                    false
+                }
+            }
+            return false
         }
+
+        var found = false
+        iframes.forEach { iframe ->
+            val src = iframe.attr("src").ifBlank { null } ?: return@forEach
+            try {
+                loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+                found = true
+            } catch (_: Exception) {
+                // Bu iframe başarısız oldu, sıradakini dene
+            }
+        }
+        return found
     }
 }
