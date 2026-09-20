@@ -33,7 +33,7 @@ class FilmModu : MainAPI() {
         isInitialized = true
         try {
             val config = app.get(
-                "https://raw.githubusercontent.com/ulgenzade/ulgencs3/master/domains.json"
+                "https://raw.githubusercontent.com/UmayTrade/MyTV/refs/heads/master/domains.json"
             ).text
             org.json.JSONObject(config).optString("filmmodu")
                 ?.takeIf { it.isNotBlank() }?.let { mainUrl = it }
