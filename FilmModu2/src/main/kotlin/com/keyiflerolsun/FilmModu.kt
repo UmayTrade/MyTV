@@ -14,7 +14,7 @@ class FilmModu : MainAPI() {
     override var mainUrl: String
         get() = "https://www.filmmodu.live"
         set(_) {}
-    override var name = "FilmModu"
+    override var name = "FilmModu2"
     override val hasMainPage = true
     override var lang = "tr"
     override val hasQuickSearch = false
