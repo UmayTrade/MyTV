@@ -115,62 +115,55 @@ class FilmModu : MainAPI() {
     }
 
     override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        ensureInit()
-        val doc = app.get(data, headers = commonHeaders).document
+    data: String,
+    isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
+    ensureInit()
+    val doc = app.get(data, headers = commonHeaders).document
 
-        doc.select("div.alternates a").forEach { alternate ->
-            val altLink = fixUrlNull(alternate.attr("href")) ?: return@forEach
-            val altName = alternate.text().trim()
-            if (altName.equals("Fragman", ignoreCase = true)) return@forEach
+    doc.select("div.alternates a").forEach { alternate ->
+        val altLink = fixUrlNull(alternate.attr("href")) ?: return@forEach
+        val altName = alternate.text().trim()
+        if (altName.equals("Fragman", ignoreCase = true)) return@forEach
 
-            val altReq = app.get(altLink, headers = commonHeaders)
-            val vidId = Regex("""var videoId = '(.*)'""").find(altReq.text)?.groupValues?.get(1) ?: return@forEach
-            val vidType = Regex("""var videoType = '(.*)'""").find(altReq.text)?.groupValues?.get(1) ?: return@forEach
+        val altReq = app.get(altLink, headers = commonHeaders)
+        val vidId = Regex("""var videoId = '(.*)'""").find(altReq.text)?.groupValues?.get(1) ?: return@forEach
+        val vidType = Regex("""var videoType = '(.*)'""").find(altReq.text)?.groupValues?.get(1) ?: return@forEach
 
-            val vidReq = app.get(
-                "$mainUrl/get-source?movie_id=$vidId&type=$vidType",
-                headers = commonHeaders
-            ).parsedSafe<GetSource>() ?: return@forEach
+        val vidReq = app.get(
+            "$mainUrl/get-source?movie_id=$vidId&type=$vidType",
+            headers = commonHeaders
+        ).parsedSafe<GetSource>() ?: return@forEach
 
-            if (vidReq.subtitle != null) {
-                subtitleCallback(
-                    SubtitleFile(
-                        lang = "Türkçe",
-                        url = fixUrl(vidReq.subtitle)
-                    )
+        vidReq.subtitle?.let { sub ->
+            subtitleCallback(
+                SubtitleFile(
+                    lang = "Türkçe",
+                    url = fixUrl(sub)
                 )
-            }
-
-            vidReq.sources?.forEach { source ->
-                callback(
-                    newExtractorLink(
-                        source = "$name - $altName",
-                        name = "$name - $altName",
-                        url = fixUrl(source.src),
-                        type = ExtractorLinkType.M3U8
-                    ) {
-                        headers = mapOf("Referer" to "$mainUrl/")
-                        quality = getQualityFromName(source.label)
-                    }
-                )
-            }
+            )
         }
 
-        return true
+        vidReq.sources?.forEach { source ->
+            val srcUrl = source.src ?: return@forEach
+            callback(
+                newExtractorLink(
+                    source = "$name - $altName",
+                    name = "$name - $altName",
+                    url = fixUrl(srcUrl),
+                    type = ExtractorLinkType.M3U8
+                ) {
+                    headers = mapOf("Referer" to "$mainUrl/")
+                    quality = getQualityFromName(source.label)
+                }
+            )
+        }
     }
+
+    return true
+ }
 }
 
-data class GetSource(
-    @JsonProperty("sources") val sources: List<Source>? = null,
-    @JsonProperty("subtitle") val subtitle: String? = null
-)
 
-data class Source(
-    @JsonProperty("src") val src: String? = null,
-    @JsonProperty("label") val label: String? = null
-)
