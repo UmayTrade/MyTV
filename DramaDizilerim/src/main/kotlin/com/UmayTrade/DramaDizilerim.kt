@@ -125,83 +125,92 @@ class DramaDizilerim : MainAPI() {
     }
 
     override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        var found = false
-        val document = app.get(data).document
+    data: String,
+    isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
+    var found = false
+    val document = app.get(data).document
 
-        // Look for embed.php data-src in watch page
-        val embedUrls = mutableListOf<String>()
-        document.select("div[data-src*='embed.php'], [data-src*='embed']").forEach {
-            val src = fixUrlNull(it.attr("data-src"))
-            if (!src.isNullOrBlank()) {
-                embedUrls.add(src)
-            }
+    // Collect embed URLs from data-src attributes and iframes
+    val embedUrls = mutableListOf<String>()
+    document.select("div[data-src*='embed.php'], [data-src*='embed']").forEach {
+        val src = fixUrlNull(it.attr("data-src"))
+        if (!src.isNullOrBlank()) {
+            embedUrls.add(src)
         }
-
-        document.select("iframe[src]").forEach {
-            val src = fixUrlNull(it.attr("src"))
-            if (!src.isNullOrBlank()) {
-                embedUrls.add(src)
-            }
-        }
-
-        val candidates = embedUrls.distinct()
-
-        val count = BoundedParallelResolver.resolveProgressive(
-            candidates = candidates,
-            resolver = { embedUrl, emitLink ->
-                try {
-                    val embedDoc = app.get(embedUrl, headers = mapOf("Referer" to data)).document
-                    val html = embedDoc.html()
-
-                    // Extract direct video source
-                    val sourceRegex = Regex("""let\s+source\s*=\s*["']([^"']+)["']""")
-                    val sourceMatch = sourceRegex.find(html)
-                    val rawVideoUrl = sourceMatch?.groupValues?.getOrNull(1)
-
-                    if (!rawVideoUrl.isNullOrBlank()) {
-                        val preflight = StreamValidator.validateStream(rawVideoUrl, mapOf("Referer" to embedUrl), name)
-                        if (preflight.isValid) {
-                            val typeTag = if (preflight.streamType == ExtractorLinkType.M3U8) "HLS" else "MP4"
-                            emitLink(
-                                newExtractorLink(
-                                    source = name,
-                                    name = "$name $typeTag",
-                                    url = rawVideoUrl,
-                                    type = preflight.streamType
-                                ) {
-                                    this.referer = embedUrl
-                                    this.quality = Qualities.Unknown.value
-                                }
-                            )
-                        }
-                    }
-
-                    // Extract subtitles
-                    val subRegex = Regex("""<track[^>]+src=["']([^"']+)["']""")
-                    subRegex.findAll(html).forEach { subMatch ->
-                        val subUrl = fixUrlNull(subMatch.groupValues[1])
-                        if (!subUrl.isNullOrBlank()) {
-                            subtitleCallback(
-                                newSubtitleFile(
-                                    lang = "tr",
-                                    url = subUrl
-                                )
-                            )
-                        }
-                    }
-                } catch (_: Exception) {}
-            },
-            onLinkFound = { link ->
-                callback(link)
-                found = true
-            }
-        )
-
-        return found || count > 0
     }
+
+    document.select("iframe[src]").forEach {
+        val src = fixUrlNull(it.attr("src"))
+        if (!src.isNullOrBlank()) {
+            embedUrls.add(src)
+        }
+    }
+
+    val candidates = embedUrls.distinct()
+
+    val results = candidates.amap { embedUrl ->
+        val links = mutableListOf<ExtractorLink>()
+        val subs = mutableListOf<SubtitleFile>()
+        try {
+            val embedDoc = app.get(embedUrl, headers = mapOf("Referer" to data)).document
+            val html = embedDoc.html()
+
+            // Extract direct video source
+            val sourceRegex = Regex("""let\s+source\s*=\s*["']([^"']+)["']""")
+            val sourceMatch = sourceRegex.find(html)
+            val rawVideoUrl = sourceMatch?.groupValues?.getOrNull(1)
+
+            if (!rawVideoUrl.isNullOrBlank()) {
+                val preflight = StreamValidator.validateStream(
+                    rawVideoUrl,
+                    mapOf("Referer" to embedUrl),
+                    name
+                )
+                if (preflight.isValid) {
+                    val typeTag = if (preflight.streamType == ExtractorLinkType.M3U8) "HLS" else "MP4"
+                    links.add(
+                        newExtractorLink(
+                            source = name,
+                            name = "$name $typeTag",
+                            url = rawVideoUrl,
+                            type = preflight.streamType
+                        ) {
+                            this.referer = embedUrl
+                            this.quality = Qualities.Unknown.value
+                        }
+                    )
+                }
+            }
+
+            // Extract subtitles
+            val subRegex = Regex("""<track[^>]+src=["']([^"']+)["']""")
+            subRegex.findAll(html).forEach { subMatch ->
+                val subUrl = fixUrlNull(subMatch.groupValues[1])
+                if (!subUrl.isNullOrBlank()) {
+                    subs.add(
+                        newSubtitleFile(
+                            lang = "tr",
+                            url = subUrl
+                        )
+                    )
+                }
+            }
+        } catch (_: Exception) {
+        }
+        links to subs
+    }
+
+    results.forEach { (links, subs) ->
+        subs.forEach { subtitleCallback(it) }
+        links.forEach {
+            callback(it)
+            found = true
+        }
+    }
+
+    return found
 }
+
