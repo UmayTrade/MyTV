@@ -6,7 +6,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.runBlocking
 
 object RemoteConfig {
-    private const val DOMAINS_URL = "https://raw.githubusercontent.com/neoser1984/cloudstream-extensions/main/domains.json"
+    private const val DOMAINS_URL = "https://raw.githubusercontent.com/UmayTrade/MyTV/refs/heads/master/domains.json"
 
     private var cache: Map<String, String>? = null
 
