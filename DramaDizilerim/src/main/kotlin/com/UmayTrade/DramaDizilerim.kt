@@ -2,9 +2,6 @@ package com.UmayTrade
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.cloudstream.tr.core.concurrency.BoundedParallelResolver
-import com.cloudstream.tr.core.model.ProviderModels
-import com.cloudstream.tr.core.network.StreamValidator
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
@@ -34,7 +31,8 @@ class DramaDizilerim : MainAPI() {
     }
 
     fun toSearchResult(element: Element): SearchResponse? {
-        val link = if (element.tagName() == "a") element else element.selectFirst("a[href*='/dizi/']") ?: return null
+        val link = if (element.tagName() == "a") element
+            else element.selectFirst("a[href*='/dizi/']") ?: return null
         val href = fixUrlNull(link.attr("href")) ?: return null
         if (!href.contains("/dizi/")) return null
 
@@ -70,7 +68,8 @@ class DramaDizilerim : MainAPI() {
     fun parseSearchResults(document: Document): List<SearchResponse> {
         val elements = document.select("a[href*='/dizi/']")
         val results = elements.mapNotNull { toSearchResult(it) }
-        return ProviderModels.dedupSearchResults(results)
+        // Standard deduplication by URL
+        return results.distinctBy { it.url }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query, 1).items
@@ -125,92 +124,76 @@ class DramaDizilerim : MainAPI() {
     }
 
     override suspend fun loadLinks(
-    data: String,
-    isCasting: Boolean,
-    subtitleCallback: (SubtitleFile) -> Unit,
-    callback: (ExtractorLink) -> Unit
-): Boolean {
-    var found = false
-    val document = app.get(data).document
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        var found = false
+        val document = app.get(data).document
 
-    // Collect embed URLs from data-src attributes and iframes
-    val embedUrls = mutableListOf<String>()
-    document.select("div[data-src*='embed.php'], [data-src*='embed']").forEach {
-        val src = fixUrlNull(it.attr("data-src"))
-        if (!src.isNullOrBlank()) {
-            embedUrls.add(src)
+        // Collect embed URLs from data-src attributes and iframes
+        val embedUrls = mutableListOf<String>()
+        document.select("div[data-src*='embed.php'], [data-src*='embed']").forEach {
+            val src = fixUrlNull(it.attr("data-src"))
+            if (!src.isNullOrBlank()) {
+                embedUrls.add(src)
+            }
         }
-    }
 
-    document.select("iframe[src]").forEach {
-        val src = fixUrlNull(it.attr("src"))
-        if (!src.isNullOrBlank()) {
-            embedUrls.add(src)
+        document.select("iframe[src]").forEach {
+            val src = fixUrlNull(it.attr("src"))
+            if (!src.isNullOrBlank()) {
+                embedUrls.add(src)
+            }
         }
-    }
 
-    val candidates = embedUrls.distinct()
+        val candidates = embedUrls.distinct()
 
-    val results = candidates.amap { embedUrl ->
-        val links = mutableListOf<ExtractorLink>()
-        val subs = mutableListOf<SubtitleFile>()
-        try {
-            val embedDoc = app.get(embedUrl, headers = mapOf("Referer" to data)).document
-            val html = embedDoc.html()
+        for (embedUrl in candidates) {
+            try {
+                val embedDoc = app.get(embedUrl, headers = mapOf("Referer" to data)).document
+                val html = embedDoc.html()
 
-            // Extract direct video source
-            val sourceRegex = Regex("""let\s+source\s*=\s*["']([^"']+)["']""")
-            val sourceMatch = sourceRegex.find(html)
-            val rawVideoUrl = sourceMatch?.groupValues?.getOrNull(1)
+                // Extract direct video source: let source = "..."
+                val sourceRegex = Regex("""let\s+source\s*=\s*["']([^"']+)["']""")
+                val rawVideoUrl = sourceRegex.find(html)?.groupValues?.getOrNull(1)
 
-            if (!rawVideoUrl.isNullOrBlank()) {
-                val preflight = StreamValidator.validateStream(
-                    rawVideoUrl,
-                    mapOf("Referer" to embedUrl),
-                    name
-                )
-                if (preflight.isValid) {
-                    val typeTag = if (preflight.streamType == ExtractorLinkType.M3U8) "HLS" else "MP4"
-                    links.add(
+                if (!rawVideoUrl.isNullOrBlank()) {
+                    val videoUrl = fixUrlNull(rawVideoUrl) ?: rawVideoUrl
+                    val isM3u8 = videoUrl.contains(".m3u8", ignoreCase = true)
+                    callback(
                         newExtractorLink(
                             source = name,
-                            name = "$name $typeTag",
-                            url = rawVideoUrl,
-                            type = preflight.streamType
+                            name = "$name ${if (isM3u8) "HLS" else "MP4"}",
+                            url = videoUrl,
+                            type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                         ) {
                             this.referer = embedUrl
                             this.quality = Qualities.Unknown.value
                         }
                     )
+                    found = true
                 }
-            }
 
-            // Extract subtitles
-            val subRegex = Regex("""<track[^>]+src=["']([^"']+)["']""")
-            subRegex.findAll(html).forEach { subMatch ->
-                val subUrl = fixUrlNull(subMatch.groupValues[1])
-                if (!subUrl.isNullOrBlank()) {
-                    subs.add(
-                        newSubtitleFile(
-                            lang = "tr",
-                            url = subUrl
+                // Extract subtitles from <track src="...">
+                val subRegex = Regex("""<track[^>]+src=["']([^"']+)["']""")
+                subRegex.findAll(html).forEach { subMatch ->
+                    val subUrl = fixUrlNull(subMatch.groupValues[1])
+                    if (!subUrl.isNullOrBlank()) {
+                        subtitleCallback(
+                            newSubtitleFile(
+                                lang = "tr",
+                                url = subUrl
+                            )
                         )
-                    )
+                    }
                 }
+            } catch (_: Exception) {
+                // ignore this embed and continue
             }
-        } catch (_: Exception) {
         }
-        links to subs
-    }
 
-    results.forEach { (links, subs) ->
-        subs.forEach { subtitleCallback(it) }
-        links.forEach {
-            callback(it)
-            found = true
-        }
+        return found
     }
-
-    return found
 }
-
