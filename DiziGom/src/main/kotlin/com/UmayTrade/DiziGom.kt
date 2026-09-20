@@ -4,7 +4,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 
 class DiziGom : MainAPI() {
-    override var mainUrl              = RemoteConfig.getDomain("dizigom", "https://www.dizigom.biz")
+    override var mainUrl              = RemoteConfig.getDomain("dizigom", "https://www.dizigom.icu")
     override var name                 = "DiziGom"
     override val hasMainPage          = true
     override var lang                 = "tr"
