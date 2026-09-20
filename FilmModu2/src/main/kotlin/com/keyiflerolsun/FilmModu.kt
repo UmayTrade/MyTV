@@ -3,24 +3,9 @@
 package com.keyiflerolsun
 
 import android.util.Log
-import com.lagradost.cloudstream3.Actor
-import com.lagradost.cloudstream3.HomePageResponse
-import com.lagradost.cloudstream3.LoadResponse
+import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
-import com.lagradost.cloudstream3.MainAPI
-import com.lagradost.cloudstream3.MainPageRequest
-import com.lagradost.cloudstream3.Score
-import com.lagradost.cloudstream3.SearchResponse
-import com.lagradost.cloudstream3.SubtitleFile
-import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.app
-import com.lagradost.cloudstream3.fixUrl
-import com.lagradost.cloudstream3.fixUrlNull
-import com.lagradost.cloudstream3.mainPageOf
-import com.lagradost.cloudstream3.newHomePageResponse
-import com.lagradost.cloudstream3.newMovieLoadResponse
-import com.lagradost.cloudstream3.newMovieSearchResponse
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.getQualityFromName
@@ -65,16 +50,14 @@ class FilmModu : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get("${request.data}?page=${page}").document
+        val document = app.get("${request.data}?page=$page").document
         val home = document.select("a.group.block").mapNotNull { it.toMainPageResult() }
         return newHomePageResponse(request.name, home)
     }
 
     private fun Element.toMainPageResult(): SearchResponse? {
         val href = fixUrlNull(this.attr("href")) ?: return null
-        // Bölüm linklerini atla
         if (href.contains("/sezon-") || href.contains("/bolum-")) return null
-        // Reklam / harici linkleri atla
         if (!href.startsWith(mainUrl)) return null
 
         val title = this.selectFirst("h3")?.text()?.trim() ?: return null
@@ -94,7 +77,7 @@ class FilmModu : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("${mainUrl}/ara?q=${query}").document
+        val document = app.get("${mainUrl}/ara?q=$query").document
         return document.select("a.group.block").mapNotNull { it.toMainPageResult() }
     }
 
@@ -103,45 +86,29 @@ class FilmModu : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
-        // Başlık
-        val title = document.selectFirst("h1")?.text()?.trim()
-            ?: document.selectFirst("div.titles h1")?.text()?.trim()
-            ?: return null
+        val title = document.selectFirst("h1")?.text()?.trim() ?: return null
 
-        // Poster
         val poster = fixUrlNull(
-            document.selectFirst("img[alt*='izle']")?.attr("src")
-                ?: document.selectFirst("div.poster img")?.attr("src")
-                ?: document.selectFirst("img.img-responsive")?.attr("src")
+            document.selectFirst("div.aspect-\\[2\\/3\\] img")?.attr("src")
+                ?: document.selectFirst("img[alt]")?.attr("src")
         )
 
-        // Açıklama
-        val description = document.selectFirst("p[itemprop='description']")?.text()?.trim()
-            ?: document.selectFirst("div.description p")?.text()?.trim()
-            ?: document.selectFirst("meta[name='description']")?.attr("content")?.trim()
+        val description = document.selectFirst("meta[name='description']")?.attr("content")?.trim()
+            ?: document.selectFirst("p.leading-relaxed")?.text()?.trim()
 
-        // Yıl
-        val year = document.selectFirst("span[itemprop='dateCreated']")?.text()?.trim()?.toIntOrNull()
-            ?: Regex("""\b(19|20)\d{2}\b""")
-                .find(document.selectFirst("div.description")?.text() ?: "")
-                ?.value?.toIntOrNull()
+        // Yıl — JSON-LD'den çek (datePublished)
+        val jsonLd = document.select("script[type='application/ld+json']")
+            .map { it.data() }.firstOrNull { it.contains("\"Movie\"") }
+        val year = Regex(""""datePublished"\s*:\s*"(\d{4})""")
+            .find(jsonLd ?: "")?.groupValues?.getOrNull(1)?.toIntOrNull()
 
-        // Türler
-        val tags = document.select("a[href*='/tur/']")
-            .map { it.text().trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
+        val tags = document.select("div.mt-3 a[href*='/tur/']").map { it.text().trim() }
 
-        // Puan
-        val rating = document.selectFirst("span.badge-rating")?.text()?.trim()
-            ?: document.selectFirst("div.description p")?.ownText()?.split(" ")?.last()?.trim()
+        val rating = document.selectFirst("p.text-star")?.text()?.trim()?.replace(",", ".")
 
-        // Oyuncular
-        val actors = document.select("a[href*='-oyuncu-']")
-            .map { Actor(it.text().trim()) }
-
-        // Fragman
-        val trailer = document.selectFirst("div.container iframe")?.attr("src")
+        val actors = document.select("a[href*='/oyuncu/']")
+            .map { Actor(it.selectFirst("p")?.text()?.trim() ?: return@map null) }
+            .filterNotNull()
 
         val type = when {
             url.contains("/dizi/") -> TvType.TvSeries
@@ -156,100 +123,101 @@ class FilmModu : MainAPI() {
             this.tags = tags
             this.score = Score.from10(rating)
             addActors(actors)
-            addTrailer(trailer)
         }
     }
 
+    /**
+     * YENİ OYNATICI YAPISI:
+     * - Detay sayfasında <div data-pv="XXX" data-player-type="embed"> var
+     * - pilavyerplay.top/assets/js/core.js bu data-pv'yi alıp video kaynağını çözer
+     *
+     * Bu yüzden core.js'in ne yaptığını taklit etmemiz gerekiyor.
+     * core.js muhtemelen şu endpoint'e istek atıyor:
+     *   https://pilavyerplay.top/api/source/{data-pv}
+     * ya da
+     *   https://pilavyerplay.top/embed/{data-pv}
+     *
+     * Aşağıdaki kod ÖNCE data-pv'yi bulur, sonra birkaç olası endpoint'i dener.
+     */
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("FLMMD", "Başlatılıyor - loadLinks için data: $data")
+        Log.d("FLMMD", "loadLinks başladı: $data")
         val document = app.get(data).document
 
-        // Yeni site yapısı: alternatif kaynak linkleri
-        // (div.alternates a -> yeni yapıda da benzer olabilir, birden fazla selector denenir)
-        val alternates = document.select("div.alternates a").ifEmpty {
-            document.select("a[data-source], a.source-link, div.sources a")
-        }
+        // 1) data-pv değerini bul
+        val playerDiv = document.selectFirst("div[data-pv]")
+        val dataPv = playerDiv?.attr("data-pv")?.takeIf { it.isNotBlank() }
+        val playerType = playerDiv?.attr("data-player-type") ?: "embed"
 
-        if (alternates.isEmpty()) {
-            Log.w("FLMMD", "Alternatif bağlantılar bulunamadı! 'div.alternates a' boş.")
+        Log.d("FLMMD", "data-pv=$dataPv, playerType=$playerType")
+
+        if (dataPv.isNullOrEmpty()) {
+            Log.e("FLMMD", "data-pv bulunamadı!")
             return false
         }
 
-        alternates.forEach { altLinkElement ->
-            val altLink = fixUrlNull(altLinkElement.attr("href"))
-            val altName = altLinkElement.text()
+        // 2) pilavyerplay.top üzerinden embed URL'ini oluştur
+        val embedBase = "https://pilavyerplay.top"
+        val possibleEmbeds = listOf(
+            "$embedBase/embed/$dataPv",
+            "$embedBase/e/$dataPv",
+            "$embedBase/v/$dataPv",
+            "$embedBase/$dataPv",
+        )
 
-            if (altLink == null || altName.contains("Fragman", true)) {
-                Log.d("FLMMD", "Fragman linki veya geçersiz link. Atlanıyor. Link: $altLink, Name: $altName")
-                return@forEach
-            }
-
-            Log.d("FLMMD", "Alternatif link bulundu: $altName, URL: $altLink")
-
+        for (embedUrl in possibleEmbeds) {
             try {
-                val altReq = app.get(altLink, referer = data)
-                val altText = altReq.text
-
-                val vidId = Regex("""var videoId = '(\d+)';""").find(altText)?.groupValues?.getOrNull(1)
-                val vidType = Regex("""var videoType = '(\w+)';""").find(altText)?.groupValues?.getOrNull(1)
-
-                if (vidId.isNullOrEmpty() || vidType.isNullOrEmpty()) {
-                    Log.e("FLMMD", "videoId ($vidId) veya videoType ($vidType) bulunamadı. İlk 500 char: ${altText.take(500)}")
-                    return@forEach
+                Log.d("FLMMD", "Deneniyor: $embedUrl")
+                val res = app.get(embedUrl, referer = data, allowRedirects = true)
+                if (res.code !in 200..299) {
+                    Log.d("FLMMD", "HTTP ${res.code} → atlanıyor")
+                    continue
                 }
 
-                Log.d("FLMMD", "Çekilen videoId: $vidId, videoType: $vidType")
+                val html = res.text
+                Log.d("FLMMD", "Cevap (ilk 300 char): ${html.take(300)}")
 
-                val sourceUrl = "${mainUrl}/get-source?movie_id=${vidId}&type=${vidType}"
-                Log.d("FLMMD", "get-source isteği atılıyor: $sourceUrl")
+                // 3) m3u8 / mp4 linklerini bul
+                val m3u8Links = Regex("""(https?://[^\s"'<>]+?\.m3u8[^\s"'<>]*)""")
+                    .findAll(html).map { it.groupValues[1] }.toList()
 
-                val vidReqRaw = app.get(sourceUrl, referer = altLink)
+                val mp4Links = Regex("""(https?://[^\s"'<>]+?\.mp4[^\s"'<>]*)""")
+                    .findAll(html).map { it.groupValues[1] }.toList()
 
-                if (vidReqRaw.code != 200) {
-                    Log.e("FLMMD", "get-source HTTP hata kodu: ${vidReqRaw.code}. Yanıt: ${vidReqRaw.text}")
-                    return@forEach
+                val allLinks = (m3u8Links + mp4Links).distinct()
+
+                if (allLinks.isEmpty()) {
+                    Log.d("FLMMD", "Bu embed'de link yok, sonraki deneniyor")
+                    continue
                 }
 
-                Log.d("FLMMD", "get-source ham cevap (ilk 500 char): ${vidReqRaw.text.take(500)}")
-
-                val vidReq = vidReqRaw.parsedSafe<GetSource>()
-
-                if (vidReq == null) {
-                    Log.e("FLMMD", "GetSource objesi null döndü. JSON ayrıştırma başarısız.")
-                    return@forEach
-                }
-
-                vidReq.subtitle?.let { subPath ->
-                    val fullSubUrl = fixUrl("${mainUrl}${subPath}")
-                    subtitleCallback(SubtitleFile(altName, fullSubUrl))
-                    Log.d("FLMMD", "Altyazı bulundu: $fullSubUrl")
-                } ?: Log.d("FLMMD", "Altyazı bulunamadı.")
-
-                vidReq.sources?.forEach { source ->
+                allLinks.forEach { link ->
+                    val isM3u8 = link.contains(".m3u8")
                     callback.invoke(
                         newExtractorLink(
-                            source = source.src,
-                            name = "FilmModu - $altName",
-                            url = fixUrl(source.src),
-                            type = ExtractorLinkType.M3U8
+                            source = "FilmModu",
+                            name = "FilmModu",
+                            url = link,
+                            type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                         ) {
-                            this.referer = altLink
-                            this.quality = getQualityFromName(source.label)
+                            this.referer = embedUrl
+                            this.quality = getQualityFromName(Regex("""(\d{3,4})p""").find(link)?.value)
                         }
                     )
-                    Log.d("FLMMD", "Video kaynağı eklendi: $altName, URL: ${source.src}, Label: ${source.label}")
-                } ?: Log.w("FLMMD", "Video kaynakları (sources) boş veya null.")
+                    Log.d("FLMMD", "Link eklendi: $link")
+                }
+                return true
 
             } catch (e: Exception) {
-                Log.e("FLMMD", "Alternatif link işleme hatası: $altLink, Hata: ${e.message}", e)
+                Log.e("FLMMD", "Hata ($embedUrl): ${e.message}")
             }
         }
-        Log.d("FLMMD", "loadLinks fonksiyonu tamamlandı.")
-        return true
+
+        Log.w("FLMMD", "Hiçbir embed'den link alınamadı")
+        return false
     }
 }
