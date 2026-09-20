@@ -5,11 +5,11 @@ package com.Blockades
 import com.fasterxml.jackson.annotation.JsonProperty
 
 data class GetSource(
-    @JsonProperty("subtitle") val subtitle: String? = null,
-    @JsonProperty("sources") val sources: List<Sources>? = arrayListOf()
+    @JsonProperty("sources") val sources: List<Source>? = null,
+    @JsonProperty("subtitle") val subtitle: String? = null
 )
 
-data class Sources(
-    @JsonProperty("src") val src: String,
-    @JsonProperty("label") val label: String,
+data class Source(
+    @JsonProperty("src") val src: String? = null,
+    @JsonProperty("label") val label: String? = null
 )
