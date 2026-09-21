@@ -26,6 +26,26 @@ class SetFilmIzle : MainAPI() {
         if (t != null) Log.e(TAG, msg, t) else Log.e(TAG, msg)
     }
 
+    /**
+     * Base64 decode öncesi string'i temizler.
+     * - \/ → / (JS escape)
+     * - \\ → \ (JS escape)
+     * - Tüm whitespace ve quote'ları atar
+     * - Sadece geçerli Base64 karakterlerini bırakır
+     */
+    private fun cleanBase64(s: String): String {
+        return s.replace("\\/", "/")
+            .replace("\\\\", "")
+            .replace("\\", "")
+            .replace("\"", "")
+            .replace("'", "")
+            .replace("\n", "")
+            .replace("\r", "")
+            .replace("\t", "")
+            .replace(" ", "")
+            .filter { it.isLetterOrDigit() || it == '+' || it == '/' || it == '=' || it == '-' || it == '_' }
+    }
+
     override val mainPage = mainPageOf(
         "$mainUrl/" to "Son Eklenenler",
         "$mainUrl/film/" to "Filmler",
@@ -83,17 +103,27 @@ class SetFilmIzle : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
+        // Daha esnek href bulma
         val href = fixUrlNull(
-            if (this.tagName() == "a") this.attr("href") else this.selectFirst("a")?.attr("href")
+            when {
+                this.tagName() == "a" -> this.attr("href")
+                else -> this.selectFirst("a[href]")?.attr("href")
+                    ?: this.attr("data-href")
+                    ?: this.selectFirst("[data-href]")?.attr("data-href")
+                    ?: this.selectFirst("[data-url]")?.attr("data-url")
+                    ?: this.selectFirst("a")?.attr("href")
+            }
         ) ?: run {
-            logErr("toSearchResult: href null, element=${this.tagName()}")
+            // DEBUG: article yapısını logla (ilk 500 char)
+            logErr("toSearchResult: href YOK. HTML: ${this.outerHtml().take(500)}")
             return null
         }
 
         val title = this.selectFirst("h2.card-ad, h2, h3, a")?.text()?.trim()
             ?: this.selectFirst("img")?.attr("alt")?.trim()
+            ?: this.attr("data-title")?.trim()
             ?: run {
-                logErr("toSearchResult: title null, href=$href")
+                logErr("toSearchResult: title YOK, href=$href")
                 return null
             }
 
@@ -166,15 +196,26 @@ class SetFilmIzle : MainAPI() {
             }.getOrDefault(response.text)
 
             log("search: htmlContent length=${htmlContent.length}")
+            logErr("search: HTML PREVIEW = ${htmlContent.take(1000)}")
 
             if (htmlContent.isNotBlank()) {
                 val doc = Jsoup.parse(htmlContent)
                 val articles = doc.select("article")
                 log("search: ${articles.size} article bulundu")
 
+                var errCount = 0
                 articles.forEach { art ->
-                    art.toSearchResult()?.let { results.add(it) }
+                    val sr = art.toSearchResult()
+                    if (sr != null) {
+                        results.add(sr)
+                    } else {
+                        errCount++
+                        if (errCount > 3) {
+                            // Sadece ilk 3 hatayı logla, gerisini sustur
+                        }
+                    }
                 }
+                log("search: ${results.size} başarılı, $errCount başarısız article")
             }
         }
 
@@ -348,7 +389,7 @@ class SetFilmIzle : MainAPI() {
         log("loadLinks: tokens.size=${tokens.size}")
         log("loadLinks: postId='$postId'")
         log("loadLinks: pageUrl='$pageUrl'")
-        log("loadLinks: nonce='${nonce.take(30)}...' (len=${nonce.length})")
+        log("loadLinks: nonce length=${nonce.length}")
         log("loadLinks: playerName='$playerName'")
         log("loadLinks: partKey='$partKey'")
 
@@ -401,14 +442,12 @@ class SetFilmIzle : MainAPI() {
             }.getOrNull()
 
             log("loadLinks: response code=${response?.code}")
-            log("loadLinks: response body (ilk 500 char) = ${response?.text?.take(500)}")
+            logErr("loadLinks: AJAX BODY = ${response?.text?.take(1500)}")
 
             if (response != null && response.text.isNotBlank()) {
                 val jsonObj = runCatching { JSONObject(response.text) }
                     .onFailure { logErr("loadLinks: JSON parse hatası", it) }
                     .getOrNull()
-
-                log("loadLinks: jsonObj keys = ${jsonObj?.keys()?.asSequence()?.toList()}")
 
                 val streamObj = jsonObj?.optJSONObject("data")?.optJSONObject("stream")
                 log("loadLinks: data.stream mevcut mu? ${streamObj != null}")
@@ -428,7 +467,7 @@ class SetFilmIzle : MainAPI() {
                     }.getOrDefault("")
 
                     log("loadLinks: bridgeHtml length=${bridgeHtml.length}")
-                    log("loadLinks: bridgeHtml (ilk 800 char) = ${bridgeHtml.take(800)}")
+                    logErr("loadLinks: BRIDGE HTML = ${bridgeHtml.take(2000)}")
 
                     val cerceveMatch = Regex(
                         """SPG\.cerceve\s*\(\s*["'][^"']+["']\s*,\s*["']([^"']+)["']\s*,\s*["']([^"']+)["']\s*\)"""
@@ -436,25 +475,29 @@ class SetFilmIzle : MainAPI() {
 
                     log("loadLinks: cerceveMatch mevcut mu? ${cerceveMatch != null}")
 
-                    // SPG.cerceve yoksa diğer pattern'leri de dene
-                    if (cerceveMatch == null) {
-                        log("loadLinks: SPG.cerceve bulunamadı, alternatif pattern aranıyor...")
-                        val altMatch = Regex("""cerceve\s*\([^)]*\)""").find(bridgeHtml)
-                        log("loadLinks: alternatif match=${altMatch?.value}")
-
-                        // 'video:' veya 'iframe:' var mı?
-                        val videoMatch = Regex("""(?:video|iframe|src)\s*[:=]\s*["']([^"']+)["']""").find(bridgeHtml)
-                        log("loadLinks: videoMatch=${videoMatch?.value?.take(200)}")
-                    }
-
                     if (cerceveMatch != null) {
-                        val cipherB64 = cerceveMatch.groupValues[1]
-                        val keyB64 = cerceveMatch.groupValues[2]
-                        log("loadLinks: cipherB64 length=${cipherB64.length}, keyB64 length=${keyB64.length}")
+                        val rawCipher = cerceveMatch.groupValues[1]
+                        val rawKey = cerceveMatch.groupValues[2]
+
+                        logErr("loadLinks: RAW cipherB64 (ilk 200) = ${rawCipher.take(200)}")
+                        logErr("loadLinks: RAW keyB64 (ilk 200) = ${rawKey.take(200)}")
+
+                        val cipherB64 = cleanBase64(rawCipher)
+                        val keyB64 = cleanBase64(rawKey)
+
+                        log("loadLinks: TEMİZ cipherB64 (ilk 100) = ${cipherB64.take(100)}")
+                        log("loadLinks: TEMİZ keyB64 (ilk 100) = ${keyB64.take(100)}")
+                        log("loadLinks: cipherB64.length=${cipherB64.length}, keyB64.length=${keyB64.length}")
 
                         val fastplayUrl = runCatching {
-                            val cipherBytes = java.util.Base64.getDecoder().decode(cipherB64)
-                            val keyBytes = java.util.Base64.getDecoder().decode(keyB64)
+                            val cipherBytes = android.util.Base64.decode(
+                                cipherB64,
+                                android.util.Base64.DEFAULT
+                            )
+                            val keyBytes = android.util.Base64.decode(
+                                keyB64,
+                                android.util.Base64.DEFAULT
+                            )
                             val decryptedBytes = ByteArray(cipherBytes.size) { idx ->
                                 (cipherBytes[idx].toInt() xor keyBytes[idx % keyBytes.size].toInt()).toByte()
                             }
@@ -475,7 +518,7 @@ class SetFilmIzle : MainAPI() {
                             }.getOrDefault("")
 
                             log("loadLinks: fpDoc length=${fpDoc.length}")
-                            log("loadLinks: fpDoc (ilk 800 char) = ${fpDoc.take(800)}")
+                            logErr("loadLinks: FASTPLAY HTML = ${fpDoc.take(2000)}")
 
                             val streamPath = Regex("""stream:\s*["']([^"']+)["']""")
                                 .find(fpDoc)?.groupValues?.get(1)
