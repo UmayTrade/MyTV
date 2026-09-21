@@ -1,4 +1,4 @@
-package com.panates
+package com.UmayTrade
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
