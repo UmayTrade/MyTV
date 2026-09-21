@@ -37,6 +37,11 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 
 class SetFilmIzle : MainAPI() {
+
+    // ==================== LOG TAG ====================
+    private val TAG = "SetFilmIzle"
+    // =================================================
+
     override var mainUrl = "https://www.setfilmizle.ltd"
     override var name = "SetFilmIzle"
     override val hasMainPage = true
@@ -72,9 +77,16 @@ class SetFilmIzle : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(request.data).document
-        val home = document.select("div.items article").mapNotNull { it.toMainPageResult() }
+        Log.d(TAG, "========== getMainPage() START ==========")
+        Log.d(TAG, "getMainPage() -> page=$page | request.name=${request.name} | request.data=${request.data}")
 
+        val document = app.get(request.data).document
+        Log.d(TAG, "getMainPage() -> document.title=${document.title()}")
+
+        val home = document.select("div.items article").mapNotNull { it.toMainPageResult() }
+        Log.d(TAG, "getMainPage() -> toplam öğe: ${home.size}")
+
+        Log.d(TAG, "========== getMainPage() END ==========")
         return newHomePageResponse(request.name, home)
     }
 
@@ -83,6 +95,8 @@ class SetFilmIzle : MainAPI() {
         val href = fixUrlNull(this.selectFirst("a")?.attr("href")) ?: return null
         val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src"))
         val score = this.selectFirst("span.rating")?.text()?.trim()
+
+        Log.d(TAG, "toMainPageResult() -> title=$title | href=$href | poster=$posterUrl | score=$score")
 
         return if (href.contains("/dizi/")) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
@@ -98,8 +112,13 @@ class SetFilmIzle : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        Log.d(TAG, "========== search() START ==========")
+        Log.d(TAG, "search() -> query=$query")
+
         val mainPage = app.get(mainUrl).document
         val nonce = Regex("""nonce: '(.*)'""").find(mainPage.html())?.groupValues?.get(1) ?: ""
+        Log.d(TAG, "search() -> nonce=$nonce")
+
         val search = app.post(
             url = "${mainUrl}/wp-admin/admin-ajax.php",
             headers = mapOf("X-Requested-With" to "XMLHttpRequest"),
@@ -109,15 +128,26 @@ class SetFilmIzle : MainAPI() {
                 "search" to query
             )
         )
-        val document = Jsoup.parse(JSONObject(search.text).getString("html"))
+        Log.d(TAG, "search() -> raw response (ilk 500 char): ${search.text.take(500)}")
 
-        return document.select("div.items article").mapNotNull { it.toSearchResult() }
+        val html = JSONObject(search.text).optString("html", "")
+        Log.d(TAG, "search() -> html uzunluğu: ${html.length}")
+
+        val document = Jsoup.parse(html)
+        val results = document.select("div.items article").mapNotNull { it.toSearchResult() }
+
+        Log.d(TAG, "search() -> sonuç sayısı: ${results.size}")
+        Log.d(TAG, "========== search() END ==========")
+
+        return results
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
         val title = this.selectFirst("h2")?.text() ?: return null
         val href = fixUrlNull(this.selectFirst("a")?.attr("href")) ?: return null
         val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src"))
+
+        Log.d(TAG, "toSearchResult() -> title=$title | href=$href | poster=$posterUrl")
 
         return if (href.contains("/dizi/")) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
@@ -126,13 +156,25 @@ class SetFilmIzle : MainAPI() {
         }
     }
 
-    override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
+    override suspend fun quickSearch(query: String): List<SearchResponse> {
+        Log.d(TAG, "quickSearch() -> query=$query")
+        return search(query)
+    }
 
     override suspend fun load(url: String): LoadResponse? {
+        Log.d(TAG, "========== load() START ==========")
+        Log.d(TAG, "load() -> url=$url")
+
         val document = app.get(url).document
+        Log.d(TAG, "load() -> document.title=${document.title()}")
 
         val title =
-            document.selectFirst("h1")?.text()?.substringBefore(" izle")?.trim() ?: return null
+            document.selectFirst("h1")?.text()?.substringBefore(" izle")?.trim() ?: run {
+                Log.e(TAG, "load() -> HATA: title bulunamadı!")
+                return null
+            }
+        Log.d(TAG, "load() -> title=$title")
+
         val poster = fixUrlNull(document.selectFirst("div.poster img")?.attr("src"))
         val description = document.selectFirst("div.wp-content p")?.text()?.trim()
         var year = document.selectFirst("div.extra span.C a")?.text()?.trim()?.toIntOrNull()
@@ -146,12 +188,26 @@ class SetFilmIzle : MainAPI() {
         val trailer = Regex("""embed/(.*)\?rel""").find(document.html())?.groupValues?.get(1)
             ?.let { "https://www.youtube.com/embed/$it" }
 
+        Log.d(TAG, "load() -> poster=$poster")
+        Log.d(TAG, "load() -> year=$year | rating=$rating | duration=$duration")
+        Log.d(TAG, "load() -> tags=$tags")
+        Log.d(TAG, "load() -> actors=${actors.map { it.name }}")
+        Log.d(TAG, "load() -> trailer=$trailer")
+        Log.d(TAG, "load() -> recommendations sayısı: ${recommendations.size}")
+
         if (url.contains("/dizi/")) {
+            Log.d(TAG, "load() -> DİZİ tespit edildi")
+
             year = document.selectFirst("a[href*='/yil/']")?.text()?.trim()?.toIntOrNull()
             duration = document.selectFirst("div#info span:containsOwn(Dakika)")?.text()?.split(" ")
                 ?.first()?.trim()?.toIntOrNull()
 
-            val episodes = document.select("div#episodes ul.episodios li").mapNotNull {
+            Log.d(TAG, "load() -> dizi year=$year | duration=$duration")
+
+            val episodeElements = document.select("div#episodes ul.episodios li")
+            Log.d(TAG, "load() -> episode li sayısı: ${episodeElements.size}")
+
+            val episodes = episodeElements.mapNotNull {
                 val epHref = fixUrlNull(it.selectFirst("h4.episodiotitle a")?.attr("href"))
                     ?: return@mapNotNull null
                 val epName = it.selectFirst("h4.episodiotitle a")?.ownText()?.trim()
@@ -162,12 +218,17 @@ class SetFilmIzle : MainAPI() {
                 val epEpisode =
                     epDetail.split("Sezon ").last().substringBefore(". Bölüm").toIntOrNull()
 
+                Log.d(TAG, "load() -> episode: name=$epName | href=$epHref | S=$epSeason | E=$epEpisode")
+
                 newEpisode(epHref) {
                     this.name = epName
                     this.season = epSeason
                     this.episode = epEpisode
                 }
             }
+
+            Log.d(TAG, "load() -> toplam episode: ${episodes.size}")
+            Log.d(TAG, "========== load() END (dizi) ==========")
 
             return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 this.posterUrl = poster
@@ -181,6 +242,9 @@ class SetFilmIzle : MainAPI() {
                 addTrailer(trailer)
             }
         }
+
+        Log.d(TAG, "load() -> FİLM tespit edildi")
+        Log.d(TAG, "========== load() END (film) ==========")
 
         return newMovieLoadResponse(title, url, TvType.Movie, url) {
             this.posterUrl = poster
@@ -214,6 +278,8 @@ class SetFilmIzle : MainAPI() {
         partKey: String,
         referer: String
     ): Response {
+        Log.d(TAG, "sendMultipartRequest() -> post_id=$postId | player_name=$playerName | part_key=$partKey | nonce=$nonce")
+
         val requestBody = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("action", "get_video_url")
@@ -223,8 +289,6 @@ class SetFilmIzle : MainAPI() {
             .addFormDataPart("part_key", partKey)
             .build()
 
-        Log.d("STF", "post_id=$postId | player_name=$playerName | part_key=$partKey")
-
         val request = Request.Builder()
             .url("${mainUrl}/wp-admin/admin-ajax.php")
             .post(requestBody)
@@ -232,7 +296,10 @@ class SetFilmIzle : MainAPI() {
             .addHeader("X-Requested-With", "XMLHttpRequest")
             .build()
 
-        return OkHttpClient().newCall(request).execute()
+        val response = OkHttpClient().newCall(request).execute()
+        Log.d(TAG, "sendMultipartRequest() -> HTTP code: ${response.code}")
+
+        return response
     }
 
     override suspend fun loadLinks(
@@ -241,66 +308,104 @@ class SetFilmIzle : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("STF", "data » $data")
+        Log.d(TAG, "########## loadLinks() START ##########")
+        Log.d(TAG, "loadLinks() -> data=$data | isCasting=$isCasting")
+
         val document = app.get(data).document
+        Log.d(TAG, "loadLinks() -> document.title=${document.title()}")
 
         val nonce = document.selectFirst("div#playex")?.attr("data-nonce") ?: ""
-        Log.d("STF", "nonce -> $nonce")
+        Log.d(TAG, "loadLinks() -> nonce=$nonce")
 
-        document.select("nav.player a").map { element ->
+        val playerElements = document.select("nav.player a")
+        Log.d(TAG, "loadLinks() -> nav.player a sayısı: ${playerElements.size}")
+
+        val players = playerElements.map { element ->
             val sourceId = element.attr("data-post-id")
             val name = element.attr("data-player-name")
             val partKey = element.attr("data-part-key")
 
+            Log.d(TAG, "loadLinks() -> player bulundu: name=$name | sourceId=$sourceId | partKey=$partKey")
+
             Triple(name, sourceId, partKey)
-        }.forEach { (name, sourceId, partKey) ->
-            if (sourceId.contains("event")) return@forEach
-            if (sourceId.isBlank()) return@forEach
-            if (name.isBlank()) return@forEach
+        }
 
-            val multiPart = sendMultipartRequest(nonce, sourceId, name, partKey, data)
-            val sourceBody = multiPart.body.string()
-            Log.d("STF", "sourceBody -> $sourceBody")
+        var index = 0
+        players.forEach { (name, sourceId, partKey) ->
+            index++
+            Log.d(TAG, "loadLinks() -> [$index/${players.size}] işleniyor: name=$name")
 
-            val sourceIframe = JSONObject(sourceBody)
-                .optJSONObject("data")
-                ?.optString("url")
-                ?.takeIf { it.isNotBlank() }
-                ?: return@forEach
+            if (sourceId.contains("event")) {
+                Log.d(TAG, "loadLinks() -> [$index] ATLANDI: sourceId 'event' içeriyor")
+                return@forEach
+            }
+            if (sourceId.isBlank()) {
+                Log.d(TAG, "loadLinks() -> [$index] ATLANDI: sourceId boş")
+                return@forEach
+            }
+            if (name.isBlank()) {
+                Log.d(TAG, "loadLinks() -> [$index] ATLANDI: name boş")
+                return@forEach
+            }
 
-            Log.d("STF", "iframe » $sourceIframe")
+            try {
+                val multiPart = sendMultipartRequest(nonce, sourceId, name, partKey, data)
+                val sourceBody = multiPart.body.string()
+                Log.d(TAG, "loadLinks() -> [$index] sourceBody: $sourceBody")
 
-            when {
-                sourceIframe.contains("vctplay.site") -> {
-                    val vctId = sourceIframe.split("/").last()
-                    val masterUrl = "https://vctplay.site/manifests/$vctId/master.txt"
-                    callback.invoke(
-                        newExtractorLink(
-                            source = "FastPlay",
-                            name = "FastPlay",
-                            url = masterUrl,
-                            ExtractorLinkType.M3U8
-                        ) {
-                            referer = "https://vctplay.site/"
-                            quality = Qualities.Unknown.value
-                        }
-                    )
+                val sourceIframe = JSONObject(sourceBody)
+                    .optJSONObject("data")
+                    ?.optString("url")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: run {
+                        Log.e(TAG, "loadLinks() -> [$index] HATA: iframe URL bulunamadı!")
+                        return@forEach
+                    }
+
+                Log.d(TAG, "loadLinks() -> [$index] iframe: $sourceIframe")
+
+                when {
+                    sourceIframe.contains("vctplay.site") -> {
+                        Log.d(TAG, "loadLinks() -> [$index] TÜR: vctplay.site")
+                        val vctId = sourceIframe.split("/").last()
+                        val masterUrl = "https://vctplay.site/manifests/$vctId/master.txt"
+                        Log.d(TAG, "loadLinks() -> [$index] masterUrl: $masterUrl")
+
+                        callback.invoke(
+                            newExtractorLink(
+                                source = "FastPlay",
+                                name = "FastPlay",
+                                url = masterUrl,
+                                ExtractorLinkType.M3U8
+                            ) {
+                                referer = "https://vctplay.site/"
+                                quality = Qualities.Unknown.value
+                            }
+                        )
+                    }
+
+                    sourceIframe.contains("explay.store") || sourceIframe.contains("setplay.site") -> {
+                        Log.d(TAG, "loadLinks() -> [$index] TÜR: explay/setplay -> loadExtractor")
+                        loadExtractor(
+                            "${sourceIframe}?partKey=${partKey}",
+                            "${mainUrl}/",
+                            subtitleCallback,
+                            callback
+                        )
+                    }
+
+                    else -> {
+                        Log.d(TAG, "loadLinks() -> [$index] TÜR: genel loadExtractor")
+                        loadExtractor(sourceIframe, "${mainUrl}/", subtitleCallback, callback)
+                    }
                 }
-
-                sourceIframe.contains("explay.store") || sourceIframe.contains("setplay.site") -> {
-                    loadExtractor(
-                        "${sourceIframe}?partKey=${partKey}",
-                        "${mainUrl}/",
-                        subtitleCallback,
-                        callback
-                    )
-                }
-
-                else -> {
-                    loadExtractor(sourceIframe, "${mainUrl}/", subtitleCallback, callback)
-                }
+            } catch (e: Exception) {
+                Log.e(TAG, "loadLinks() -> [$index] İSTİSNA: ${e.message}", e)
             }
         }
+
+        Log.d(TAG, "loadLinks() -> tamamlandı")
+        Log.d(TAG, "########## loadLinks() END ##########")
 
         return true
     }
