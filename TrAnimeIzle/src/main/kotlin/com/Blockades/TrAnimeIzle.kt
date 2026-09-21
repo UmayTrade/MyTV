@@ -1,4 +1,4 @@
-package com.ulgencs3.tranimeizle
+package com.Blockades
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
