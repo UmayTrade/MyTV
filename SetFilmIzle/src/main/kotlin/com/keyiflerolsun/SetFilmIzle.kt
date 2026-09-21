@@ -39,7 +39,7 @@ import org.jsoup.nodes.Element
 class SetFilmIzle : MainAPI() {
 
     // ==================================================================
-    // ==========       ANA DEĞİŞKENLER (ÖNCE BUNLAR)        ============
+    // ==========   1) ANA DEĞİŞKENLER (ÖNCE BUNLAR)         ============
     // ==================================================================
 
     override var mainUrl = "https://www.setfilmizle.ltd"
@@ -50,22 +50,16 @@ class SetFilmIzle : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     // ==================================================================
-    // ============       LOG AYARLARI                       ============
+    // ==========   2) LOG AYARLARI                         ============
     // ==================================================================
     private val LOG_AKTIF = true
     private val TAG = "SETFILMIZLE"
     private val PREFIX = ">>> SETFILMIZLE >>> "
 
-    /**
-     * Normal log (Log.d)
-     */
     private fun log(mesaj: String) {
         if (LOG_AKTIF) Log.d(TAG, "$PREFIX$mesaj")
     }
 
-    /**
-     * Hata log (Log.e) - her zaman aktif
-     */
     private fun logE(mesaj: String, e: Throwable? = null) {
         if (e != null) {
             Log.e(TAG, "$PREFIX[HATA] $mesaj", e)
@@ -74,16 +68,10 @@ class SetFilmIzle : MainAPI() {
         }
     }
 
-    /**
-     * Uyarı log (Log.w) - her zaman aktif
-     */
     private fun logW(mesaj: String) {
         Log.w(TAG, "$PREFIX[UYARI] $mesaj")
     }
 
-    /**
-     * Log başlığı (büyük ayraç)
-     */
     private fun logBaslik(baslik: String) {
         if (LOG_AKTIF) {
             Log.d(TAG, "$PREFIX========================================")
@@ -93,8 +81,8 @@ class SetFilmIzle : MainAPI() {
     }
 
     // ==================================================================
-    // ==========       EKLENTİ YÜKLENDİĞİNDE ÇALIŞIR        ============
-    // ==========       (mainUrl/name/lang'den SONRA!)       ============
+    // ==========   3) EKLENTİ YÜKLENDİĞİNDE ÇALIŞIR         ============
+    // ==========   (mainUrl/name/lang'den SONRA!)           ============
     // ==================================================================
     init {
         Log.e(TAG, "$PREFIX########################################")
@@ -107,7 +95,7 @@ class SetFilmIzle : MainAPI() {
     }
 
     // ==================================================================
-    // ==========       ANA SAYFA KATEGORİLERİ               ============
+    // ==========   4) ANA SAYFA KATEGORİLERİ                ============
     // ==================================================================
 
     override val mainPage = mainPageOf(
@@ -138,7 +126,7 @@ class SetFilmIzle : MainAPI() {
     )
 
     // ==================================================================
-    // ==========       ANA SAYFA                            ============
+    // ==========   5) ANA SAYFA                            ============
     // ==================================================================
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -195,7 +183,7 @@ class SetFilmIzle : MainAPI() {
     }
 
     // ==================================================================
-    // ==========       ARAMA                                ============
+    // ==========   6) ARAMA                                ============
     // ==================================================================
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -272,7 +260,7 @@ class SetFilmIzle : MainAPI() {
     }
 
     // ==================================================================
-    // ==========       DETAY SAYFASI                        ============
+    // ==========   7) DETAY SAYFASI                         ============
     // ==================================================================
 
     override suspend fun load(url: String): LoadResponse? {
@@ -402,7 +390,7 @@ class SetFilmIzle : MainAPI() {
     }
 
     // ==================================================================
-    // ==========       MULTIPART İSTEK                      ============
+    // ==========   8) MULTIPART İSTEK                       ============
     // ==================================================================
 
     private fun sendMultipartRequest(
@@ -437,7 +425,7 @@ class SetFilmIzle : MainAPI() {
     }
 
     // ==================================================================
-    // ==========       VİDEO LİNKLERİ                       ============
+    // ==========   9) VİDEO LİNKLERİ                        ============
     // ==================================================================
 
     override suspend fun loadLinks(
@@ -466,7 +454,6 @@ class SetFilmIzle : MainAPI() {
 
             if (playerElements.isEmpty()) {
                 logW("Hiç player bulunamadı! HTML'de 'nav.player a' yok.")
-                logW("Alternatif olarak tüm 'a' etiketleri deneniyor...")
                 val allLinks = document.select("a")
                 log("Toplam 'a' etiketi sayısı = ${allLinks.size}")
             }
