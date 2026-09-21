@@ -15,7 +15,7 @@ import org.json.JSONObject
  * Arşiv: 6.100+ Anime, tüm bölümler ve çeviri grupları (Fansublar)
  * Oynatıcılar: Sibnet, Voe, Dailymotion, Odnoklassniki (Ok.ru), Google Drive, Mp4Upload vb.
  */
-class TurkAnimeProvider : MainAPI() {
+class TurkAnime : MainAPI() {
 
     override var mainUrl = "https://turkanimemirror.vercel.app"
     override var name = "Türk Anime TV"
