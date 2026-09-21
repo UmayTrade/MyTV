@@ -169,7 +169,6 @@ class TRasyalog : MainAPI() {
 
         // ============================================================
         // BÖLÜM LİNKLERİNİ AL
-        // Statik HTML'de bölüm yoksa AJAX ile dinamik çek
         // ============================================================
 
         val staticLinks = document.select(
@@ -355,58 +354,55 @@ class TRasyalog : MainAPI() {
     }
 
     override suspend fun loadLinks(
-    data: String,
-    isCasting: Boolean,
-    subtitleCallback: (SubtitleFile) -> Unit,
-    callback: (ExtractorLink) -> Unit
-): Boolean {
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
 
-    val pageUrl = data.substringBefore("#").trim()
-    if (pageUrl.isEmpty()) return false
+        val pageUrl = data.substringBefore("#").trim()
+        if (pageUrl.isEmpty()) return false
 
-    val document = app.get(pageUrl).document
+        val document = app.get(pageUrl).document
 
-    // Genişletilmiş iframe seçici — #plyg ve genel iframe'leri kapsar
-    val iframeElements = document.select(
-        "#plyg iframe, iframe[src*='odnoklassniki'], iframe[src*='ok.ru'], iframe"
-    )
+        val iframeElements = document.select(
+            "#plyg iframe, iframe[src*='odnoklassniki'], iframe[src*='ok.ru'], iframe"
+        )
 
-    if (iframeElements.isEmpty()) return false
+        if (iframeElements.isEmpty()) return false
 
-    var found = false
+        var found = false
 
-    iframeElements.forEach { iframe ->
+        iframeElements.forEach { iframe ->
 
-        var src = iframe.attr("src").trim()
-        if (src.isEmpty()) src = iframe.attr("data-src").trim()
-        if (src.isEmpty()) src = iframe.attr("data-litespeed-src").trim()
-        if (src.isEmpty()) src = iframe.attr("data-url").trim()
+            var src = iframe.attr("src").trim()
+            if (src.isEmpty()) src = iframe.attr("data-src").trim()
+            if (src.isEmpty()) src = iframe.attr("data-litespeed-src").trim()
+            if (src.isEmpty()) src = iframe.attr("data-url").trim()
 
-        if (src.isEmpty()) return@forEach
-        if (src.startsWith("javascript:", ignoreCase = true)) return@forEach
-        if (src == "about:blank") return@forEach
+            if (src.isEmpty()) return@forEach
+            if (src.startsWith("javascript:", ignoreCase = true)) return@forEach
+            if (src == "about:blank") return@forEach
 
-        // Protocol-relative ve relative URL'leri düzelt
-        val fixedUrl = when {
-            src.startsWith("//") -> "https:$src"
-            src.startsWith("/")  -> fixUrl(src)
-            else                 -> src
+            val fixedUrl = when {
+                src.startsWith("//") -> "https:$src"
+                src.startsWith("/")  -> fixUrl(src)
+                else                 -> src
+            }
+
+            try {
+                loadExtractor(
+                    fixedUrl,
+                    referer = pageUrl,
+                    subtitleCallback,
+                    callback
+                )
+                found = true
+            } catch (e: Exception) {
+                println("Extractor error for $fixedUrl: ${e.message}")
+            }
         }
 
-        try {
-            // referer parametresi OK.ru extractor'ı için kritik
-            loadExtractor(
-                fixedUrl,
-                referer = pageUrl,   // <-- EKLENDİ
-                subtitleCallback,
-                callback
-            )
-            found = true
-        } catch (e: Exception) {
-            // Bu iframe çözülemedi, diğerlerine devam et
-            println("Extractor error for $fixedUrl: ${e.message}")
-        }
+        return found
     }
-
-    return found
 }
