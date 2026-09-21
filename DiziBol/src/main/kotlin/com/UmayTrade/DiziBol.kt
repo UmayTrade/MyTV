@@ -10,7 +10,7 @@ import java.net.URLEncoder
 
 class DiziBal : MainAPI() {
     override var mainUrl = "https://dizibol.org"
-    override var name = "DiziBal"
+    override var name = "DiziBol"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
     override var lang = "tr"
     override val hasMainPage = true
