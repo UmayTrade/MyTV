@@ -1,6 +1,6 @@
 package com.keyiflerolsun
 
-import com.aethelon.network.CommonHeaders
+import com.keyiflerolsun.CommonHeaders
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
