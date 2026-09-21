@@ -354,7 +354,12 @@ class TRasyalog : MainAPI() {
     ): Boolean {
 
         val pageUrl = data.substringBefore("#").trim()
-        if (pageUrl.isEmpty()) return false
+        Log.d("TRasyalog", "loadLinks called with: $pageUrl")
+
+        if (pageUrl.isEmpty()) {
+            Log.e("TRasyalog", "pageUrl is empty!")
+            return false
+        }
 
         val document = app.get(pageUrl).document
 
@@ -362,7 +367,12 @@ class TRasyalog : MainAPI() {
             "#plyg iframe, iframe[src*='odnoklassniki'], iframe[src*='ok.ru'], iframe"
         )
 
-        if (iframeElements.isEmpty()) return false
+        Log.d("TRasyalog", "Found ${iframeElements.size} iframe(s)")
+
+        if (iframeElements.isEmpty()) {
+            Log.e("TRasyalog", "No iframe found on page!")
+            return false
+        }
 
         var found = false
 
@@ -372,6 +382,8 @@ class TRasyalog : MainAPI() {
             if (src.isEmpty()) src = iframe.attr("data-src").trim()
             if (src.isEmpty()) src = iframe.attr("data-litespeed-src").trim()
             if (src.isEmpty()) src = iframe.attr("data-url").trim()
+
+            Log.d("TRasyalog", "iframe src: $src")
 
             if (src.isEmpty()) return@forEach
             if (src.startsWith("javascript:", ignoreCase = true)) return@forEach
@@ -383,6 +395,8 @@ class TRasyalog : MainAPI() {
                 else                 -> src
             }
 
+            Log.d("TRasyalog", "Fixed URL: $fixedUrl")
+
             // 1) CloudStream'in yerleşik extractor'ını dene
             try {
                 loadExtractor(
@@ -391,16 +405,19 @@ class TRasyalog : MainAPI() {
                     subtitleCallback,
                     callback
                 )
+                Log.d("TRasyalog", "loadExtractor succeeded for $fixedUrl")
                 found = true
             } catch (e: Exception) {
-                Log.e("TRasyalog", "Built-in extractor failed for $fixedUrl", e)
+                Log.e("TRasyalog", "loadExtractor FAILED for $fixedUrl", e)
             }
 
             // 2) Yedek: OK.ru embed sayfasından doğrudan video URL'si çıkar
-            if (!found && fixedUrl.contains("odnoklassniki") || fixedUrl.contains("ok.ru")) {
+            if (!found && (fixedUrl.contains("odnoklassniki") || fixedUrl.contains("ok.ru"))) {
                 try {
+                    Log.d("TRasyalog", "Trying fallback OK.ru extraction for $fixedUrl")
                     val okVideoUrl = extractOkRuVideo(fixedUrl, pageUrl)
                     if (okVideoUrl != null) {
+                        Log.d("TRasyalog", "Fallback OK.ru URL found: $okVideoUrl")
                         callback(
                             newExtractorLink(
                                 source = this.name,
@@ -416,6 +433,8 @@ class TRasyalog : MainAPI() {
                             }
                         )
                         found = true
+                    } else {
+                        Log.w("TRasyalog", "Fallback OK.ru extraction returned null")
                     }
                 } catch (e: Exception) {
                     Log.e("TRasyalog", "Fallback OK.ru extraction failed", e)
@@ -423,6 +442,7 @@ class TRasyalog : MainAPI() {
             }
         }
 
+        Log.d("TRasyalog", "loadLinks returning: $found")
         return found
     }
 
@@ -435,26 +455,15 @@ class TRasyalog : MainAPI() {
         referer: String
     ): String? {
         return try {
-            // Embed sayfasını çek
-            val embedDoc = app.get(
-                embedUrl,
-                referer = referer,
-                headers = mapOf(
-                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-                            "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                            "Chrome/120.0.0.0 Safari/537.36"
-                )
-            ).text
-
-            // Video ID'sini çıkar
             val videoId = Regex("""videoembed/(\d+)""")
                 .find(embedUrl)
                 ?.groupValues
                 ?.getOrNull(1)
                 ?: return null
 
-            // OK.ru API'sinden video bilgilerini al
             val apiUrl = "https://ok.ru/dk?cmd=videoPlayerMetadata&mid=$videoId"
+            Log.d("TRasyalog", "OK.ru API URL: $apiUrl")
+
             val apiResponse = app.get(
                 apiUrl,
                 referer = embedUrl,
@@ -467,7 +476,8 @@ class TRasyalog : MainAPI() {
                 )
             ).text
 
-            // JSON yanıtından en yüksek kaliteli video URL'sini çıkar
+            Log.d("TRasyalog", "OK.ru API response (first 300 chars): ${apiResponse.take(300)}")
+
             val videoUrlRegex = Regex(
                 """"url"\s*:\s*"([^"]+\.(?:mp4|m3u8)[^"]*)"""",
                 RegexOption.IGNORE_CASE
@@ -477,7 +487,8 @@ class TRasyalog : MainAPI() {
                 .map { it.groupValues[1].replace("\\/", "/") }
                 .toList()
 
-            // En yüksek kaliteyi seç (genelde sonuncu veya en büyük boyutlu)
+            Log.d("TRasyalog", "Found ${matches.size} video URL(s) in OK.ru response")
+
             matches.lastOrNull()
         } catch (e: Exception) {
             Log.e("TRasyalog", "OK.ru API extraction error", e)
