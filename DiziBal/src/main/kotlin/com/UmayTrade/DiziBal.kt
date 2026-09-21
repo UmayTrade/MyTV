@@ -23,7 +23,7 @@ class DiziBal : MainAPI() {
 
         private val defaultHeaders = mapOf(
             "User-Agent" to UA,
-            "Referer" to "https://dizibal.com/" // mainUrl ile tutarlı
+            "Referer" to "https://dizibal.com/"
         )
     }
 
@@ -40,7 +40,6 @@ class DiziBal : MainAPI() {
             return newHomePageResponse(allPages)
         }
 
-        // Hem section hem div:has(h2) ama tekrarları önlemek için distinct
         val sections = doc.select("div.container-site > section, div.container-site > div")
             .filter { it.selectFirst("h2") != null }
 
@@ -235,7 +234,6 @@ class DiziBal : MainAPI() {
 
         val type = if (url.contains("/anime/")) TvType.Anime else TvType.TvSeries
 
-        // URL bazlı distinct: aynı bölüm iki kez eklenmesin
         val uniqueEpisodes = episodes.distinctBy { it.data ?: "${it.season}-${it.episode}" }
 
         return newTvSeriesLoadResponse(title, url, type, uniqueEpisodes) {
@@ -350,13 +348,7 @@ class DiziBal : MainAPI() {
                 if (fullIframe.contains("youtube.com") || fullIframe.contains("google")) continue
 
                 val ok = loadExtractor(fullIframe, data, subtitleCallback) { link ->
-                    // Doğrudan iletiyoruz; isim değiştirmek istersek copy kullanırız
-                    callback(
-                        link.copy(
-                            name = if (link.name.startsWith("DiziBal")) link.name
-                            else "DiziBal - ${link.name}"
-                        )
-                    )
+                    callback(link)
                 }
                 if (ok) found = true
             }
@@ -369,11 +361,8 @@ class DiziBal : MainAPI() {
 
     private fun cleanTitle(raw: String): String {
         return raw
-            // Sondaki "izle" ekini at
             .replace(Regex("(?i)\\s+izle\\s*$"), "")
-            // "(2023)" gibi yıl parantezini at
             .replace(Regex("""\s*\(\d{4}\)\s*$"""), "")
-            // "dizi/film/anime izle" kalıplarını at
             .replace(Regex("(?i)\\s*(?:dizi|film|anime)\\s+izle.*$"), "")
             .trim()
     }
