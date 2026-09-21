@@ -1,162 +1,460 @@
+```kotlin
 package com.UmayTrade
 
-import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
 
 class TRasyalog : MainAPI() {
-    override var mainUrl        = "https://asyalog.co"
-    override var name           = "AsyaLog"
-    override val hasMainPage    = true
-    override var lang           = "tr"
+
+    override var mainUrl = "https://asyalog.co"
+    override var name = "AsyaLog"
+    override val hasMainPage = true
+    override var lang = "tr"
     override val hasQuickSearch = false
     override val supportedTypes = setOf(TvType.TvSeries)
 
     override var sequentialMainPage = true
-    override var sequentialMainPageDelay       = 500L
+    override var sequentialMainPageDelay = 500L
     override var sequentialMainPageScrollDelay = 500L
 
     override val mainPage = mainPageOf(
-        "${mainUrl}/diziler/ulke/guney-kore/" to "Kore Dizileri",
-        "${mainUrl}/diziler/ulke/cin/" to "Çin Dizileri",
-        "${mainUrl}/diziler/ulke/tayland/" to "Tayland Dizileri",
-        "${mainUrl}/diziler/ulke/japonya/" to "Japon Diziler",
-        "${mainUrl}/diziler/ulke/endonezya/" to "Endonezya Diziler",
-        "${mainUrl}/devam-eden-diziler/" to "Devam eden Diziler"
+        "$mainUrl/diziler/ulke/guney-kore/" to "Kore Dizileri",
+        "$mainUrl/diziler/ulke/cin/" to "Çin Dizileri",
+        "$mainUrl/diziler/ulke/tayland/" to "Tayland Dizileri",
+        "$mainUrl/diziler/ulke/japonya/" to "Japon Dizileri",
+        "$mainUrl/diziler/ulke/endonezya/" to "Endonezya Dizileri",
+        "$mainUrl/devam-eden-diziler/" to "Devam Eden Diziler"
     )
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get("${request.data}/page/$page/").document
-        val home = document.select("div.frag-k").mapNotNull { 
-            it.toMainPageResult() 
-        }
-        return newHomePageResponse(request.name, home)
-    }
+    // ---------------------------------------------------------
+    // ANA SAYFA
+    // ---------------------------------------------------------
 
-    private fun Element.toMainPageResult(): SearchResponse? {
-        val title = this.selectFirst("a.baslik span")?.text()?.trim()
-            ?: this.selectFirst("a.resim")?.attr("title")?.trim() 
-            ?: return null
-        
-        val href = fixUrlNull(this.selectFirst("a.resim")?.attr("href") 
-            ?: this.selectFirst("a.baslik")?.attr("href")) 
-            ?: return null
+    override suspend fun getMainPage(
+        page: Int,
+        request: MainPageRequest
+    ): HomePageResponse {
 
-        val posterUrl = this.selectFirst("a.resim img")?.let { img ->
-            fixUrlNull(
-                img.attr("src").takeIf { it.isNotBlank() }
-                    ?: img.attr("data-src")
-            )
+        val url = if (page <= 1) {
+            request.data
+        } else {
+            "${request.data.trimEnd('/')}/page/$page/"
         }
 
-        return newTvSeriesSearchResponse(title, href, TvType.TvSeries) { 
-            this.posterUrl = posterUrl 
-        }
-    }
-
-    override suspend fun search(query: String): List<SearchResponse> {
-        val encodedQuery = query.trim().replace(" ", "+")
-        val document = app.get("${mainUrl}/?s=$encodedQuery").document
-        return document.select("div.frag-k, div.post-container, .sag-liste li").mapNotNull { 
-            it.toMainPageResult() 
-        }
-    }
-
-    override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
-
-    override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
-        val title = document.selectFirst(".ssag h1")?.text()?.trim()
-            ?: document.selectFirst("h1")?.text()?.trim()
-            ?: document.title().split("|", "-").firstOrNull()?.trim()
+        val results = document
+            .select(
+                "div.frag-k, " +
+                "div.post-container, " +
+                ".sag-liste li"
+            )
+            .mapNotNull { it.toSearchResponse() }
+
+        return newHomePageResponse(
+            request.name,
+            results
+        )
+    }
+
+    // ---------------------------------------------------------
+    // SEARCH
+    // ---------------------------------------------------------
+
+    override suspend fun search(query: String): List<SearchResponse> {
+
+        val encodedQuery = query
+            .trim()
+            .replace(" ", "+")
+
+        val document = app.get(
+            "$mainUrl/?s=$encodedQuery"
+        ).document
+
+        return document
+            .select(
+                "div.frag-k, " +
+                "div.post-container, " +
+                ".sag-liste li"
+            )
+            .mapNotNull { it.toSearchResponse() }
+    }
+
+    override suspend fun quickSearch(
+        query: String
+    ): List<SearchResponse> = search(query)
+
+    // ---------------------------------------------------------
+    // SEARCH RESULT
+    // ---------------------------------------------------------
+
+    private fun Element.toSearchResponse(): SearchResponse? {
+
+        val title =
+            selectFirst("a.baslik span")
+                ?.text()
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: selectFirst("a.resim")
+                    ?.attr("title")
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                ?: selectFirst(".dizi-isim")
+                    ?.text()
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                ?: return null
+
+        val href =
+            selectFirst("a.resim")
+                ?.attr("href")
+                ?: selectFirst("a.baslik")
+                    ?.attr("href")
+                ?: selectFirst("a[href*='/dizi/']")
+                    ?.attr("href")
+                ?: return null
+
+        val fixedUrl = fixUrlNull(href)
             ?: return null
 
-        val posterElement = document.selectFirst(".afis img")
-        val poster = fixUrlNull(posterElement?.attr("src")?.takeIf { it.isNotEmpty() }
-            ?: posterElement?.attr("data-src"))
+        val posterUrl =
+            selectFirst("a.resim img")
+                ?.let { image ->
 
-        val description = document.selectFirst(".ozet, .aciklama")?.text()?.trim()
-        val tags = document.select(".kategori a, .post-tags a, span.genre").mapNotNull { it.text()?.trim() }.distinct()
+                    fixUrlNull(
+                        image.attr("src")
+                            .takeIf { it.isNotBlank() }
+                            ?: image.attr("data-src")
+                            .takeIf { it.isNotBlank() }
+                            ?: image.attr("data-lazy-src")
+                            .takeIf { it.isNotBlank() }
+                    )
+                }
+
+        return newTvSeriesSearchResponse(
+            title,
+            fixedUrl,
+            TvType.TvSeries
+        ) {
+            this.posterUrl = posterUrl
+        }
+    }
+
+    // ---------------------------------------------------------
+    // LOAD DIZI
+    // ---------------------------------------------------------
+
+    override suspend fun load(
+        url: String
+    ): LoadResponse? {
+
+        val document = app.get(url).document
+
+        val title =
+            document.selectFirst(".dizi-bilgi .ssag h1")
+                ?.text()
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: document.selectFirst("h1")
+                    ?.text()
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                ?: document.title()
+                    .substringBefore("|")
+                    .trim()
+                    .takeIf { it.isNotEmpty() }
+                ?: return null
+
+        val poster =
+            document.selectFirst(".dizi-bilgi .afis img")
+                ?.let { image ->
+
+                    fixUrlNull(
+                        image.attr("src")
+                            .takeIf { it.isNotBlank() }
+                            ?: image.attr("data-src")
+                    )
+                }
+
+        val description =
+            document.selectFirst(
+                ".dizi-bilgi .aciklama, " +
+                ".ozet, " +
+                ".aciklama"
+            )
+                ?.text()
+                ?.trim()
+
+        val tags =
+            document.select(
+                ".kategori a, " +
+                ".post-tags a, " +
+                "span.genre"
+            )
+                .mapNotNull {
+                    it.text()
+                        .trim()
+                        .takeIf { text -> text.isNotEmpty() }
+                }
+                .distinct()
 
         val episodes = mutableListOf<Episode>()
 
-        // 1. Parse standard list structure and range-based bundles
-        val episodeElements = document.select("li.sec_bolum a, .dizi-bolumler a[href*=/bolum/], .bolum-listesi a, #bolumler a, a[href*=-bolum]")
-        episodeElements.forEach { element ->
-            val href = fixUrlNull(element.attr("href")) ?: return@forEach
-            if (!href.contains("/bolum/")) return@forEach
-            if (href.contains("fragman", ignoreCase = true)) return@forEach
+        // =====================================================
+        // ASYALOG GERÇEK BÖLÜM YAPISI
+        //
+        // Örnek:
+        //
+        // 01-04. Bölüm
+        // https://asyalog.co/bolum/...-1-4-bolum/
+        //
+        // 05-08. Bölüm
+        // https://asyalog.co/bolum/...-5-8-bolum/
+        //
+        // 13-16. Bölüm
+        // https://asyalog.co/bolum/...-13-16-bolum/
+        //
+        // Paket içindeki gerçek bölüm yolları:
+        //
+        // /13-16-bolum/
+        // /13-16-bolum/2/
+        // /13-16-bolum/3/
+        // /13-16-bolum/4/
+        // =====================================================
 
-            val epName = element.attr("title").trim().ifEmpty { element.text().trim() }
-            val cleanPath = href.removeSuffix("/").substringAfterLast("/")
-            
-            val rangeMatch = """(\d+)-(\d+)-bolum""".toRegex().find(cleanPath)
+        val episodeRows = document.select(
+            ".dizi-bolumler ul.scroll-liste > li"
+        )
+
+        for (row in episodeRows) {
+
+            val link =
+                row.selectFirst("a[href*='/bolum/']")
+                    ?: continue
+
+            val href =
+                fixUrlNull(link.attr("href"))
+                    ?: continue
+
+            val rangeText =
+                row.selectFirst(".blm")
+                    ?.text()
+                    ?.trim()
+                    ?: link.text().trim()
+
+            if (rangeText.isBlank()) {
+                continue
+            }
+
+            // -------------------------------------------------
+            // 13-16. Bölüm
+            // -------------------------------------------------
+
+            val rangeMatch = Regex(
+                """(\d+)\s*-\s*(\d+)"""
+            ).find(rangeText)
+
             if (rangeMatch != null) {
-                val start = rangeMatch.groupValues[1].toInt()
-                val end = rangeMatch.groupValues[2].toInt()
-                for (i in start..end) {
-                    val epUrl = if (i == start) {
-                        href
-                    } else {
-                        val partNum = i - start + 1
-                        if (href.endsWith("/")) "${href}${partNum}/" else "${href}/${partNum}/"
+
+                val start =
+                    rangeMatch.groupValues[1].toIntOrNull()
+
+                val end =
+                    rangeMatch.groupValues[2].toIntOrNull()
+
+                if (start != null && end != null && end >= start) {
+
+                    for (episodeNumber in start..end) {
+
+                        val part =
+                            episodeNumber - start + 1
+
+                        val episodeUrl =
+                            if (part == 1) {
+                                href.trimEnd('/')
+                            } else {
+                                "${href.trimEnd('/')}/$part/"
+                            }
+
+                        episodes.add(
+                            newEpisode(episodeUrl) {
+
+                                name =
+                                    "$episodeNumber. Bölüm"
+
+                                episode =
+                                    episodeNumber
+
+                                season = 1
+                            }
+                        )
                     }
-                    episodes.add(newEpisode(epUrl) {
-                        this.name = "$i. Bölüm"
-                        this.episode = i
-                    })
                 }
-            } else {
-                val singleMatch = """(\d+)-bolum""".toRegex().find(cleanPath)
-                val epNum = singleMatch?.groupValues?.get(1)?.toIntOrNull()
-                    ?: """(\d+)""".toRegex().find(epName)?.groupValues?.get(1)?.toIntOrNull()
-                
-                episodes.add(newEpisode(href) {
-                    this.name = if (epNum != null) "$epNum. Bölüm" else epName
-                    this.episode = epNum
-                })
+
+                continue
             }
+
+            // -------------------------------------------------
+            // Tek bölüm varsa
+            // -------------------------------------------------
+
+            val singleEpisode =
+                Regex("""(\d+)""")
+                    .find(rangeText)
+                    ?.groupValues
+                    ?.getOrNull(1)
+                    ?.toIntOrNull()
+
+            episodes.add(
+                newEpisode(href) {
+
+                    name =
+                        if (singleEpisode != null) {
+                            "$singleEpisode. Bölüm"
+                        } else {
+                            rangeText
+                        }
+
+                    episode =
+                        singleEpisode
+
+                    season = 1
+                }
+            )
         }
 
-        // 2. Fallback to tab headers if episodes list is still empty (old/alternative design)
+        // =====================================================
+        // YEDEK PARSE
+        //
+        // Bazı sayfalarda .scroll-liste yapısı değişirse
+        // /bolum/ linklerini doğrudan tarıyoruz.
+        // =====================================================
+
         if (episodes.isEmpty()) {
-            val tabHeaders = document.select("ul.sekme-baslik li")
-            tabHeaders.forEach { tab ->
-                val targetId = tab.attr("rel") ?: tab.selectFirst("a")?.attr("rel") ?: return@forEach
-                if (!targetId.startsWith("bolum")) return@forEach
-                val epName = tab.text().trim()
-                val rangeMatch = """(\d+)\s*-\s*(\d+)""".toRegex().find(epName)
 
-                if (rangeMatch != null) {
-                    val start = rangeMatch.groupValues[1].toInt()
-                    val end = rangeMatch.groupValues[2].toInt()
-                    for (i in start..end) {
-                        val episodeDataUrl = "$url#$targetId?ep=$i"
-                        episodes.add(newEpisode(episodeDataUrl) {
-                            this.name = "$i. Bölüm"
-                            this.episode = i
-                        })
+            val links = document.select(
+                "a[href*='/bolum/']"
+            )
+
+            for (link in links) {
+
+                val href =
+                    fixUrlNull(link.attr("href"))
+                        ?: continue
+
+                val text =
+                    link.selectFirst(".blm")
+                        ?.text()
+                        ?.trim()
+                        ?: link.text().trim()
+
+                if (text.isBlank()) {
+                    continue
+                }
+
+                val match =
+                    Regex(
+                        """(\d+)\s*-\s*(\d+)"""
+                    ).find(text)
+
+                if (match != null) {
+
+                    val start =
+                        match.groupValues[1].toIntOrNull()
+
+                    val end =
+                        match.groupValues[2].toIntOrNull()
+
+                    if (start != null && end != null) {
+
+                        for (episodeNumber in start..end) {
+
+                            val part =
+                                episodeNumber - start + 1
+
+                            val episodeUrl =
+                                if (part == 1) {
+                                    href.trimEnd('/')
+                                } else {
+                                    "${href.trimEnd('/')}/$part/"
+                                }
+
+                            episodes.add(
+                                newEpisode(episodeUrl) {
+
+                                    name =
+                                        "$episodeNumber. Bölüm"
+
+                                    episode =
+                                        episodeNumber
+
+                                    season = 1
+                                }
+                            )
+                        }
                     }
+
                 } else {
-                    val epNum = """(\d+)""".toRegex().find(epName)?.groupValues?.get(1)?.toIntOrNull()
-                    episodes.add(newEpisode("$url#$targetId") {
-                        this.name = epName
-                        this.episode = epNum
-                    })
+
+                    val episodeNumber =
+                        Regex("""(\d+)""")
+                            .find(text)
+                            ?.groupValues
+                            ?.getOrNull(1)
+                            ?.toIntOrNull()
+
+                    episodes.add(
+                        newEpisode(href) {
+
+                            name =
+                                if (episodeNumber != null) {
+                                    "$episodeNumber. Bölüm"
+                                } else {
+                                    text
+                                }
+
+                            episode =
+                                episodeNumber
+
+                            season = 1
+                        }
+                    )
                 }
             }
         }
 
-        val sortedEpisodes = episodes.distinctBy { it.data }.sortedBy { it.episode ?: Int.MAX_VALUE }
+        // -----------------------------------------------------
+        // DUPLICATE TEMİZLE
+        // -----------------------------------------------------
 
-        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, sortedEpisodes) {
-            this.posterUrl = poster
-            this.plot = description
+        val sortedEpisodes =
+            episodes
+                .distinctBy { it.data }
+                .sortedWith(
+                    compareBy<Episode> {
+                        it.season ?: 1
+                    }.thenBy {
+                        it.episode ?: Int.MAX_VALUE
+                    }
+                )
+
+        return newTvSeriesLoadResponse(
+            title,
+            url,
+            TvType.TvSeries,
+            sortedEpisodes
+        ) {
+
+            posterUrl = poster
+            plot = description
             this.tags = tags
         }
     }
+
+    // ---------------------------------------------------------
+    // VIDEO LINKLERİ
+    // ---------------------------------------------------------
 
     override suspend fun loadLinks(
         data: String,
@@ -164,31 +462,128 @@ class TRasyalog : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val fragmentParts = data.split("#")
-        val pageUrl = fragmentParts[0]
 
-        val rawFragment = if (fragmentParts.size > 1) fragmentParts[1] else null
-        val targetTabId = rawFragment?.substringBefore("?")
+        val episodeUrl =
+            data
+                .substringBefore("#")
+                .trim()
 
-        val document = app.get(pageUrl).document
-
-        val targetElement = if (!targetTabId.isNullOrEmpty()) {
-            document.selectFirst("div#$targetTabId") ?: document
-        } else {
-            document
+        if (episodeUrl.isBlank()) {
+            return false
         }
 
-        targetElement.select("iframe").forEach { element ->
-            val src = element.attr("src").ifBlank {
-                element.attr("data-url").ifBlank { element.attr("data-src") }
-            }.trim()
+        // -----------------------------------------------------
+        // Bölüm sayfasını aç
+        // -----------------------------------------------------
 
-            if (src.isNotEmpty() && !src.startsWith("javascript")) {
-                val fixedUrl = if (src.startsWith("//")) "https:$src" else src
-                loadExtractor(fixedUrl, pageUrl, subtitleCallback, callback)
+        val document =
+            app.get(
+                episodeUrl,
+                referer = mainUrl
+            ).document
+
+        var found = false
+
+        // =====================================================
+        // 1. ASYALOG'UN GERÇEK VIDEO ALANI
+        //
+        // <span id="plyg">
+        //     <iframe src="//odnoklassniki.ru/videoembed/...">
+        // =====================================================
+
+        val plygIframe =
+            document.selectFirst(
+                "#plyg iframe"
+            )
+
+        if (plygIframe != null) {
+
+            val src =
+                plygIframe.attr("src")
+                    .trim()
+
+            if (src.isNotBlank()) {
+
+                val videoUrl =
+                    normalizeUrl(src)
+
+                loadExtractor(
+                    videoUrl,
+                    episodeUrl,
+                    subtitleCallback,
+                    callback
+                )
+
+                found = true
             }
         }
 
-        return true
+        // =====================================================
+        // 2. YEDEK: TÜM IFRAME'LER
+        // =====================================================
+
+        if (!found) {
+
+            document.select(
+                "iframe"
+            ).forEach { iframe ->
+
+                val src =
+                    iframe.attr("src")
+                        .ifBlank {
+                            iframe.attr("data-src")
+                        }
+                        .ifBlank {
+                            iframe.attr("data-url")
+                        }
+                        .trim()
+
+                if (
+                    src.isBlank() ||
+                    src.startsWith("javascript:", true)
+                ) {
+                    return@forEach
+                }
+
+                val videoUrl =
+                    normalizeUrl(src)
+
+                loadExtractor(
+                    videoUrl,
+                    episodeUrl,
+                    subtitleCallback,
+                    callback
+                )
+
+                found = true
+            }
+        }
+
+        return found
+    }
+
+    // ---------------------------------------------------------
+    // URL NORMALIZE
+    // ---------------------------------------------------------
+
+    private fun normalizeUrl(
+        url: String
+    ): String {
+
+        val clean =
+            url.trim()
+
+        return when {
+
+            clean.startsWith("//") ->
+                "https:$clean"
+
+            clean.startsWith("/") ->
+                "$mainUrl$clean"
+
+            else ->
+                clean
+        }
     }
 }
+```
