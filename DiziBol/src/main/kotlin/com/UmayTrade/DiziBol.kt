@@ -8,7 +8,7 @@ import com.lagradost.cloudstream3.utils.loadExtractor
 import org.json.JSONObject
 import java.net.URLEncoder
 
-class DiziBal : MainAPI() {
+class DiziBol : MainAPI() {
     override var mainUrl = "https://dizibol.org"
     override var name = "DiziBol"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
@@ -20,7 +20,7 @@ class DiziBal : MainAPI() {
 
         private val defaultHeaders = mapOf(
             "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Referer" to "https://dizibal.org/"
+            "Referer" to "https://dizibol.org/"
         )
     }
 
@@ -35,12 +35,11 @@ class DiziBal : MainAPI() {
             return newHomePageResponse(allPages)
         }
 
-        // Parse each section with an h2 heading and a row of content cards
         val sections = doc.select("section, div.container-site > div")
         for (sec in sections) {
             val titleEl = sec.selectFirst("h2") ?: continue
             val rawTitle = titleEl.text().trim()
-            if (rawTitle.isBlank() || rawTitle.equals("DiziBal", ignoreCase = true)) continue
+            if (rawTitle.isBlank() || rawTitle.equals("DiziBol", ignoreCase = true)) continue
 
             val cards = sec.select("a[href*='/series/'], a[href*='/movie/'], a[href*='/anime/']")
             val items = cards.mapNotNull { a ->
@@ -173,10 +172,9 @@ class DiziBal : MainAPI() {
             }
         }
 
-        // TV Series or Anime: Extract all seasons and episodes
+        // TV Series or Anime
         val cleanBaseUrl = url.split("?").first().removeSuffix("/")
 
-        // Discover available seasons from season tabs (e.g. ?sezon=2#bolumler)
         val seasonNumbers = doc.select("a[href*='sezon=']").mapNotNull {
             Regex("""sezon=(\d+)""").find(it.attr("href"))?.groupValues?.get(1)?.toIntOrNull()
         }.distinct().sorted()
@@ -195,7 +193,6 @@ class DiziBal : MainAPI() {
                 }
             }
 
-            // Cards with episode links
             val epCards = seasonDoc.select("a[href*='/season/$s/episode/']")
             val distinctCards = if (epCards.isNotEmpty()) {
                 epCards
@@ -255,7 +252,7 @@ class DiziBal : MainAPI() {
 
         var found = false
 
-        // 1. Pilavyer player integration (data-pv attribute)
+        // 1. Pilavyer player
         val dataPv = watchPage.selectFirst("div[data-pv]")?.attr("data-pv")
         val coreScriptSrc = watchPage.selectFirst("script[src*='pilavyerplay'], script[src*='/assets/js/core.js']")?.attr("src")
 
@@ -282,7 +279,6 @@ class DiziBal : MainAPI() {
                     val streamUrl = playerJson.optString("stream")
 
                     if (!streamUrl.isNullOrBlank()) {
-                        // Extract subtitles
                         val subsArray = playerJson.optJSONArray("subs")
                         if (subsArray != null) {
                             for (i in 0 until subsArray.length()) {
@@ -295,7 +291,6 @@ class DiziBal : MainAPI() {
                             }
                         }
 
-                        // Extract available audio tracks
                         val audiosArray = playerJson.optJSONArray("audios")
                         val audioLabels = mutableListOf<String>()
                         if (audiosArray != null) {
@@ -309,9 +304,9 @@ class DiziBal : MainAPI() {
                         }
 
                         val streamName = if (audioLabels.isNotEmpty()) {
-                            "DiziBal (${audioLabels.joinToString(" / ")})"
+                            "DiziBol (${audioLabels.joinToString(" / ")})"
                         } else {
-                            "DiziBal (HLS)"
+                            "DiziBol (HLS)"
                         }
 
                         callback(
@@ -334,7 +329,7 @@ class DiziBal : MainAPI() {
             } catch (_: Exception) {}
         }
 
-        // 2. Fallback: inspect any embedded iframes or video tags
+        // 2. Fallback: iframe / video tag
         if (!found) {
             val iframes = watchPage.select("iframe[src]").map { it.attr("src") }
             for (iframe in iframes) {
@@ -342,19 +337,7 @@ class DiziBal : MainAPI() {
                 if (fullIframe.contains("youtube.com") || fullIframe.contains("google")) continue
 
                 if (loadExtractor(fullIframe, data, subtitleCallback) { link ->
-                    callback(
-                        ExtractorLink(
-                            link.source ?: "DiziBal",
-                            "DiziBal - ${link.name}",
-                            link.url ?: "",
-                            link.referer ?: mainUrl,
-                            link.quality,
-                            link.headers ?: emptyMap(),
-                            link.extractorData,
-                            link.type,
-                            link.audioTracks ?: emptyList()
-                        )
-                    )
+                    callback(link)
                 }) {
                     found = true
                 }
@@ -367,8 +350,9 @@ class DiziBal : MainAPI() {
     // ── Helpers ─────────────────────────────────────────────────────────
 
     private fun cleanTitle(raw: String): String {
-        return raw.replace(Regex("(?i)\\s*(?:dizi|film|anime)\\s*izle"), "")
-            .replace(Regex("(?i)\\s*izle.*"), "")
+        return raw
+            .replace(Regex("(?i)\\s*(?:dizi|film|anime)\\s*izle"), "")
+            .replace(Regex("(?i)\\s*izle\\b.*"), "")
             .replace(Regex("(?i)\\s*\\(\\d{4}\\).*"), "")
             .trim()
     }
