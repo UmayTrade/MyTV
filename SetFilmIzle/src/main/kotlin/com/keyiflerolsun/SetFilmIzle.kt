@@ -82,7 +82,6 @@ class SetFilmIzle : MainAPI() {
 
     // ==================================================================
     // ==========   3) EKLENTİ YÜKLENDİĞİNDE ÇALIŞIR         ============
-    // ==========   (mainUrl/name/lang'den SONRA!)           ============
     // ==================================================================
     init {
         Log.e(TAG, "$PREFIX########################################")
@@ -136,11 +135,43 @@ class SetFilmIzle : MainAPI() {
         log("request.data = ${request.data}")
 
         return try {
-            val document = app.get(request.data).document
+            // Sayfa URL'sini oluştur (pagination desteği)
+            val pageUrl = if (page > 1) "${request.data}page/$page/" else request.data
+            log("Kullanılacak URL = $pageUrl")
+
+            val document = app.get(pageUrl).document
             log("document.title = ${document.title()}")
             log("HTML uzunluğu = ${document.html().length}")
 
-            val articles = document.select("div.items article")
+            // -------- SELECTOR DENEMELERİ --------
+            // Sitenin yapısı değişmiş olabilir, çeşitli selector'ları deniyoruz
+            val articles = when {
+                document.select("div.items article").isNotEmpty() -> {
+                    log("Selector kullanıldı: div.items article")
+                    document.select("div.items article")
+                }
+                document.select("div.items > article").isNotEmpty() -> {
+                    log("Selector kullanıldı: div.items > article")
+                    document.select("div.items > article")
+                }
+                document.select("article.item").isNotEmpty() -> {
+                    log("Selector kullanıldı: article.item")
+                    document.select("article.item")
+                }
+                document.select("div.movies-list article").isNotEmpty() -> {
+                    log("Selector kullanıldı: div.movies-list article")
+                    document.select("div.movies-list article")
+                }
+                document.select("div.movie-box").isNotEmpty() -> {
+                    log("Selector kullanıldı: div.movie-box")
+                    document.select("div.movie-box")
+                }
+                else -> {
+                    logW("Bilinen selector çalışmadı! Fallback: tüm article'lar")
+                    document.select("article")
+                }
+            }
+
             log("Bulunan 'article' sayısı = ${articles.size}")
 
             val home = articles.mapNotNull { it.toMainPageResult() }
@@ -156,16 +187,38 @@ class SetFilmIzle : MainAPI() {
     }
 
     private fun Element.toMainPageResult(): SearchResponse? {
-        val title = this.selectFirst("h2")?.text() ?: run {
-            logW("toMainPageResult: h2 bulunamadı, atlanıyor")
+        // -------- BAŞLIK --------
+        val title = when {
+            this.selectFirst("h2") != null -> this.selectFirst("h2")!!.text()
+            this.selectFirst("h3") != null -> this.selectFirst("h3")!!.text()
+            this.selectFirst("div.title a") != null -> this.selectFirst("div.title a")!!.text()
+            this.selectFirst("a.title") != null -> this.selectFirst("a.title")!!.text()
+            this.selectFirst("h4") != null -> this.selectFirst("h4")!!.text()
+            else -> {
+                logW("toMainPageResult: başlık bulunamadı, atlanıyor")
+                return null
+            }
+        }
+
+        // -------- HREF --------
+        val href = fixUrlNull(
+            this.selectFirst("a")?.attr("href")
+                ?: this.selectFirst("div.title a")?.attr("href")
+        ) ?: run {
+            logW("toMainPageResult: href bulunamadı - $title")
             return null
         }
-        val href = fixUrlNull(this.selectFirst("a")?.attr("href")) ?: run {
-            logW("toMainPageResult: 'a' href bulunamadı - $title")
-            return null
-        }
-        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src"))
+
+        // -------- POSTER --------
+        val posterUrl = fixUrlNull(
+            this.selectFirst("img")?.attr("data-src")
+                ?: this.selectFirst("img")?.attr("data-lazy-src")
+                ?: this.selectFirst("img")?.attr("src")
+        )
+
+        // -------- SCORE --------
         val score = this.selectFirst("span.rating")?.text()?.trim()
+            ?: this.selectFirst("div.rating")?.text()?.trim()
 
         log("→ $title | href=$href | poster=${posterUrl?.take(60)} | score=$score")
 
@@ -194,7 +247,8 @@ class SetFilmIzle : MainAPI() {
             val mainPage = app.get(mainUrl).document
             log("Ana sayfa alındı, title = ${mainPage.title()}")
 
-            val nonce = Regex("""nonce: '(.*)'""").find(mainPage.html())?.groupValues?.get(1) ?: ""
+            val nonce = Regex("""nonce: '(.*)'""").find(mainPage.html())
+                ?.groupValues?.get(1) ?: ""
             log("Bulunan nonce = '$nonce'")
 
             if (nonce.isBlank()) {
@@ -225,7 +279,16 @@ class SetFilmIzle : MainAPI() {
             log("Çıkarılan html uzunluğu = ${html.length}")
 
             val document = Jsoup.parse(html)
-            val articles = document.select("div.items article")
+
+            // Aynı selector fallback'i
+            val articles = when {
+                document.select("div.items article").isNotEmpty() ->
+                    document.select("div.items article")
+                document.select("article.item").isNotEmpty() ->
+                    document.select("article.item")
+                else -> document.select("article")
+            }
+
             log("Bulunan arama sonucu article sayısı = ${articles.size}")
 
             val results = articles.mapNotNull { it.toSearchResult() }
@@ -241,9 +304,17 @@ class SetFilmIzle : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val title = this.selectFirst("h2")?.text() ?: return null
+        val title = when {
+            this.selectFirst("h2") != null -> this.selectFirst("h2")!!.text()
+            this.selectFirst("h3") != null -> this.selectFirst("h3")!!.text()
+            this.selectFirst("div.title a") != null -> this.selectFirst("div.title a")!!.text()
+            else -> return null
+        }
         val href = fixUrlNull(this.selectFirst("a")?.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src"))
+        val posterUrl = fixUrlNull(
+            this.selectFirst("img")?.attr("data-src")
+                ?: this.selectFirst("img")?.attr("src")
+        )
 
         log("→ [arama] $title | $href")
 
@@ -282,19 +353,22 @@ class SetFilmIzle : MainAPI() {
             }
             log("title = '$title'")
 
-            val poster = fixUrlNull(document.selectFirst("div.poster img")?.attr("src"))
+            val poster = fixUrlNull(
+                document.selectFirst("div.poster img")?.attr("src")
+                    ?: document.selectFirst("div.poster img")?.attr("data-src")
+            )
             val description = document.selectFirst("div.wp-content p")?.text()?.trim()
             var year = document.selectFirst("div.extra span.C a")?.text()?.trim()?.toIntOrNull()
             val tags = document.select("div.sgeneros a").map { it.text() }
             val rating = document.selectFirst("span.dt_rating_vgs")?.text()?.trim()
-            var duration =
-                document.selectFirst("span.runtime")?.text()?.split(" ")?.first()?.trim()
-                    ?.toIntOrNull()
+            var duration = document.selectFirst("span.runtime")?.text()
+                ?.split(" ")?.first()?.trim()?.toIntOrNull()
 
-            val recommendations =
-                document.select("div.srelacionados article").mapNotNull { it.toRecommendationResult() }
+            val recommendations = document.select("div.srelacionados article")
+                .mapNotNull { it.toRecommendationResult() }
             val actors = document.select("span.valor a").map { Actor(it.text()) }
-            val trailer = Regex("""embed/(.*)\?rel""").find(document.html())?.groupValues?.get(1)
+            val trailer = Regex("""embed/(.*)\?rel""").find(document.html())
+                ?.groupValues?.get(1)
                 ?.let { "https://www.youtube.com/embed/$it" }
 
             log("poster = ${poster?.take(80)}")
@@ -321,8 +395,9 @@ class SetFilmIzle : MainAPI() {
                 log("Episode 'li' sayısı = ${episodeElements.size}")
 
                 val episodes = episodeElements.mapNotNull { el ->
-                    val epHref = fixUrlNull(el.selectFirst("h4.episodiotitle a")?.attr("href"))
-                        ?: return@mapNotNull null
+                    val epHref = fixUrlNull(
+                        el.selectFirst("h4.episodiotitle a")?.attr("href")
+                    ) ?: return@mapNotNull null
                     val epName = el.selectFirst("h4.episodiotitle a")?.ownText()?.trim()
                         ?: return@mapNotNull null
                     val epDetail = el.selectFirst("h4.episodiotitle a")?.ownText()?.trim()
@@ -380,7 +455,10 @@ class SetFilmIzle : MainAPI() {
     private fun Element.toRecommendationResult(): SearchResponse? {
         val title = this.selectFirst("a img")?.attr("alt") ?: return null
         val href = fixUrlNull(this.selectFirst("a")?.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("a img")?.attr("data-src"))
+        val posterUrl = fixUrlNull(
+            this.selectFirst("a img")?.attr("data-src")
+                ?: this.selectFirst("a img")?.attr("src")
+        )
 
         return if (href.contains("/dizi/")) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
