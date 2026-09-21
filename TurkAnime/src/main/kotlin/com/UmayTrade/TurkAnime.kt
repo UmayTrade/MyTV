@@ -201,7 +201,6 @@ class TurkAnime : MainAPI() {
                     this.name = epName
                     this.episode = epNum
                     this.season = 1
-                    this.dubStatus = DubStatus.Subbed
                 })
             }
         } catch (_: Exception) { }
@@ -223,7 +222,7 @@ class TurkAnime : MainAPI() {
             if (actors.isNotEmpty()) {
                 addActors(actors)
             }
-            this.episodes = episodes
+            addEpisodes(DubStatus.Subbed, episodes)
         }
     }
 
