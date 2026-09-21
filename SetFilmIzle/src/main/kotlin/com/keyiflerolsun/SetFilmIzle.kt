@@ -214,33 +214,25 @@ class SetFilmIzle : MainAPI() {
         partKey: String,
         referer: String
     ): Response {
-        val formData = mapOf(
-            "action" to "get_video_url",
-            "nonce" to nonce,
-            "post_id" to postId,
-            "player_name" to playerName,
-            "part_key" to partKey
-        )
+        val requestBody = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("action", "get_video_url")
+            .addFormDataPart("nonce", nonce)
+            .addFormDataPart("post_id", postId)
+            .addFormDataPart("player_name", playerName)
+            .addFormDataPart("part_key", partKey)
+            .build()
 
-        Log.d("STF", "formData -> $formData")
+        Log.d("STF", "post_id=$postId | player_name=$playerName | part_key=$partKey")
 
-        val requestBody = MultipartBody.Builder().setType(MultipartBody.FORM).apply {
-            formData.forEach { (key, value) -> addFormDataPart(key, value) }
-        }.build()
+        val request = Request.Builder()
+            .url("${mainUrl}/wp-admin/admin-ajax.php")
+            .post(requestBody)
+            .addHeader("Referer", referer)
+            .addHeader("X-Requested-With", "XMLHttpRequest")
+            .build()
 
-        val headers = mapOf(
-            "Referer" to referer,
-            "Content-Type" to "multipart/form-data; boundary=---------------------------112453778312642376182726606734",
-        )
-
-        val request =
-            Request.Builder().url("${mainUrl}/wp-admin/admin-ajax.php").post(requestBody).apply {
-                headers.forEach { (key, value) -> addHeader(key, value) }
-            }.build()
-
-        val client = OkHttpClient()
-
-        return client.newCall(request).execute()
+        return OkHttpClient().newCall(request).execute()
     }
 
     override suspend fun loadLinks(
@@ -250,8 +242,10 @@ class SetFilmIzle : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         Log.d("STF", "data » $data")
-        println("STF data » $data")
         val document = app.get(data).document
+
+        val nonce = document.selectFirst("div#playex")?.attr("data-nonce") ?: ""
+        Log.d("STF", "nonce -> $nonce")
 
         document.select("nav.player a").map { element ->
             val sourceId = element.attr("data-post-id")
@@ -261,45 +255,50 @@ class SetFilmIzle : MainAPI() {
             Triple(name, sourceId, partKey)
         }.forEach { (name, sourceId, partKey) ->
             if (sourceId.contains("event")) return@forEach
-            if (sourceId == "") return@forEach
-            var setKey = "SetPlay"
-
-            val nonce = document.selectFirst("div#playex")?.attr("data-nonce") ?: ""
-            Log.d("STF", "nonce -> $nonce")
+            if (sourceId.isBlank()) return@forEach
+            if (name.isBlank()) return@forEach
 
             val multiPart = sendMultipartRequest(nonce, sourceId, name, partKey, data)
             val sourceBody = multiPart.body.string()
-            Log.d("STf", "sourceBody -> $sourceBody")
-            val sourceIframe =
-                JSONObject(sourceBody).optJSONObject("data")?.optString("url") ?: return@forEach
+            Log.d("STF", "sourceBody -> $sourceBody")
+
+            val sourceIframe = JSONObject(sourceBody)
+                .optJSONObject("data")
+                ?.optString("url")
+                ?.takeIf { it.isNotBlank() }
+                ?: return@forEach
+
             Log.d("STF", "iframe » $sourceIframe")
-            println("STF iframe » $sourceIframe")
 
-            if (sourceIframe.contains("vctplay.site")) {
-                val vctId = sourceIframe.split("/").last()
-                val masterUrl = "https://vctplay.site/manifests/$vctId/master.txt"
-                callback.invoke(
-                    newExtractorLink(
-                        source = "FastPlay",
-                        name = "FastPlay",
-                        url = masterUrl,
-                        ExtractorLinkType.M3U8
-                    ) {
-                        referer = "https://vctplay.site/"
-                        quality = Qualities.Unknown.value
-                    }
-                )
-            }
+            when {
+                sourceIframe.contains("vctplay.site") -> {
+                    val vctId = sourceIframe.split("/").last()
+                    val masterUrl = "https://vctplay.site/manifests/$vctId/master.txt"
+                    callback.invoke(
+                        newExtractorLink(
+                            source = "FastPlay",
+                            name = "FastPlay",
+                            url = masterUrl,
+                            ExtractorLinkType.M3U8
+                        ) {
+                            referer = "https://vctplay.site/"
+                            quality = Qualities.Unknown.value
+                        }
+                    )
+                }
 
-            if (sourceIframe.contains("explay.store") || sourceIframe.contains("setplay.site")) {
-                loadExtractor(
-                    "${sourceIframe}?partKey=${partKey}",
-                    "${mainUrl}/",
-                    subtitleCallback,
-                    callback
-                )
-            } else {
-                loadExtractor(sourceIframe, "${mainUrl}/", subtitleCallback, callback)
+                sourceIframe.contains("explay.store") || sourceIframe.contains("setplay.site") -> {
+                    loadExtractor(
+                        "${sourceIframe}?partKey=${partKey}",
+                        "${mainUrl}/",
+                        subtitleCallback,
+                        callback
+                    )
+                }
+
+                else -> {
+                    loadExtractor(sourceIframe, "${mainUrl}/", subtitleCallback, callback)
+                }
             }
         }
 
