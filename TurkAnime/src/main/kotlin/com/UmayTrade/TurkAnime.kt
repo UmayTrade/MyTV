@@ -133,81 +133,74 @@ class TurkAnime : MainAPI() {
     // -------------------------------------------------------------------------
 
     override suspend fun load(url: String): LoadResponse {
-        val slug = url.trimEnd('/').substringAfterLast('/')
-        val animeBase = "$ARCHIVE_RAW/$slug"
+    val slug = url.trimEnd('/').substringAfterLast('/')
+    val animeBase = "$ARCHIVE_RAW/$slug"
 
-        // 1. info.json Çek
-        var title = slugToTitle(slug)
-        var description: String? = null
-        val tags = mutableListOf<String>()
-        var score: Double? = null
+    var title = slugToTitle(slug)
+    var description: String? = null
+    val tags = mutableListOf<String>()
+    var score: Double? = null
+    var archivePoster: String? = null      // YENİ
+    var archiveBanner: String? = null      // YENİ
 
-        try {
-            val infoText = app.get("$animeBase/info.json", headers = commonHeaders, timeout = 10).text
-            val info = JSONObject(infoText)
+    try {
+        val infoText = app.get("$animeBase/info.json", headers = commonHeaders, timeout = 10).text
+        val info = JSONObject(infoText)
 
-            val altTitle = info.optString("Japonca").takeIf { it.isNotBlank() }
-            if (!altTitle.isNullOrBlank() && !altTitle.equals("?????", ignoreCase = true)) {
-                title = "$title ($altTitle)"
-            }
-
-            description = info.optString("Özet").takeIf { it.isNotBlank() }
-                ?: info.optString("ozet").takeIf { it.isNotBlank() }
-
-            val genresArr = info.optJSONArray("Anime Türü") ?: info.optJSONArray("genres")
-            if (genresArr != null) {
-                for (i in 0 until genresArr.length()) {
-                    val g = genresArr.optString(i).trim()
-                    if (g.isNotBlank()) tags.add(g)
-                }
-            }
-
-            val scoreStr = info.optString("Puanı").takeIf { it.isNotBlank() }
-                ?: info.optString("puani").takeIf { it.isNotBlank() }
-            score = scoreStr?.toDoubleOrNull()
-        } catch (_: Exception) { }
-
-        // 2. bolumler.json Çek
-        val episodes = mutableListOf<Episode>()
-        try {
-            val epsText = app.get("$animeBase/bolumler.json", headers = commonHeaders, timeout = 10).text
-            val epsArr = JSONArray(epsText)
-
-            for (i in 0 until epsArr.length()) {
-                val epItem = epsArr.optJSONArray(i) ?: continue
-                val epSlug = epItem.optString(0)
-                val epName = epItem.optString(1).takeIf { it.isNotBlank() } ?: "Bölüm ${i + 1}"
-                if (epSlug.isBlank()) continue
-
-                val epNum = Regex("""(\d+)""").find(epSlug)?.groupValues?.get(1)?.toIntOrNull() ?: (i + 1)
-                val epDataUrl = "$animeBase/$epSlug.json"
-
-                episodes.add(newEpisode(epDataUrl) {
-                    this.name = epName
-                    this.episode = epNum
-                    this.season = 1
-                })
-            }
-        } catch (_: Exception) { }
-
-        // 3. AniList Karakterler, Seslendirmenler, HD Afiş ve Banner
-        val searchCandidate = slugToTitle(slug)
-        val (actors, banner, aniListPoster, aniListScore) = fetchAniListMetadata(searchCandidate)
-
-        val finalScore = score ?: aniListScore
-
-        return newAnimeLoadResponse(title, url, TvType.Anime) {
-            this.posterUrl = aniListPoster
-            this.backgroundPosterUrl = banner
-            this.plot = description
-            this.tags = tags
-            finalScore?.let { this.score = Score.from10(it) }
-            if (actors.isNotEmpty()) {
-                addActors(actors)
-            }
-            addEpisodes(DubStatus.Subbed, episodes)
+        val altTitle = info.optString("Japonca").takeIf { it.isNotBlank() }
+        if (!altTitle.isNullOrBlank() && !altTitle.equals("?????", ignoreCase = true)) {
+            title = "$title ($altTitle)"
         }
+
+        description = info.optString("Özet").takeIf { it.isNotBlank() }
+            ?: info.optString("ozet").takeIf { it.isNotBlank() }
+
+        val genresArr = info.optJSONArray("Anime Türü") ?: info.optJSONArray("genres")
+        if (genresArr != null) {
+            for (i in 0 until genresArr.length()) {
+                val g = genresArr.optString(i).trim()
+                if (g.isNotBlank()) tags.add(g)
+            }
+        }
+
+        val scoreStr = info.optString("Puanı").takeIf { it.isNotBlank() }
+            ?: info.optString("puani").takeIf { it.isNotBlank() }
+        score = scoreStr?.toDoubleOrNull()
+
+        // YENİ: Arşivdeki afiş/poster alanlarını oku
+        archivePoster = info.optString("Afiş").takeIf { it.isNotBlank() }
+            ?: info.optString("afis").takeIf { it.isNotBlank() }
+            ?: info.optString("Poster").takeIf { it.isNotBlank() }
+            ?: info.optString("poster").takeIf { it.isNotBlank() }
+            ?: info.optString("Resim").takeIf { it.isNotBlank() }
+            ?: info.optString("resim").takeIf { it.isNotBlank() }
+
+        archiveBanner = info.optString("Banner").takeIf { it.isNotBlank() }
+            ?: info.optString("banner").takeIf { it.isNotBlank() }
+    } catch (_: Exception) { }
+
+    // ... bölümler ...
+
+    // AniList aramasında daha doğru başlık kullan
+    val searchCandidate = title.substringBefore(" (")  // Japonca kısmını at
+    val (actors, banner, aniListPoster, aniListScore) = fetchAniListMetadata(searchCandidate)
+
+    val finalScore = score ?: aniListScore
+    val finalPoster = aniListPoster ?: archivePoster
+    val finalBanner = banner ?: archiveBanner
+
+    return newAnimeLoadResponse(title, url, TvType.Anime) {
+        this.posterUrl = finalPoster
+        this.backgroundPosterUrl = finalBanner
+        this.plot = description
+        this.tags = tags
+        finalScore?.let { this.score = Score.from10(it) }
+        if (actors.isNotEmpty()) {
+            addActors(actors)
+        }
+        addEpisodes(DubStatus.Subbed, episodes)
     }
+}
 
     // -------------------------------------------------------------------------
     // Video Linkleri & Oynatıcılar
