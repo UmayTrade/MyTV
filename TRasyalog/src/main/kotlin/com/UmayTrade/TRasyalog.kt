@@ -463,7 +463,7 @@ class TRasyalog : MainAPI() {
                         "https:$src"
 
                     src.startsWith("/") ->
-                        fixUrl(src, pageUrl)
+                        fixUrl(src)
 
                     else ->
                         src
