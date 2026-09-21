@@ -29,7 +29,8 @@ class SetFilmIzle : MainAPI() {
     /**
      * Base64 decode öncesi string'i temizler.
      * - \/ → / (JS escape)
-     * - \\ → \ (JS escape)
+     * - \\ → silinir
+     * - \ → silinir
      * - Tüm whitespace ve quote'ları atar
      * - Sadece geçerli Base64 karakterlerini bırakır
      */
@@ -210,9 +211,6 @@ class SetFilmIzle : MainAPI() {
                         results.add(sr)
                     } else {
                         errCount++
-                        if (errCount > 3) {
-                            // Sadece ilk 3 hatayı logla, gerisini sustur
-                        }
                     }
                 }
                 log("search: ${results.size} başarılı, $errCount başarısız article")
