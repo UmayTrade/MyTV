@@ -167,44 +167,74 @@ class TRasyalog : MainAPI() {
             }
             .distinct()
 
-        /*
-         * ASYALOG BÖLÜM YAPISI
-         *
-         * Örnek:
-         *
-         * 01-04. Bölüm
-         * 05-08. Bölüm
-         * 09-12. Bölüm
-         * 13-16. Bölüm
-         * 17-20. Bölüm
-         *
-         * Her paket kendi URL'sine sahip.
-         *
-         * Örneğin:
-         *
-         * 13 -> /13-16-bolum/
-         * 14 -> /13-16-bolum/2/
-         * 15 -> /13-16-bolum/3/
-         * 16 -> /13-16-bolum/4/
-         */
+        // ============================================================
+        // DEĞİŞİKLİK BURADAN BAŞLIYOR
+        // Statik HTML'de bölüm yoksa, AJAX isteği ile dinamik al
+        // ============================================================
 
-        val episodes = mutableListOf<Episode>()
-
-        val bundleLinks = document.select(
+        // 1. Adım: Önce statik HTML'den bölüm linklerini dene
+        val staticLinks = document.select(
             ".dizi-bolumler ul.scroll-liste > li a[href*='/bolum/']"
         )
 
-        /*
-         * Eğer yukarıdaki selector farklı bir sayfada
-         * çalışmazsa alternatif selectorlar.
-         */
-        val links = if (bundleLinks.isNotEmpty()) {
-            bundleLinks
+        val links: List<Element>
+
+        if (staticLinks.isNotEmpty()) {
+            // Statik HTML'de bölümler varsa, doğrudan kullan
+            links = staticLinks
         } else {
-            document.select(
-                ".dizi-bolumler a[href*='/bolum/']"
-            )
+            // 2. Adım: Statik HTML boş, AJAX isteği ile bölümleri çek
+            // Aşağıdaki ajaxUrl ve actionValue'yu
+            // tarayıcı Network panelinden bulduğunuz gerçek değerlerle değiştirin
+            val ajaxUrl = "$mainUrl/wp-admin/admin-ajax.php" // <-- Gerçek URL ile değiştirin
+            val actionValue = "bolumleri_getir" // <-- Gerçek action değeri ile değiştirin
+
+            // post_id'yi sayfadan çıkar (WordPress standart yapısı)
+            val postId = document.selectFirst("body")
+                ?.attr("class")
+                ?.let { bodyClass ->
+                    Regex("""postid-(\d+)""")
+                        .find(bodyClass)
+                        ?.groupValues
+                        ?.getOrNull(1)
+                }
+                ?: document.selectFirst("input[name='post_id']")
+                    ?.attr("value")
+                ?: document.selectFirst("[data-post-id]")
+                    ?.attr("data-post-id")
+
+            if (postId != null) {
+                try {
+                    // AJAX isteği gönder
+                    val ajaxResponse = app.post(
+                        ajaxUrl,
+                        data = mapOf(
+                            "action" to actionValue,
+                            "post_id" to postId
+                        ),
+                        headers = mapOf(
+                            "X-Requested-With" to "XMLHttpRequest",
+                            "Referer" to url
+                        )
+                    ).document
+
+                    // AJAX yanıtından bölüm linklerini çıkar
+                    links = ajaxResponse.select("a[href*='/bolum/']")
+                } catch (e: Exception) {
+                    // AJAX başarısız olursa boş liste ile devam et
+                    links = emptyList()
+                }
+            } else {
+                // post_id bulunamazsa, sayfadaki tüm /bolum/ linklerini al
+                links = document.select("a[href*='/bolum/']")
+            }
         }
+
+        // ============================================================
+        // Bölüm paketleme mantığı (orijinal kod, değişiklik yok)
+        // ============================================================
+
+        val episodes = mutableListOf<Episode>()
 
         links.forEach { element ->
 
@@ -230,13 +260,6 @@ class TRasyalog : MainAPI() {
                 return@forEach
             }
 
-            /*
-             * Örnek URL:
-             *
-             * https://asyalog.co/bolum/
-             * live-up-to-your-youth-2026-cin-13-16-bolum/
-             */
-
             val path = fixedHref
                 .substringBefore("?")
                 .substringBefore("#")
@@ -245,9 +268,6 @@ class TRasyalog : MainAPI() {
             val lastPart = path
                 .substringAfterLast('/')
 
-            /*
-             * 13-16-bolum
-             */
             val rangeMatch = Regex(
                 """(\d+)-(\d+)-bolum""",
                 RegexOption.IGNORE_CASE
@@ -271,24 +291,6 @@ class TRasyalog : MainAPI() {
 
                 for (episodeNumber in start..end) {
 
-                    /*
-                     * İlk bölüm paket URL'sinin kendisi:
-                     *
-                     * 13:
-                     * /13-16-bolum/
-                     *
-                     * Sonraki bölümler:
-                     *
-                     * 14:
-                     * /13-16-bolum/2/
-                     *
-                     * 15:
-                     * /13-16-bolum/3/
-                     *
-                     * 16:
-                     * /13-16-bolum/4/
-                     */
-
                     val partNumber =
                         episodeNumber - start + 1
 
@@ -310,10 +312,6 @@ class TRasyalog : MainAPI() {
                 }
 
             } else {
-
-                /*
-                 * Tek bölüm URL'si için fallback.
-                 */
 
                 val singleMatch = Regex(
                     """(\d+)-bolum""",
@@ -347,9 +345,6 @@ class TRasyalog : MainAPI() {
             }
         }
 
-        /*
-         * Aynı bölümün iki defa eklenmesini engelle.
-         */
         val finalEpisodes = episodes
             .distinctBy { it.data }
             .sortedWith(
@@ -387,20 +382,6 @@ class TRasyalog : MainAPI() {
         }
 
         val document = app.get(pageUrl).document
-
-        /*
-         * ASYALOG'daki gerçek player:
-         *
-         * <span id="plyg">
-         *     <iframe
-         *       src="//odnoklassniki.ru/videoembed/..."
-         *     >
-         * </iframe>
-         * </span>
-         *
-         * Öncelikle #plyg içerisindeki iframe
-         * alınır.
-         */
 
         val iframeElements = document.select(
             "#plyg iframe"
@@ -445,18 +426,6 @@ class TRasyalog : MainAPI() {
                 return@forEach
             }
 
-            /*
-             * Site protocol-relative URL kullanıyor:
-             *
-             * //odnoklassniki.ru/videoembed/...
-             *
-             * Bunu:
-             *
-             * https://odnoklassniki.ru/videoembed/...
-             *
-             * haline getiriyoruz.
-             */
-
             val fixedUrl =
                 when {
                     src.startsWith("//") ->
@@ -481,11 +450,6 @@ class TRasyalog : MainAPI() {
                 found = true
 
             } catch (_: Exception) {
-                /*
-                 * Bir iframe extractor tarafından
-                 * desteklenmiyorsa diğer iframe'lere
-                 * devam edilir.
-                 */
             }
         }
 
