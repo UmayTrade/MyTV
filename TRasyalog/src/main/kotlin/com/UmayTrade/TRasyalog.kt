@@ -38,11 +38,15 @@ class TRasyalog : MainAPI() {
             "${request.data}/page/$page/"
         }
 
+        Log.d("TRasyalog", "getMainPage: $pageUrl")
+
         val document = app.get(pageUrl).document
 
         val home = document
             .select("div.frag-k")
             .mapNotNull { it.toMainPageResult() }
+
+        Log.d("TRasyalog", "getMainPage found ${home.size} items")
 
         return newHomePageResponse(
             request.name,
@@ -98,16 +102,22 @@ class TRasyalog : MainAPI() {
             .trim()
             .replace(" ", "+")
 
+        Log.d("TRasyalog", "search: $encodedQuery")
+
         val document = app.get(
             "$mainUrl/?s=$encodedQuery"
         ).document
 
-        return document
+        val results = document
             .select(
                 "div.frag-k, div.post-container, .sag-liste li"
             )
             .mapNotNull { it.toMainPageResult() }
             .distinctBy { it.url }
+
+        Log.d("TRasyalog", "search found ${results.size} results")
+
+        return results
     }
 
     override suspend fun quickSearch(
@@ -120,7 +130,12 @@ class TRasyalog : MainAPI() {
         url: String
     ): LoadResponse? {
 
+        Log.d("TRasyalog", "========== load() START ==========")
+        Log.d("TRasyalog", "load() URL: $url")
+
         val document = app.get(url).document
+
+        Log.d("TRasyalog", "Document title tag: ${document.title()}")
 
         val title =
             document.selectFirst(".ssag h1")
@@ -137,6 +152,8 @@ class TRasyalog : MainAPI() {
                     ?.trim()
                     ?.takeIf { it.isNotEmpty() }
                 ?: return null
+
+        Log.d("TRasyalog", "load() title: $title")
 
         val posterElement = document.selectFirst(
             ".afis img"
@@ -172,9 +189,13 @@ class TRasyalog : MainAPI() {
             ".dizi-bolumler ul.scroll-liste > li a[href*='/bolum/']"
         )
 
+        Log.d("TRasyalog", "staticLinks size: ${staticLinks.size}")
+
         val links: List<Element> = if (staticLinks.isNotEmpty()) {
             staticLinks
         } else {
+            Log.d("TRasyalog", "No static links, trying AJAX fallback")
+
             val ajaxUrl = "$mainUrl/wp-admin/admin-ajax.php"
             val actionValue = "bolumleri_getir"
 
@@ -191,6 +212,8 @@ class TRasyalog : MainAPI() {
                 ?: document.selectFirst("[data-post-id]")
                     ?.attr("data-post-id")
 
+            Log.d("TRasyalog", "postId: $postId")
+
             if (postId != null) {
                 try {
                     val ajaxResponse = app.post(
@@ -205,12 +228,17 @@ class TRasyalog : MainAPI() {
                         )
                     ).document
 
-                    ajaxResponse.select("a[href*='/bolum/']")
+                    val ajaxLinks = ajaxResponse.select("a[href*='/bolum/']")
+                    Log.d("TRasyalog", "AJAX links size: ${ajaxLinks.size}")
+                    ajaxLinks
                 } catch (e: Exception) {
+                    Log.e("TRasyalog", "AJAX failed", e)
                     emptyList()
                 }
             } else {
-                document.select("a[href*='/bolum/']")
+                val fallbackLinks = document.select("a[href*='/bolum/']")
+                Log.d("TRasyalog", "Fallback links size: ${fallbackLinks.size}")
+                fallbackLinks
             }
         }
 
@@ -333,6 +361,9 @@ class TRasyalog : MainAPI() {
                 }
             )
 
+        Log.d("TRasyalog", "finalEpisodes size: ${finalEpisodes.size}")
+        Log.d("TRasyalog", "========== load() END ==========")
+
         return newTvSeriesLoadResponse(
             title,
             url,
@@ -353,13 +384,17 @@ class TRasyalog : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
 
+        Log.d("TRasyalog", "########## loadLinks START ##########")
+        Log.d("TRasyalog", "loadLinks data: $data")
+
         val pageUrl = data.substringBefore("#").trim()
-        Log.d("TRasyalog", "loadLinks called with: $pageUrl")
 
         if (pageUrl.isEmpty()) {
             Log.e("TRasyalog", "pageUrl is empty!")
             return false
         }
+
+        Log.d("TRasyalog", "pageUrl: $pageUrl")
 
         val document = app.get(pageUrl).document
 
@@ -376,18 +411,18 @@ class TRasyalog : MainAPI() {
 
         var found = false
 
-        iframeElements.forEach { iframe ->
+        iframeElements.forEachIndexed { index, iframe ->
 
             var src = iframe.attr("src").trim()
             if (src.isEmpty()) src = iframe.attr("data-src").trim()
             if (src.isEmpty()) src = iframe.attr("data-litespeed-src").trim()
             if (src.isEmpty()) src = iframe.attr("data-url").trim()
 
-            Log.d("TRasyalog", "iframe src: $src")
+            Log.d("TRasyalog", "iframe[$index] src: $src")
 
-            if (src.isEmpty()) return@forEach
-            if (src.startsWith("javascript:", ignoreCase = true)) return@forEach
-            if (src == "about:blank") return@forEach
+            if (src.isEmpty()) return@forEachIndexed
+            if (src.startsWith("javascript:", ignoreCase = true)) return@forEachIndexed
+            if (src == "about:blank") return@forEachIndexed
 
             val fixedUrl = when {
                 src.startsWith("//") -> "https:$src"
@@ -395,9 +430,8 @@ class TRasyalog : MainAPI() {
                 else                 -> src
             }
 
-            Log.d("TRasyalog", "Fixed URL: $fixedUrl")
+            Log.d("TRasyalog", "iframe[$index] fixedUrl: $fixedUrl")
 
-            // 1) CloudStream'in yerleşik extractor'ını dene
             try {
                 loadExtractor(
                     fixedUrl,
@@ -405,19 +439,18 @@ class TRasyalog : MainAPI() {
                     subtitleCallback,
                     callback
                 )
-                Log.d("TRasyalog", "loadExtractor succeeded for $fixedUrl")
+                Log.d("TRasyalog", "loadExtractor SUCCESS for $fixedUrl")
                 found = true
             } catch (e: Exception) {
-                Log.e("TRasyalog", "loadExtractor FAILED for $fixedUrl", e)
+                Log.e("TRasyalog", "loadExtractor FAILED for $fixedUrl: ${e.message}", e)
             }
 
-            // 2) Yedek: OK.ru embed sayfasından doğrudan video URL'si çıkar
             if (!found && (fixedUrl.contains("odnoklassniki") || fixedUrl.contains("ok.ru"))) {
                 try {
-                    Log.d("TRasyalog", "Trying fallback OK.ru extraction for $fixedUrl")
+                    Log.d("TRasyalog", "Trying fallback OK.ru extraction")
                     val okVideoUrl = extractOkRuVideo(fixedUrl, pageUrl)
                     if (okVideoUrl != null) {
-                        Log.d("TRasyalog", "Fallback OK.ru URL found: $okVideoUrl")
+                        Log.d("TRasyalog", "Fallback OK.ru URL: $okVideoUrl")
                         callback(
                             newExtractorLink(
                                 source = this.name,
@@ -433,8 +466,6 @@ class TRasyalog : MainAPI() {
                             }
                         )
                         found = true
-                    } else {
-                        Log.w("TRasyalog", "Fallback OK.ru extraction returned null")
                     }
                 } catch (e: Exception) {
                     Log.e("TRasyalog", "Fallback OK.ru extraction failed", e)
@@ -443,13 +474,10 @@ class TRasyalog : MainAPI() {
         }
 
         Log.d("TRasyalog", "loadLinks returning: $found")
+        Log.d("TRasyalog", "########## loadLinks END ##########")
         return found
     }
 
-    /**
-     * OK.ru embed sayfasından doğrudan video URL'sini çıkarmayı dener.
-     * OK.ru'nun kendi API'sini kullanır.
-     */
     private suspend fun extractOkRuVideo(
         embedUrl: String,
         referer: String
@@ -462,7 +490,7 @@ class TRasyalog : MainAPI() {
                 ?: return null
 
             val apiUrl = "https://ok.ru/dk?cmd=videoPlayerMetadata&mid=$videoId"
-            Log.d("TRasyalog", "OK.ru API URL: $apiUrl")
+            Log.d("TRasyalog", "OK.ru API: $apiUrl")
 
             val apiResponse = app.get(
                 apiUrl,
@@ -476,7 +504,7 @@ class TRasyalog : MainAPI() {
                 )
             ).text
 
-            Log.d("TRasyalog", "OK.ru API response (first 300 chars): ${apiResponse.take(300)}")
+            Log.d("TRasyalog", "OK.ru API response first 300: ${apiResponse.take(300)}")
 
             val videoUrlRegex = Regex(
                 """"url"\s*:\s*"([^"]+\.(?:mp4|m3u8)[^"]*)"""",
@@ -487,11 +515,11 @@ class TRasyalog : MainAPI() {
                 .map { it.groupValues[1].replace("\\/", "/") }
                 .toList()
 
-            Log.d("TRasyalog", "Found ${matches.size} video URL(s) in OK.ru response")
+            Log.d("TRasyalog", "Found ${matches.size} video URLs")
 
             matches.lastOrNull()
         } catch (e: Exception) {
-            Log.e("TRasyalog", "OK.ru API extraction error", e)
+            Log.e("TRasyalog", "OK.ru API error", e)
             null
         }
     }
