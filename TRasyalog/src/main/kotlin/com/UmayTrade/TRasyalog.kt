@@ -499,7 +499,7 @@ class TRasyalog : MainAPI() {
 
     /**
      * OK.ru embed sayfasından video URL'lerini çıkarır.
-     * Mobil API ve metadata API'yi dener.
+     * HTML entity'leri (&quot;) düzgün şekilde keser.
      * Dönen liste: (url, kalite adı) çiftleri
      */
     private suspend fun extractOkRuVideo(
@@ -535,26 +535,68 @@ class TRasyalog : MainAPI() {
 
                 Log.e("TRasyalog", "Mobile HTML length: ${mobileHtml.length}")
 
-                val mobilePatterns = listOf(
-                    Regex(""""url"\s*:\s*"([^"]+\.mp4[^"]*)""""),
+                // HTML entity'lerini (&quot; &amp; &#34;) normal karakterlere çevir
+                val decodedHtml = mobileHtml
+                    .replace("&quot;", "\"")
+                    .replace("&amp;", "&")
+                    .replace("&#34;", "\"")
+                    .replace("&#39;", "'")
+                    .replace("\\/", "/")
+
+                // 1. Aşama: Decode edilmiş HTML'de JSON formatını ara
+                val jsonPatterns = listOf(
                     Regex(""""url"\s*:\s*"([^"]+\.m3u8[^"]*)""""),
-                    Regex("""(https?://[^"'\s\\<>]+\.(?:mp4|m3u8)[^"'\s\\<>]*)"""),
-                    Regex("""(//[^"'\s\\<>]+\.(?:mp4|m3u8)[^"'\s\\<>]*)""")
+                    Regex(""""url"\s*:\s*"([^"]+\.mp4[^"]*)""""),
+                    Regex(""""hls"\s*:\s*"([^"]+\.m3u8[^"]*)""""),
+                    Regex(""""ondemand"\s*:\s*"([^"]+\.m3u8[^"]*)"""")
                 )
 
-                for ((index, pattern) in mobilePatterns.withIndex()) {
-                    val match = pattern.find(mobileHtml)
+                for ((index, pattern) in jsonPatterns.withIndex()) {
+                    val match = pattern.find(decodedHtml)
                     if (match != null) {
                         var url = match.groupValues[1]
                             .replace("\\/", "/")
-                            .replace("\\u0026", "&")
-                            .replace("&amp;", "&")
+                            .trim()
 
                         if (url.startsWith("//")) url = "https:$url"
 
-                        Log.e("TRasyalog", "Mobile pattern[$index]: $url")
+                        // URL'nin sonundaki olası çöp karakterleri temizle
+                        url = url.substringBefore("\"").substringBefore("&").trim()
+
+                        Log.e("TRasyalog", "JSON pattern[$index]: $url")
                         results.add(url to "Mobile")
                         break
+                    }
+                }
+
+                // 2. Aşama: Decode edilmemiş HTML'de doğrudan URL ara
+                // & karakteri regex'ten çıkarıldı, böylece URL &quot; gördüğünde kesiliyor
+                if (results.isEmpty()) {
+                    val urlPatterns = listOf(
+                        Regex("""(https?://[^"'\s\\<>&]+\.m3u8[^"'\s\\<>&]*)"""),
+                        Regex("""(https?://[^"'\s\\<>&]+\.mp4[^"'\s\\<>&]*)"""),
+                        Regex("""(//[^"'\s\\<>&]+\.m3u8[^"'\s\\<>&]*)"""),
+                        Regex("""(//[^"'\s\\<>&]+\.mp4[^"'\s\\<>&]*)""")
+                    )
+
+                    for ((index, pattern) in urlPatterns.withIndex()) {
+                        val match = pattern.find(mobileHtml)
+                        if (match != null) {
+                            var url = match.groupValues[1]
+                                .replace("\\/", "/")
+                                .trim()
+
+                            // Ekstra temizlik: &quot ve &amp'den sonrasını kes
+                            if (url.contains("&quot")) url = url.substringBefore("&quot")
+                            if (url.contains("&amp")) url = url.substringBefore("&amp")
+                            if (url.contains("&")) url = url.substringBefore("&")
+
+                            if (url.startsWith("//")) url = "https:$url"
+
+                            Log.e("TRasyalog", "URL pattern[$index]: $url")
+                            results.add(url to "Mobile")
+                            break
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -562,56 +604,57 @@ class TRasyalog : MainAPI() {
             }
 
             // Yöntem 2: videoPlayerMetadata API
-            val apiUrls = listOf(
-                "https://ok.ru/dk?cmd=videoPlayerMetadata&mid=$videoId",
-                "https://m.ok.ru/dk?cmd=videoPlayerMetadata&mid=$videoId",
-                "https://odnoklassniki.ru/dk?cmd=videoPlayerMetadata&mid=$videoId"
-            )
+            if (results.isEmpty()) {
+                val apiUrls = listOf(
+                    "https://ok.ru/dk?cmd=videoPlayerMetadata&mid=$videoId",
+                    "https://m.ok.ru/dk?cmd=videoPlayerMetadata&mid=$videoId",
+                    "https://odnoklassniki.ru/dk?cmd=videoPlayerMetadata&mid=$videoId"
+                )
 
-            for (apiUrl in apiUrls) {
-                try {
-                    Log.e("TRasyalog", "Trying API: $apiUrl")
+                for (apiUrl in apiUrls) {
+                    try {
+                        Log.e("TRasyalog", "Trying API: $apiUrl")
 
-                    val apiResponse = app.get(
-                        apiUrl,
-                        referer = embedUrl,
-                        headers = mapOf(
-                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-                                    "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                                    "Chrome/120.0.0.0 Safari/537.36",
-                            "Accept" to "application/json, text/javascript, */*; q=0.01",
-                            "X-Requested-With" to "XMLHttpRequest"
-                        )
-                    ).text
+                        val apiResponse = app.get(
+                            apiUrl,
+                            referer = embedUrl,
+                            headers = mapOf(
+                                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                                        "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                                        "Chrome/120.0.0.0 Safari/537.36",
+                                "Accept" to "application/json, text/javascript, */*; q=0.01",
+                                "X-Requested-With" to "XMLHttpRequest"
+                            )
+                        ).text
 
-                    Log.e("TRasyalog", "API response length: ${apiResponse.length}")
-                    Log.e("TRasyalog", "API first 200: ${apiResponse.take(200)}")
+                        Log.e("TRasyalog", "API response length: ${apiResponse.length}")
 
-                    val videoEntries = Regex(
-                        """"name"\s*:\s*"([^"]+)"\s*,\s*"url"\s*:\s*"([^"]+)"""",
-                        RegexOption.IGNORE_CASE
-                    ).findAll(apiResponse).map {
-                        val quality = it.groupValues[1]
-                        val url = it.groupValues[2]
-                            .replace("\\/", "/")
-                            .replace("\\u0026", "&")
-                        quality to url
-                    }.toList()
+                        val videoEntries = Regex(
+                            """"name"\s*:\s*"([^"]+)"\s*,\s*"url"\s*:\s*"([^"]+)"""",
+                            RegexOption.IGNORE_CASE
+                        ).findAll(apiResponse).map {
+                            val quality = it.groupValues[1]
+                            val url = it.groupValues[2]
+                                .replace("\\/", "/")
+                                .replace("\\u0026", "&")
+                                .substringBefore("&")
+                                .trim()
+                            quality to url
+                        }.toList()
 
-                    if (videoEntries.isNotEmpty()) {
-                        Log.e("TRasyalog", "Found ${videoEntries.size} video entries via API")
-
-                        videoEntries.forEach { (quality, url) ->
-                            Log.e("TRasyalog", "  API entry - $quality: $url")
-
-                            if (!results.any { it.first == url }) {
-                                results.add(url to quality)
+                        if (videoEntries.isNotEmpty()) {
+                            Log.e("TRasyalog", "Found ${videoEntries.size} video entries via API")
+                            videoEntries.forEach { (quality, url) ->
+                                Log.e("TRasyalog", "  API entry - $quality: $url")
+                                if (!results.any { it.first == url }) {
+                                    results.add(url to quality)
+                                }
                             }
+                            break
                         }
-                        break
+                    } catch (e: Exception) {
+                        Log.e("TRasyalog", "API $apiUrl failed: ${e.message}")
                     }
-                } catch (e: Exception) {
-                    Log.e("TRasyalog", "API $apiUrl failed: ${e.message}")
                 }
             }
 
