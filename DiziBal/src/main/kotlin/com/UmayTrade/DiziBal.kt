@@ -18,9 +18,12 @@ class DiziBal : MainAPI() {
     companion object {
         private const val DEFAULT_PLAYER_BASE = "https://play2.pilavyerplay.top"
 
+        private const val UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
         private val defaultHeaders = mapOf(
-            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Referer" to "https://dizibal.org/"
+            "User-Agent" to UA,
+            "Referer" to "https://dizibal.com/" // mainUrl ile tutarlı
         )
     }
 
@@ -29,14 +32,18 @@ class DiziBal : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val allPages = mutableListOf<HomePageList>()
 
+        val pageUrl = if (page <= 1) mainUrl else "$mainUrl?page=$page"
+
         val doc = try {
-            app.get(mainUrl, headers = defaultHeaders).document
+            app.get(pageUrl, headers = defaultHeaders).document
         } catch (_: Exception) {
             return newHomePageResponse(allPages)
         }
 
-        // Parse each section with an h2 heading and a row of content cards
-        val sections = doc.select("section, div.container-site > div")
+        // Hem section hem div:has(h2) ama tekrarları önlemek için distinct
+        val sections = doc.select("div.container-site > section, div.container-site > div")
+            .filter { it.selectFirst("h2") != null }
+
         for (sec in sections) {
             val titleEl = sec.selectFirst("h2") ?: continue
             val rawTitle = titleEl.text().trim()
@@ -72,7 +79,7 @@ class DiziBal : MainAPI() {
                 }
             }.distinctBy { it.url }
 
-            if (items.isNotEmpty()) {
+            if (items.isNotEmpty() && allPages.none { it.name == rawTitle }) {
                 allPages.add(HomePageList(rawTitle, items))
             }
         }
@@ -173,10 +180,9 @@ class DiziBal : MainAPI() {
             }
         }
 
-        // TV Series or Anime: Extract all seasons and episodes
+        // TV Series or Anime
         val cleanBaseUrl = url.split("?").first().removeSuffix("/")
 
-        // Discover available seasons from season tabs (e.g. ?sezon=2#bolumler)
         val seasonNumbers = doc.select("a[href*='sezon=']").mapNotNull {
             Regex("""sezon=(\d+)""").find(it.attr("href"))?.groupValues?.get(1)?.toIntOrNull()
         }.distinct().sorted()
@@ -195,7 +201,6 @@ class DiziBal : MainAPI() {
                 }
             }
 
-            // Cards with episode links
             val epCards = seasonDoc.select("a[href*='/season/$s/episode/']")
             val distinctCards = if (epCards.isNotEmpty()) {
                 epCards
@@ -230,7 +235,10 @@ class DiziBal : MainAPI() {
 
         val type = if (url.contains("/anime/")) TvType.Anime else TvType.TvSeries
 
-        return newTvSeriesLoadResponse(title, url, type, episodes.distinctBy { it.data }) {
+        // URL bazlı distinct: aynı bölüm iki kez eklenmesin
+        val uniqueEpisodes = episodes.distinctBy { it.data ?: "${it.season}-${it.episode}" }
+
+        return newTvSeriesLoadResponse(title, url, type, uniqueEpisodes) {
             this.posterUrl = poster
             this.plot = plot
             this.year = year
@@ -257,7 +265,9 @@ class DiziBal : MainAPI() {
 
         // 1. Pilavyer player integration (data-pv attribute)
         val dataPv = watchPage.selectFirst("div[data-pv]")?.attr("data-pv")
-        val coreScriptSrc = watchPage.selectFirst("script[src*='pilavyerplay'], script[src*='/assets/js/core.js']")?.attr("src")
+        val coreScriptSrc = watchPage
+            .selectFirst("script[src*='pilavyerplay'], script[src*='/assets/js/core.js']")
+            ?.attr("src")
 
         val playerBase = if (!coreScriptSrc.isNullOrBlank()) {
             coreScriptSrc.substringBefore("/assets/js/core.js").substringBefore("/e/c.js")
@@ -271,7 +281,7 @@ class DiziBal : MainAPI() {
                 val iframeHtml = app.get(
                     iframeUrl,
                     headers = mapOf(
-                        "User-Agent" to defaultHeaders["User-Agent"]!!,
+                        "User-Agent" to UA,
                         "Referer" to "$mainUrl/"
                     )
                 ).text
@@ -282,7 +292,7 @@ class DiziBal : MainAPI() {
                     val streamUrl = playerJson.optString("stream")
 
                     if (!streamUrl.isNullOrBlank()) {
-                        // Extract subtitles
+                        // Altyazılar
                         val subsArray = playerJson.optJSONArray("subs")
                         if (subsArray != null) {
                             for (i in 0 until subsArray.length()) {
@@ -295,16 +305,14 @@ class DiziBal : MainAPI() {
                             }
                         }
 
-                        // Extract available audio tracks
+                        // Ses dilleri
                         val audiosArray = playerJson.optJSONArray("audios")
                         val audioLabels = mutableListOf<String>()
                         if (audiosArray != null) {
                             for (i in 0 until audiosArray.length()) {
                                 val audio = audiosArray.optJSONObject(i) ?: continue
                                 val label = audio.optString("label")
-                                if (!label.isNullOrBlank()) {
-                                    audioLabels.add(label)
-                                }
+                                if (!label.isNullOrBlank()) audioLabels.add(label)
                             }
                         }
 
@@ -324,7 +332,7 @@ class DiziBal : MainAPI() {
                                 type = ExtractorLinkType.M3U8,
                                 headers = mapOf(
                                     "Referer" to iframeUrl,
-                                    "User-Agent" to defaultHeaders["User-Agent"]!!
+                                    "User-Agent" to UA
                                 )
                             )
                         )
@@ -334,30 +342,23 @@ class DiziBal : MainAPI() {
             } catch (_: Exception) {}
         }
 
-        // 2. Fallback: inspect any embedded iframes or video tags
+        // 2. Fallback: iframe / video
         if (!found) {
             val iframes = watchPage.select("iframe[src]").map { it.attr("src") }
             for (iframe in iframes) {
                 val fullIframe = fixUrl(iframe)
                 if (fullIframe.contains("youtube.com") || fullIframe.contains("google")) continue
 
-                if (loadExtractor(fullIframe, data, subtitleCallback) { link ->
+                val ok = loadExtractor(fullIframe, data, subtitleCallback) { link ->
+                    // Doğrudan iletiyoruz; isim değiştirmek istersek copy kullanırız
                     callback(
-                        ExtractorLink(
-                            link.source ?: "DiziBal",
-                            "DiziBal - ${link.name}",
-                            link.url ?: "",
-                            link.referer ?: mainUrl,
-                            link.quality,
-                            link.headers ?: emptyMap(),
-                            link.extractorData,
-                            link.type,
-                            link.audioTracks ?: emptyList()
+                        link.copy(
+                            name = if (link.name.startsWith("DiziBal")) link.name
+                            else "DiziBal - ${link.name}"
                         )
                     )
-                }) {
-                    found = true
                 }
+                if (ok) found = true
             }
         }
 
@@ -367,9 +368,13 @@ class DiziBal : MainAPI() {
     // ── Helpers ─────────────────────────────────────────────────────────
 
     private fun cleanTitle(raw: String): String {
-        return raw.replace(Regex("(?i)\\s*(?:dizi|film|anime)\\s*izle"), "")
-            .replace(Regex("(?i)\\s*izle.*"), "")
-            .replace(Regex("(?i)\\s*\\(\\d{4}\\).*"), "")
+        return raw
+            // Sondaki "izle" ekini at
+            .replace(Regex("(?i)\\s+izle\\s*$"), "")
+            // "(2023)" gibi yıl parantezini at
+            .replace(Regex("""\s*\(\d{4}\)\s*$"""), "")
+            // "dizi/film/anime izle" kalıplarını at
+            .replace(Regex("(?i)\\s*(?:dizi|film|anime)\\s+izle.*$"), "")
             .trim()
     }
 }
