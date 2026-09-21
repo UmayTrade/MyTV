@@ -432,7 +432,6 @@ class TRasyalog : MainAPI() {
 
             Log.e("TRasyalog", "fixedUrl: $fixedUrl")
 
-            // OK.ru ise önce kendi çıkarımımızı dene
             if (fixedUrl.contains("odnoklassniki") || fixedUrl.contains("ok.ru")) {
                 Log.e("TRasyalog", "OK.ru detected, extracting directly")
 
@@ -441,13 +440,24 @@ class TRasyalog : MainAPI() {
                 if (videoUrls.isNotEmpty()) {
                     Log.e("TRasyalog", "OK.ru found ${videoUrls.size} URL(s)")
 
-                    videoUrls.forEachIndexed { index, (url, quality) ->
-                        Log.e("TRasyalog", "OK.ru URL[$index] ($quality): $url")
+                    videoUrls.forEachIndexed { index, (url, qualityName) ->
+                        Log.e("TRasyalog", "OK.ru URL[$index] ($qualityName): $url")
+
+                        val qualityValue = when (qualityName.lowercase()) {
+                            "mobile" -> Qualities.P144.value
+                            "lowest" -> Qualities.P240.value
+                            "low" -> Qualities.P360.value
+                            "sd" -> Qualities.P480.value
+                            "hd" -> Qualities.P720.value
+                            "full" -> Qualities.P1080.value
+                            "quad" -> Qualities.P2160.value
+                            else -> Qualities.Unknown.value
+                        }
 
                         callback(
                             newExtractorLink(
                                 source = this.name,
-                                name = "${this.name} (OK.ru) - $quality",
+                                name = "${this.name} (OK.ru) - $qualityName",
                                 url = url,
                                 type = if (url.contains(".m3u8"))
                                     ExtractorLinkType.M3U8
@@ -455,7 +465,7 @@ class TRasyalog : MainAPI() {
                                     ExtractorLinkType.VIDEO
                             ) {
                                 this.referer = pageUrl
-                                this.quality = quality
+                                this.quality = qualityValue
                             }
                         )
                     }
@@ -472,7 +482,6 @@ class TRasyalog : MainAPI() {
                     }
                 }
             } else {
-                // OK.ru değilse normal extractor
                 try {
                     loadExtractor(fixedUrl, referer = pageUrl, subtitleCallback, callback)
                     Log.e("TRasyalog", "loadExtractor SUCCESS for $fixedUrl")
@@ -491,7 +500,7 @@ class TRasyalog : MainAPI() {
     /**
      * OK.ru embed sayfasından video URL'lerini çıkarır.
      * Mobil API ve metadata API'yi dener.
-     * Dönen liste: (url, kalite) çiftleri
+     * Dönen liste: (url, kalite adı) çiftleri
      */
     private suspend fun extractOkRuVideo(
         embedUrl: String,
@@ -500,7 +509,6 @@ class TRasyalog : MainAPI() {
         val results = mutableListOf<Pair<String, String>>()
 
         try {
-            // Video ID'sini çıkar
             val videoId = Regex("""(?:videoembed|/video)/(\d+)""")
                 .find(embedUrl)
                 ?.groupValues
@@ -579,8 +587,6 @@ class TRasyalog : MainAPI() {
                     Log.e("TRasyalog", "API response length: ${apiResponse.length}")
                     Log.e("TRasyalog", "API first 200: ${apiResponse.take(200)}")
 
-                    // JSON'dan "videos" array'ini bul - her biri name ve url içerir
-                    // Örnek: "videos":[{"name":"mobile","url":"..."},{"name":"lowest","url":"..."},...]
                     val videoEntries = Regex(
                         """"name"\s*:\s*"([^"]+)"\s*,\s*"url"\s*:\s*"([^"]+)"""",
                         RegexOption.IGNORE_CASE
@@ -602,7 +608,7 @@ class TRasyalog : MainAPI() {
                                 results.add(url to quality)
                             }
                         }
-                        break // Başarılı API'den sonra diğerlerini denemeye gerek yok
+                        break
                     }
                 } catch (e: Exception) {
                     Log.e("TRasyalog", "API $apiUrl failed: ${e.message}")
