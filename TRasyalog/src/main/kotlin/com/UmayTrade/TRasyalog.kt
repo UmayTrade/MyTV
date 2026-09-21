@@ -168,28 +168,20 @@ class TRasyalog : MainAPI() {
             .distinct()
 
         // ============================================================
-        // DEĞİŞİKLİK BURADAN BAŞLIYOR
-        // Statik HTML'de bölüm yoksa, AJAX isteği ile dinamik al
+        // BÖLÜM LİNKLERİNİ AL
+        // Statik HTML'de bölüm yoksa AJAX ile dinamik çek
         // ============================================================
 
-        // 1. Adım: Önce statik HTML'den bölüm linklerini dene
         val staticLinks = document.select(
             ".dizi-bolumler ul.scroll-liste > li a[href*='/bolum/']"
         )
 
-        val links: List<Element>
-
-        if (staticLinks.isNotEmpty()) {
-            // Statik HTML'de bölümler varsa, doğrudan kullan
-            links = staticLinks
+        val links: List<Element> = if (staticLinks.isNotEmpty()) {
+            staticLinks
         } else {
-            // 2. Adım: Statik HTML boş, AJAX isteği ile bölümleri çek
-            // Aşağıdaki ajaxUrl ve actionValue'yu
-            // tarayıcı Network panelinden bulduğunuz gerçek değerlerle değiştirin
-            val ajaxUrl = "$mainUrl/wp-admin/admin-ajax.php" // <-- Gerçek URL ile değiştirin
-            val actionValue = "bolumleri_getir" // <-- Gerçek action değeri ile değiştirin
+            val ajaxUrl = "$mainUrl/wp-admin/admin-ajax.php"
+            val actionValue = "bolumleri_getir"
 
-            // post_id'yi sayfadan çıkar (WordPress standart yapısı)
             val postId = document.selectFirst("body")
                 ?.attr("class")
                 ?.let { bodyClass ->
@@ -205,7 +197,6 @@ class TRasyalog : MainAPI() {
 
             if (postId != null) {
                 try {
-                    // AJAX isteği gönder
                     val ajaxResponse = app.post(
                         ajaxUrl,
                         data = mapOf(
@@ -218,20 +209,17 @@ class TRasyalog : MainAPI() {
                         )
                     ).document
 
-                    // AJAX yanıtından bölüm linklerini çıkar
-                    links = ajaxResponse.select("a[href*='/bolum/']")
+                    ajaxResponse.select("a[href*='/bolum/']")
                 } catch (e: Exception) {
-                    // AJAX başarısız olursa boş liste ile devam et
-                    links = emptyList()
+                    emptyList()
                 }
             } else {
-                // post_id bulunamazsa, sayfadaki tüm /bolum/ linklerini al
-                links = document.select("a[href*='/bolum/']")
+                document.select("a[href*='/bolum/']")
             }
         }
 
         // ============================================================
-        // Bölüm paketleme mantığı (orijinal kod, değişiklik yok)
+        // BÖLÜM PAKETLEME MANTIĞI
         // ============================================================
 
         val episodes = mutableListOf<Episode>()
