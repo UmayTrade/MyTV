@@ -39,16 +39,21 @@ import org.jsoup.nodes.Element
 class SetFilmIzle : MainAPI() {
 
     // ==================================================================
-    // ============       LOG AYARLARI - BURAYI DÜZENLE      ============
+    // ==========       ANA DEĞİŞKENLER (ÖNCE BUNLAR)        ============
     // ==================================================================
-    // Tüm logları açmak için:  LOG_AKTIF = true
-    // Sadece kritik loglar:    LOG_AKTIF = false
+
+    override var mainUrl = "https://www.setfilmizle.ltd"
+    override var name = "SetFilmIzle"
+    override val hasMainPage = true
+    override var lang = "tr"
+    override val hasQuickSearch = false
+    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
+
+    // ==================================================================
+    // ============       LOG AYARLARI                       ============
+    // ==================================================================
     private val LOG_AKTIF = true
-
-    // Log tag'i - logcat'te bu tag ile filtreleyin
     private val TAG = "SETFILMIZLE"
-
-    // Tüm log satırlarının başına eklenir (kolay filtre için)
     private val PREFIX = ">>> SETFILMIZLE >>> "
 
     /**
@@ -89,6 +94,7 @@ class SetFilmIzle : MainAPI() {
 
     // ==================================================================
     // ==========       EKLENTİ YÜKLENDİĞİNDE ÇALIŞIR        ============
+    // ==========       (mainUrl/name/lang'den SONRA!)       ============
     // ==================================================================
     init {
         Log.e(TAG, "$PREFIX########################################")
@@ -101,15 +107,8 @@ class SetFilmIzle : MainAPI() {
     }
 
     // ==================================================================
-    // ==========       ANA DEĞİŞKENLER                      ============
+    // ==========       ANA SAYFA KATEGORİLERİ               ============
     // ==================================================================
-
-    override var mainUrl = "https://www.setfilmizle.ltd"
-    override var name = "SetFilmIzle"
-    override val hasMainPage = true
-    override var lang = "tr"
-    override val hasQuickSearch = false
-    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     override val mainPage = mainPageOf(
         "${mainUrl}/tur/aile/" to "Aile",
