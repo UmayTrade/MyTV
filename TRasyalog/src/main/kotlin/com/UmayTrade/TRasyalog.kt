@@ -1,5 +1,6 @@
 package com.UmayTrade
 
+import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
@@ -167,10 +168,6 @@ class TRasyalog : MainAPI() {
             }
             .distinct()
 
-        // ============================================================
-        // BÖLÜM LİNKLERİNİ AL
-        // ============================================================
-
         val staticLinks = document.select(
             ".dizi-bolumler ul.scroll-liste > li a[href*='/bolum/']"
         )
@@ -216,10 +213,6 @@ class TRasyalog : MainAPI() {
                 document.select("a[href*='/bolum/']")
             }
         }
-
-        // ============================================================
-        // BÖLÜM PAKETLEME MANTIĞI
-        // ============================================================
 
         val episodes = mutableListOf<Episode>()
 
@@ -390,6 +383,7 @@ class TRasyalog : MainAPI() {
                 else                 -> src
             }
 
+            // 1) CloudStream'in yerleşik extractor'ını dene
             try {
                 loadExtractor(
                     fixedUrl,
@@ -399,10 +393,95 @@ class TRasyalog : MainAPI() {
                 )
                 found = true
             } catch (e: Exception) {
-                println("Extractor error for $fixedUrl: ${e.message}")
+                Log.e("TRasyalog", "Built-in extractor failed for $fixedUrl", e)
+            }
+
+            // 2) Yedek: OK.ru embed sayfasından doğrudan video URL'si çıkar
+            if (!found && fixedUrl.contains("odnoklassniki") || fixedUrl.contains("ok.ru")) {
+                try {
+                    val okVideoUrl = extractOkRuVideo(fixedUrl, pageUrl)
+                    if (okVideoUrl != null) {
+                        callback(
+                            newExtractorLink(
+                                source = this.name,
+                                name = "${this.name} (OK.ru)",
+                                url = okVideoUrl,
+                                type = if (okVideoUrl.contains(".m3u8"))
+                                    ExtractorLinkType.M3U8
+                                else
+                                    ExtractorLinkType.VIDEO
+                            ) {
+                                this.referer = pageUrl
+                                this.quality = Qualities.Unknown.value
+                            }
+                        )
+                        found = true
+                    }
+                } catch (e: Exception) {
+                    Log.e("TRasyalog", "Fallback OK.ru extraction failed", e)
+                }
             }
         }
 
         return found
+    }
+
+    /**
+     * OK.ru embed sayfasından doğrudan video URL'sini çıkarmayı dener.
+     * OK.ru'nun kendi API'sini kullanır.
+     */
+    private suspend fun extractOkRuVideo(
+        embedUrl: String,
+        referer: String
+    ): String? {
+        return try {
+            // Embed sayfasını çek
+            val embedDoc = app.get(
+                embedUrl,
+                referer = referer,
+                headers = mapOf(
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                            "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                            "Chrome/120.0.0.0 Safari/537.36"
+                )
+            ).text
+
+            // Video ID'sini çıkar
+            val videoId = Regex("""videoembed/(\d+)""")
+                .find(embedUrl)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?: return null
+
+            // OK.ru API'sinden video bilgilerini al
+            val apiUrl = "https://ok.ru/dk?cmd=videoPlayerMetadata&mid=$videoId"
+            val apiResponse = app.get(
+                apiUrl,
+                referer = embedUrl,
+                headers = mapOf(
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                            "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                            "Chrome/120.0.0.0 Safari/537.36",
+                    "Accept" to "application/json, text/javascript, */*; q=0.01",
+                    "X-Requested-With" to "XMLHttpRequest"
+                )
+            ).text
+
+            // JSON yanıtından en yüksek kaliteli video URL'sini çıkar
+            val videoUrlRegex = Regex(
+                """"url"\s*:\s*"([^"]+\.(?:mp4|m3u8)[^"]*)"""",
+                RegexOption.IGNORE_CASE
+            )
+
+            val matches = videoUrlRegex.findAll(apiResponse)
+                .map { it.groupValues[1].replace("\\/", "/") }
+                .toList()
+
+            // En yüksek kaliteyi seç (genelde sonuncu veya en büyük boyutlu)
+            matches.lastOrNull()
+        } catch (e: Exception) {
+            Log.e("TRasyalog", "OK.ru API extraction error", e)
+            null
+        }
     }
 }
