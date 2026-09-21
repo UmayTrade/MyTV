@@ -1,253 +1,217 @@
-
 package com.UmayTrade
 
-import java.util.Base64
-import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
-import org.jsoup.nodes.Document
-import org.jsoup.nodes.Element
-import java.security.MessageDigest
-import javax.crypto.Cipher
-import javax.crypto.spec.IvParameterSpec
-import javax.crypto.spec.SecretKeySpec
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 
-class TurkAnime : MainAPI() {
-    override var mainUrl = "https://www.turkanime.tv"
-    override var name = "TurkAnime"
+/**
+ * Türk Anime TV (Ayna & Arşiv) Sağlayıcısı (v3)
+ *
+ * Kaynak: https://turkanimemirror.vercel.app / GitHub JSON Arşivi
+ * Arşiv: 6.100+ Anime, tüm bölümler ve çeviri grupları (Fansublar)
+ * Oynatıcılar: Sibnet, Voe, Dailymotion, Odnoklassniki (Ok.ru), Google Drive, Mp4Upload vb.
+ */
+class TurkAnimeProvider : MainAPI() {
+
+    override var mainUrl = "https://turkanimemirror.vercel.app"
+    override var name = "Türk Anime TV"
     override val hasMainPage = true
     override var lang = "tr"
-    override val hasQuickSearch = false
-    override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
+    override val hasChromecastSupport = true
+    override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
+
+    companion object {
+        private const val ARCHIVE_RAW = "https://raw.githubusercontent.com/agnogad/TurkAnimeTV_Arsiv_json/main/animeler"
+
+        // Popüler / Klasik Animeler Seçkisi
+        private val POPULAR_SLUGS = listOf(
+            "death-note", "shingeki-no-kyojin", "naruto", "naruto-shippuuden", "bleach",
+            "one-piece", "jujutsu-kaisen", "fullmetal-alchemist-brotherhood", "hunter-x-hunter-2011",
+            "steins-gate", "kimetsu-no-yaiba", "sword-art-online", "boku-no-hero-academia",
+            "tokyo-ghoul", "code-geass-hangyaku-no-lelouch", "cowboy-bebop", "vinland-saga",
+            "chainsaw-man", "cyberpunk-edgerunners", "haikyuu", "black-clover", "monster",
+            "mob-psycho-100", "overlord", "neon-genesis-evangelion", "solo-leveling"
+        )
+    }
+
+    private val commonHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer" to "$mainUrl/"
+    )
+
+    private var cachedSlugs: List<String>? = null
+
+    private suspend fun getAnimeSlugs(): List<String> {
+        cachedSlugs?.let { return it }
+        return try {
+            val text = app.get("$ARCHIVE_RAW/animeler.json", headers = commonHeaders, timeout = 12).text
+            val arr = JSONArray(text)
+            val list = (0 until arr.length()).map { arr.getString(it) }
+            cachedSlugs = list
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun slugToTitle(slug: String): String {
+        return slug.split("-").joinToString(" ") { part ->
+            part.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Ana Sayfa
+    // -------------------------------------------------------------------------
 
     override val mainPage = mainPageOf(
-        "${mainUrl}/anime-turu/1/Aksiyon" to "Aksiyon",
-        "${mainUrl}/anime-turu/24/Bilim_Kurgu" to "Bilim Kurgu",
-        "${mainUrl}/anime-turu/4/Komedi" to "Komedi",
-        "${mainUrl}/anime-turu/8/Dram" to "Dram",
-        "${mainUrl}/anime-turu/10/Fantastik" to "Fantastik",
-        "${mainUrl}/anime-turu/2/Macera" to "Macera",
-        "${mainUrl}/anime-turu/27/Shounen" to "Shounen",
-        "${mainUrl}/anime-turu/22/Romantizm" to "Romantizm",
-        "${mainUrl}/anime-turu/37/Do%C4%9Fa%C3%BCst%C3%BC_G%C3%BC%C3%A7ler" to "Doğaüstü Güçler",
-        "${mainUrl}/anime-turu/41/Gerilim" to "Gerilim",
-        "${mainUrl}/anime-turu/7/Gizem" to "Gizem",
-        "${mainUrl}/anime-turu/30/Spor" to "Spor"
+        "popular" to "Popüler & Klasik Animeler",
+        "all"     to "Tüm Arşiv (A-Z)"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val targetUrl = if (page <= 1) {
-            request.data
-        } else {
-            "${request.data}&page=${page}"
-        }
+        val allSlugs = getAnimeSlugs()
 
-        val document = app.get(targetUrl).document
-        val home = document.select("div#orta-icerik div.panel").mapNotNull { toMainPageResult(it) }
-
-        return newHomePageResponse(request.name, home)
-    }
-
-    fun toMainPageResult(element: Element): SearchResponse? {
-        val titleEl = element.selectFirst("div.panel-title a") ?: return null
-        val title = titleEl.text().trim()
-        val href = fixUrlNull(titleEl.attr("href")) ?: return null
-        val posterEl = element.selectFirst("img[data-src], img[src]")
-        val posterUrl = fixUrlNull(
-            posterEl?.attr("data-src")?.ifBlank { null }
-                ?: posterEl?.attr("src")?.ifBlank { null }
-        )
-
-        return newAnimeSearchResponse(title, href, TvType.Anime) {
-            this.posterUrl = posterUrl
-        }
-    }
-
-    override suspend fun search(query: String, page: Int): SearchResponseList {
-        val document = app.post(
-            "${mainUrl}/arama",
-            data = mapOf("arama" to query),
-            headers = mapOf(
-                "Referer" to "${mainUrl}/"
-            )
-        ).document
-
-        val items = document.select("div#orta-icerik div.panel").mapNotNull { toMainPageResult(it) }
-        return newSearchResponseList(items, hasNext = false)
-    }
-
-    override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query, 1).items
-
-    override suspend fun load(url: String): LoadResponse? {
-        val document = app.get(url).document
-        return parseLoadMetadata(document, url)
-    }
-
-    suspend fun parseLoadMetadata(document: Document, url: String): LoadResponse? {
-        val title = document.selectFirst("div#detayPaylas div.panel-title")?.text()?.trim() ?: return null
-        val poster = fixUrlNull(
-            document.selectFirst("div#detayPaylas div.imaj img")?.let {
-                it.attr("data-src").ifBlank { null } ?: it.attr("src").ifBlank { null }
-            }
-        )
-        val description = document.selectFirst("div#detayPaylas p.ozet")?.text()?.trim()
-        val year = document.selectFirst("div#detayPaylas a[href*='yil/']")?.attr("href")?.substringAfter("yil/")?.filter { it.isDigit() }?.take(4)?.toIntOrNull()
-        val tags = document.select("div#animedetay a[href*='anime-turu']").map { it.text().trim() }.filter { it.isNotBlank() }
-        val score = document.selectFirst("span.puan")?.text()?.trim()
-
-        val bolumlerUrl = fixUrlNull(document.selectFirst("a[data-url*='ajax/bolumler&animeId=']")?.attr("data-url"))
-        val episodes = mutableListOf<Episode>()
-
-        if (bolumlerUrl != null) {
-            val token = document.selectFirst("meta[name='_token']")?.attr("content") ?: ""
-            val bolumlerDoc = app.get(
-                bolumlerUrl,
-                headers = mapOf(
-                    "X-Requested-With" to "XMLHttpRequest",
-                    "token" to token,
-                    "Referer" to url
-                ),
-                cookies = mapOf("yasOnay" to "1")
-            ).document
-
-            bolumlerDoc.select("div#bolum-list li").forEach { it ->
-                val epLinkEl = it.selectFirst("a[href*='/video/']") ?: return@forEach
-                val epHref = fixUrlNull(epLinkEl.attr("href")) ?: return@forEach
-                val epName = it.selectFirst("span.bolumAdi")?.text()?.trim() ?: epLinkEl.text().trim()
-                val epTitle = epLinkEl.attr("title").trim()
-                val epNum = Regex("(\\d+)\\.\\s*Bölüm").find(epTitle)?.groupValues?.get(1)?.toIntOrNull()
-                    ?: Regex("-?(\\d+)-bolum").find(epHref)?.groupValues?.get(1)?.toIntOrNull() ?: 1
-
-                episodes.add(
-                    newEpisode(epHref) {
-                        this.name = epName
-                        this.season = 1
-                        this.episode = epNum
-                    }
-                )
-            }
-        }
-
-        return newTvSeriesLoadResponse(title, url, TvType.Anime, episodes) {
-            this.posterUrl = poster
-            this.plot = description
-            this.year = year
-            this.tags = tags
-            this.score = Score.from10(score)
-        }
-    }
-
-    private data class CryptoJsPayload(
-        @JsonProperty("ct") val ct: String? = null,
-        @JsonProperty("iv") val iv: String? = null,
-        @JsonProperty("s") val s: String? = null
-    )
-
-    private fun hexStringToByteArray(s: String): ByteArray {
-        val len = s.length
-        val data = ByteArray(len / 2)
-        var i = 0
-        while (i < len) {
-            data[i / 2] = ((Character.digit(s[i], 16) shl 4) + Character.digit(s[i + 1], 16)).toByte()
-            i += 2
-        }
-        return data
-    }
-
-    private fun evpBytesToKey(password: ByteArray, salt: ByteArray, keyLen: Int, ivLen: Int): Pair<ByteArray, ByteArray> {
-        val md5 = MessageDigest.getInstance("MD5")
-        var currentHash = ByteArray(0)
-        var concatenated = ByteArray(0)
-        while (concatenated.size < keyLen + ivLen) {
-            md5.reset()
-            md5.update(currentHash)
-            md5.update(password)
-            md5.update(salt)
-            currentHash = md5.digest()
-            concatenated += currentHash
-        }
-        val key = concatenated.copyOfRange(0, keyLen)
-        val iv = concatenated.copyOfRange(keyLen, keyLen + ivLen)
-        return Pair(key, iv)
-    }
-
-    private fun iframe2AesLink(iframe: String): String? {
-        return try {
-            val aesDataRaw = iframe.substringAfter("embed/#/url/").substringBefore("?status")
-            val aesJson = String(Base64.getDecoder().decode(aesDataRaw), Charsets.UTF_8)
-            val payload = AppUtils.tryParseJson<CryptoJsPayload>(aesJson) ?: return null
-
-            val ct = Base64.getDecoder().decode(payload.ct ?: return null)
-            val salt = hexStringToByteArray(payload.s ?: return null)
-            val passphrase = "710^8A@3@>T2}#zN5xK?kR7KNKb@-A!LzYL5~M1qU0UfdWsZoBm4UUat%}ueUv6E--*hDPPbH7K2bp9^3o41hw,khL:}Kx8080@M".toByteArray(Charsets.UTF_8)
-
-            val (key, derivedIv) = evpBytesToKey(passphrase, salt, 32, 16)
-            val iv = payload.iv?.let { hexStringToByteArray(it) } ?: derivedIv
-
-            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
-            val decrypted = String(cipher.doFinal(ct), Charsets.UTF_8).replace("\\", "").replace("\"", "").trim()
-
-            fixUrlNull(decrypted)
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    private suspend fun resolveIframesAndExtract(
-        doc: Document,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ) {
-        val iframes = doc.select("iframe").mapNotNull { fixUrlNull(it.attr("src")) }
-        for (rawFrame in iframes) {
-            val frameLink = if (rawFrame.contains("embed/#/url/")) iframe2AesLink(rawFrame) else rawFrame
-            if (frameLink != null) {
-                try {
-                    loadExtractor(frameLink, "${mainUrl}/", subtitleCallback, callback)
-                } catch (_: Exception) {}
-            }
-        }
-    }
-
-    private suspend fun processVideosecUrl(
-        url: String,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ) {
-        try {
-            val doc = app.get(
-                url,
-                headers = mapOf(
-                    "X-Requested-With" to "XMLHttpRequest",
-                    "Referer" to "${mainUrl}/"
-                )
-            ).document
-
-            // 1. Direct iframes in this response
-            resolveIframesAndExtract(doc, subtitleCallback, callback)
-
-            // 2. Secondary/nested buttons (e.g. video hosts under fansub selection)
-            val nestedButtons = doc.select("button[onclick*='ajax/videosec']")
-            for (nestedBtn in nestedButtons) {
-                val onclick = nestedBtn.attr("onclick")
-                val subPath = onclick.substringAfter("IndexIcerik('").substringBefore("'")
-                val nestedUrl = fixUrlNull(subPath) ?: continue
-                if (nestedUrl != url) {
-                    try {
-                        val hostDoc = app.get(
-                            nestedUrl,
-                            headers = mapOf(
-                                "X-Requested-With" to "XMLHttpRequest",
-                                "Referer" to "${mainUrl}/"
-                            )
-                        ).document
-                        resolveIframesAndExtract(hostDoc, subtitleCallback, callback)
-                    } catch (_: Exception) {}
+        val items = when (request.data) {
+            "popular" -> {
+                val availablePopular = if (allSlugs.isNotEmpty()) {
+                    POPULAR_SLUGS.filter { allSlugs.contains(it) }
+                } else {
+                    POPULAR_SLUGS
+                }
+                availablePopular.map { slug ->
+                    newAnimeSearchResponse(slugToTitle(slug), "$ARCHIVE_RAW/$slug", TvType.Anime)
                 }
             }
-        } catch (_: Exception) {}
+            "all" -> {
+                val pageSize = 30
+                val startIndex = (page - 1) * pageSize
+                if (startIndex < allSlugs.size) {
+                    val pagedSlugs = allSlugs.drop(startIndex).take(pageSize)
+                    pagedSlugs.map { slug ->
+                        newAnimeSearchResponse(slugToTitle(slug), "$ARCHIVE_RAW/$slug", TvType.Anime)
+                    }
+                } else {
+                    emptyList()
+                }
+            }
+            else -> emptyList()
+        }
+
+        return newHomePageResponse(
+            HomePageList(request.name, items),
+            hasNext = (request.data == "all" && (page * 30) < allSlugs.size)
+        )
     }
+
+    // -------------------------------------------------------------------------
+    // Arama
+    // -------------------------------------------------------------------------
+
+    override suspend fun search(query: String): List<SearchResponse> {
+        val cleanQuery = query.trim().lowercase()
+        if (cleanQuery.isBlank()) return emptyList()
+
+        val slugQuery = cleanQuery.replace(Regex("""\s+"""), "-")
+        val allSlugs = getAnimeSlugs()
+
+        val matchedSlugs = allSlugs.filter { slug ->
+            slug.contains(slugQuery) || slug.replace("-", " ").contains(cleanQuery)
+        }.take(30)
+
+        return matchedSlugs.map { slug ->
+            newAnimeSearchResponse(slugToTitle(slug), "$ARCHIVE_RAW/$slug", TvType.Anime)
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Detay & Bölüm Listesi
+    // -------------------------------------------------------------------------
+
+    override suspend fun load(url: String): LoadResponse {
+        val slug = url.trimEnd('/').substringAfterLast('/')
+        val animeBase = "$ARCHIVE_RAW/$slug"
+
+        // 1. info.json Çek
+        var title = slugToTitle(slug)
+        var description: String? = null
+        val tags = mutableListOf<String>()
+        var score: Double? = null
+
+        try {
+            val infoText = app.get("$animeBase/info.json", headers = commonHeaders, timeout = 10).text
+            val info = JSONObject(infoText)
+
+            val altTitle = info.optString("Japonca").takeIf { it.isNotBlank() }
+            if (!altTitle.isNullOrBlank() && !altTitle.equals("?????", ignoreCase = true)) {
+                title = "$title ($altTitle)"
+            }
+
+            description = info.optString("Özet").takeIf { it.isNotBlank() }
+                ?: info.optString("ozet").takeIf { it.isNotBlank() }
+
+            val genresArr = info.optJSONArray("Anime Türü") ?: info.optJSONArray("genres")
+            if (genresArr != null) {
+                for (i in 0 until genresArr.length()) {
+                    val g = genresArr.optString(i).trim()
+                    if (g.isNotBlank()) tags.add(g)
+                }
+            }
+
+            val scoreStr = info.optString("Puanı").takeIf { it.isNotBlank() }
+                ?: info.optString("puani").takeIf { it.isNotBlank() }
+            score = scoreStr?.toDoubleOrNull()
+        } catch (_: Exception) { }
+
+        // 2. bolumler.json Çek
+        val episodes = mutableListOf<Episode>()
+        try {
+            val epsText = app.get("$animeBase/bolumler.json", headers = commonHeaders, timeout = 10).text
+            val epsArr = JSONArray(epsText)
+
+            for (i in 0 until epsArr.length()) {
+                val epItem = epsArr.optJSONArray(i) ?: continue
+                val epSlug = epItem.optString(0)
+                val epName = epItem.optString(1).takeIf { it.isNotBlank() } ?: "Bölüm ${i + 1}"
+                if (epSlug.isBlank()) continue
+
+                val epNum = Regex("""(\d+)""").find(epSlug)?.groupValues?.get(1)?.toIntOrNull() ?: (i + 1)
+                val epDataUrl = "$animeBase/$epSlug.json"
+
+                episodes.add(newEpisode(epDataUrl) {
+                    this.name = epName
+                    this.episode = epNum
+                    this.season = 1
+                })
+            }
+        } catch (_: Exception) { }
+
+        // 3. AniList Karakterler, Seslendirmenler, HD Afiş ve Banner
+        val searchCandidate = slugToTitle(slug)
+        val (actors, banner, aniListPoster, aniListScore) = fetchAniListMetadata(searchCandidate)
+
+        val finalScore = score ?: aniListScore
+
+        return newAnimeLoadResponse(title, url, TvType.Anime) {
+            this.posterUrl = aniListPoster
+            this.backgroundPosterUrl = banner
+            this.plot = description
+            this.tags = tags
+            finalScore?.let { this.score = Score.from10(it) }
+            if (actors.isNotEmpty()) {
+                addActors(actors)
+            }
+            addEpisodes(DubStatus.Subbed, episodes)
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Video Linkleri & Oynatıcılar
+    // -------------------------------------------------------------------------
 
     override suspend fun loadLinks(
         data: String,
@@ -255,26 +219,142 @@ class TurkAnime : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        var found = false
-        val wrappedCallback: (ExtractorLink) -> Unit = { link ->
-            found = true
-            callback(link)
+        // data = "$ARCHIVE_RAW/$slug/$epSlug.json"
+        val playersJsonText = try {
+            app.get(data, headers = commonHeaders, timeout = 10).text
+        } catch (_: Exception) {
+            return false
         }
 
-        val document = app.get(data).document
-
-        // Direct iframes on page
-        resolveIframesAndExtract(document, subtitleCallback, wrappedCallback)
-
-        // Buttons (fansubs or direct video hosts)
-        val buttons = document.select("button[onclick*='ajax/videosec']")
-        for (button in buttons) {
-            val onclick = button.attr("onclick")
-            val subPath = onclick.substringAfter("IndexIcerik('").substringBefore("'")
-            val buttonLink = fixUrlNull(subPath) ?: continue
-            processVideosecUrl(buttonLink, subtitleCallback, wrappedCallback)
+        val playersArr = try {
+            JSONArray(playersJsonText)
+        } catch (_: Exception) {
+            return false
         }
 
-        return found
+        data class PlayerEntry(
+            val player: String,
+            val fansub: String,
+            val url: String
+        )
+
+        val entries = mutableListOf<PlayerEntry>()
+
+        for (i in 0 until playersArr.length()) {
+            val obj = playersArr.optJSONObject(i) ?: continue
+            val videoUrl = obj.optString("url").trim()
+            if (videoUrl.isBlank() || !videoUrl.startsWith("http")) continue
+
+            val player = obj.optString("player").takeIf { it.isNotBlank() } ?: "Sunucu"
+            val fansub = obj.optString("fansub").takeIf { it.isNotBlank() } ?: "Varsayılan"
+            entries.add(PlayerEntry(player, fansub, videoUrl))
+        }
+
+        // Öncelik Sıralaması: Sibnet, Voe, Dailymotion, Ok.ru, Gdrive, Mp4Upload, Diğerleri
+        val sortedEntries = entries.sortedByDescending { (player, _, _) ->
+            val p = player.lowercase()
+            when {
+                p.contains("sibnet") -> 100
+                p.contains("voe") -> 95
+                p.contains("dailymotion") -> 90
+                p.contains("odnoklassniki") || p.contains("ok.ru") || p.contains("okru") -> 85
+                p.contains("gdrive") || p.contains("drive.google") -> 80
+                p.contains("mp4upload") -> 75
+                p.contains("dood") -> 70
+                p.contains("sendvid") -> 65
+                p.contains("cloudvideo") -> 60
+                else -> 50
+            }
+        }
+
+        val extractedUrls = mutableSetOf<String>()
+
+        for (entry in sortedEntries) {
+            val rawUrl = entry.url
+            if (!extractedUrls.add(rawUrl)) continue
+
+            // Doğrudan M3U8 veya MP4 ise
+            if (rawUrl.contains(".m3u8") || rawUrl.contains(".mp4")) {
+                callback(
+                    newExtractorLink(
+                        source = name,
+                        name = "$name [${entry.player} - ${entry.fansub}]",
+                        url = rawUrl,
+                        type = if (rawUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                    )
+                )
+                continue
+            }
+
+            // Standart Extractor Oynatıcıları (Sibnet, Odnoklassniki, Voe, Dailymotion, Gdrive, Mp4upload, vb.)
+            try {
+                loadExtractor(rawUrl, mainUrl, subtitleCallback, callback)
+            } catch (_: Exception) { }
+        }
+
+        return extractedUrls.isNotEmpty()
     }
+
+    // -------------------------------------------------------------------------
+    // AniList Karakter & Banner & HD Afiş Zenginleştirme
+    // -------------------------------------------------------------------------
+
+    private suspend fun fetchAniListMetadata(searchTitle: String): Quadruple<List<Actor>, String?, String?, Double?> {
+        val actors = mutableListOf<Actor>()
+        var banner: String? = null
+        var cover: String? = null
+        var score: Double? = null
+        try {
+            val queryStr = """
+                query (${'$'}search: String) {
+                  Media (search: ${'$'}search, type: ANIME) {
+                    bannerImage
+                    coverImage { extraLarge large }
+                    averageScore
+                    characters (perPage: 6, sort: ROLE) {
+                      edges {
+                        node { name { full } image { medium } }
+                      }
+                    }
+                  }
+                }
+            """.trimIndent()
+            val payload = JSONObject().apply {
+                put("query", queryStr)
+                put("variables", JSONObject().apply { put("search", searchTitle) })
+            }
+            val requestBody = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val resp = app.post(
+                "https://graphql.anilist.co",
+                headers = mapOf("User-Agent" to "Mozilla/5.0"),
+                requestBody = requestBody,
+                timeout = 4
+            ).text
+            val m = JSONObject(resp).optJSONObject("data")?.optJSONObject("Media")
+            if (m != null) {
+                banner = m.optString("bannerImage").takeIf { it.isNotBlank() }
+                val coverObj = m.optJSONObject("coverImage")
+                cover = coverObj?.optString("extraLarge")?.takeIf { it.isNotBlank() }
+                    ?: coverObj?.optString("large")?.takeIf { it.isNotBlank() }
+
+                val avg = m.optDouble("averageScore")
+                if (!avg.isNaN() && avg > 0.0) {
+                    score = avg / 10.0
+                }
+                val edges = m.optJSONObject("characters")?.optJSONArray("edges")
+                if (edges != null) {
+                    for (i in 0 until edges.length()) {
+                        val edge = edges.optJSONObject(i) ?: continue
+                        val node = edge.optJSONObject("node") ?: continue
+                        val name = node.optJSONObject("name")?.optString("full")?.takeIf { it.isNotBlank() } ?: continue
+                        val img = node.optJSONObject("image")?.optString("medium")?.takeIf { it.isNotBlank() }
+                        actors.add(Actor(name, img))
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+        return Quadruple(actors, banner, cover, score)
+    }
+
+    private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
 }
