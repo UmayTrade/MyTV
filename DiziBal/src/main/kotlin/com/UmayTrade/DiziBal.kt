@@ -9,7 +9,7 @@ import org.json.JSONObject
 import java.net.URLEncoder
 
 class DiziBal : MainAPI() {
-    override var mainUrl = "https://dizibal.com"
+    override var mainUrl = "https://dizibal.org"
     override var name = "DiziBal"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
     override var lang = "tr"
