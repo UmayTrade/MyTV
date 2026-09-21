@@ -1,6 +1,6 @@
 // ! Bu araç @kraptor123 tarafından yazılmıştır.
 
-package com.kraptor
+package com.Blockades
 
 import android.util.Log
 import com.fasterxml.jackson.annotation.JsonProperty
