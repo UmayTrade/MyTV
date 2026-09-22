@@ -1,13 +1,13 @@
 // ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
 
-package com.UmayTrade
+package com.keyiflerolsun
 
 import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
 
-class DiziPalOriginal : MainAPI() {
+class DiziPal : MainAPI() {
     override var mainUrl              = "https://dizipal2133.com"
     override var name                 = "DiziPal"
     override val hasMainPage          = true
