@@ -8,7 +8,7 @@ import org.jsoup.nodes.Element
 class AnimeWorld : MainAPI() {
     override var mainUrl = "https://animeworld.ac"
     override var name = "AnimeWorld"
-    override var lang = "it" // Veya "tr", sitenin diline göre değiştirebilirsiniz
+    override var lang = "it"
     override val hasMainPage = true
     override val hasQuickSearch = true
     override val supportedTypes = setOf(
@@ -22,7 +22,7 @@ class AnimeWorld : MainAPI() {
         "$mainUrl/trending?page=" to "Trendler"
     )
 
-    override async fun getMainPage(
+    override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
     ): HomePageResponse {
@@ -31,7 +31,6 @@ class AnimeWorld : MainAPI() {
             it.toMainPageResult()
         }
         
-        // Sayfalama kontrolü: Eğer "Next" veya sonraki sayfa butonu yoksa hasNext = false olur
         val hasNext = document.select("a.page-link[rel=next], ul.pagination li.active + li").isNotEmpty()
         
         return newHomePageResponse(
@@ -44,13 +43,11 @@ class AnimeWorld : MainAPI() {
         val title = this.selectFirst("a.name, a.title, .film-detail .film-name a")?.text()?.trim() ?: return null
         val href = fixUrl(this.selectFirst("a")?.attr("href") ?: return null)
         
-        // AVIF/WEBP uzantılı veya protokolü eksik görselleri düzeltme
         var posterUrl = this.selectFirst("img")?.getImageUrl()
         if (posterUrl != null && posterUrl.startsWith("//")) {
             posterUrl = "https:$posterUrl"
         }
 
-        // Türü dinamik belirleme (Dizi / Film)
         val isMovie = this.select(".badge, .type").text().contains("Movie", ignoreCase = true)
         val type = if (isMovie) TvType.AnimeMovie else TvType.Anime
 
@@ -59,14 +56,14 @@ class AnimeWorld : MainAPI() {
         }
     }
 
-    override async fun search(query: String): List<SearchResponse> {
+    override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get("$mainUrl/search?keyword=$query").document
         return document.select("div.film-list div.item, div.archive-page div.item").mapNotNull {
             it.toMainPageResult()
         }
     }
 
-    override async fun load(url: String): LoadResponse {
+    override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
 
         val title = document.selectFirst("h1.title, h1.entry-title")?.text()?.trim() ?: ""
@@ -75,7 +72,6 @@ class AnimeWorld : MainAPI() {
         val genre = document.select("div.genres a, div.genre a").map { it.text() }
         val year = document.selectFirst("div.year, span.release-date")?.text()?.toIntOrNull()
 
-        // Bölüm/Server Listesi
         val episodes = mutableListOf<Episode>()
         
         val epElements = document.select("ul.episodes-list li a, div.episodes a")
@@ -91,7 +87,6 @@ class AnimeWorld : MainAPI() {
                 )
             }
         } else {
-            // Eğer doğrudan tek bir film veya video sayfasıysa
             episodes.add(
                 newEpisode(url) {
                     this.name = title
@@ -109,15 +104,14 @@ class AnimeWorld : MainAPI() {
         }
     }
 
-    override async fun loadLinks(
+    override suspend fun loadLinks(
         data: String,
         isCdn: Boolean,
-        handler: PlaylistUtils,
-        videoTemplate: (ExtractorLink) -> Unit
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
     ): Boolean {
         val response = app.get(data, allowRedirects = false)
         
-        // Redirect (Yönlendirme) kontrolü ve Null-Safety koruması
         val locationHeader = response.headers["Location"] ?: response.headers["location"]
         val targetUrl = if (!locationHeader.isNullOrEmpty()) {
             fixUrl(locationHeader)
@@ -127,20 +121,18 @@ class AnimeWorld : MainAPI() {
 
         val document = if (targetUrl != data) app.get(targetUrl).document else response.document
 
-        // Sayfa içindeki oynatıcı (iframe / embed / video) bağlantılarını çekme
         val iframeSrc = document.select("iframe[src], div.player iframe").attr("data-src")
             .ifEmpty { document.select("iframe[src]").attr("src") }
 
         if (iframeSrc.isNotEmpty()) {
             val fixedIframe = fixUrl(iframeSrc)
-            loadExtractor(fixedIframe, data, videoTemplate)
+            loadExtractor(fixedIframe, subtitleCallback, callback)
             return true
         }
 
         return false
     }
 
-    // Görsel URL'sini alma yardımcı fonksiyonu
     private fun Element.getImageUrl(): String? {
         return this.attr("data-src").ifEmpty {
             this.attr("data-lazy-src").ifEmpty {
