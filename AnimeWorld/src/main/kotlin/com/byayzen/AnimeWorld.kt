@@ -1,148 +1,151 @@
-// ! Bu araç @ByAyzen tarafından | @cs-karma için yazılmıştır.
-
 package com.byayzen
 
-import android.util.Log
-import com.fasterxml.jackson.annotation.JsonProperty
-import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
-import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
-import org.jsoup.nodes.Document
+import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.loadExtractor
+import org.jsoup.nodes.Element
 
 class AnimeWorld : MainAPI() {
     override var mainUrl = "https://animeworld.ac"
     override var name = "AnimeWorld"
+    override var lang = "it" // Veya "tr", sitenin diline göre değiştirebilirsiniz
     override val hasMainPage = true
-    override var lang = "it"
-    override val hasQuickSearch = false
-    override val supportedTypes = setOf(TvType.Anime)
-    //Movie, AnimeMovie, TvSeries, Cartoon, Anime, OVA, Torrent, Documentary, AsianDrama, Live, NSFW, Others, Music, AudioBook, CustomMedia, Audio, Podcast,
-
-    override val mainPage = mainPageOf(
-        "${mainUrl}/updated" to "Nuovi Episodi",
-        "${mainUrl}/animes" to "Anime",
-        "${mainUrl}/ongoing" to "In Corso",
-        "${mainUrl}/movies" to "Film Anime"
+    override val hasQuickSearch = true
+    override val supportedTypes = setOf(
+        TvType.Anime,
+        TvType.AnimeMovie,
+        TvType.OVA
     )
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page == 1) request.data else "${request.data}?page=$page"
-        val document = app.get(url).document
-        val home = document.select("div.film-list div.item").mapNotNull { it.toMainPageResult() }
+    override val mainPage = mainPageOf(
+        "$mainUrl/az-list?page=" to "Tüm Animeler",
+        "$mainUrl/trending?page=" to "Trendler"
+    )
 
-        return newHomePageResponse(request.name, home, hasNext = true)
+    override async fun getMainPage(
+        page: Int,
+        request: MainPageRequest
+    ): HomePageResponse {
+        val document = app.get("${request.data}$page").document
+        val home = document.select("div.film-list div.item, div.archive-page div.item").mapNotNull {
+            it.toMainPageResult()
+        }
+        
+        // Sayfalama kontrolü: Eğer "Next" veya sonraki sayfa butonu yoksa hasNext = false olur
+        val hasNext = document.select("a.page-link[rel=next], ul.pagination li.active + li").isNotEmpty()
+        
+        return newHomePageResponse(
+            list = HomePageList(request.name, home),
+            hasNext = hasNext
+        )
     }
 
     private fun Element.toMainPageResult(): SearchResponse? {
-        val titleElement = this.selectFirst("a.name") ?: return null
-        val title = titleElement.text() ?: return null
-        val href = fixUrlNull(titleElement.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("src"))
-        val isDub = this.selectFirst("div.status div.dub") != null
+        val title = this.selectFirst("a.name, a.title, .film-detail .film-name a")?.text()?.trim() ?: return null
+        val href = fixUrl(this.selectFirst("a")?.attr("href") ?: return null)
+        
+        // AVIF/WEBP uzantılı veya protokolü eksik görselleri düzeltme
+        var posterUrl = this.selectFirst("img")?.getImageUrl()
+        if (posterUrl != null && posterUrl.startsWith("//")) {
+            posterUrl = "https:$posterUrl"
+        }
 
-        return newAnimeSearchResponse(title, href, TvType.AnimeMovie) {
+        // Türü dinamik belirleme (Dizi / Film)
+        val isMovie = this.select(".badge, .type").text().contains("Movie", ignoreCase = true)
+        val type = if (isMovie) TvType.AnimeMovie else TvType.Anime
+
+        return newAnimeSearchResponse(title, href, type) {
             this.posterUrl = posterUrl
-            addDubStatus(isDub)
         }
     }
 
-    override suspend fun search(query: String, page: Int): SearchResponseList {
-        val url = if (page == 1) {
-            "${mainUrl}/filter?sort=0&keyword=${query}"
-        } else {
-            "${mainUrl}/filter?sort=0&keyword=${query}&page=$page"
+    override async fun search(query: String): List<SearchResponse> {
+        val document = app.get("$mainUrl/search?keyword=$query").document
+        return document.select("div.film-list div.item, div.archive-page div.item").mapNotNull {
+            it.toMainPageResult()
         }
-
-        val results = app.get(url).document.select("div.film-list div.item")
-            .mapNotNull { it.toMainPageResult() }
-
-        return newSearchResponseList(results, hasNext = true)
     }
 
-    override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query)
+    override async fun load(url: String): LoadResponse {
+        val document = app.get(url).document
 
-    override suspend fun load(url: String): LoadResponse? {
-        val realUrl = app.get(url, allowRedirects = false).headers["Location"] ?: return null
-        val document = app.get(realUrl).document
+        val title = document.selectFirst("h1.title, h1.entry-title")?.text()?.trim() ?: ""
+        val poster = document.selectFirst("div.poster img, div.thumb img")?.getImageUrl()
+        val description = document.selectFirst("div.desc, div.synopsis, div.storyline")?.text()?.trim()
+        val genre = document.select("div.genres a, div.genre a").map { it.text() }
+        val year = document.selectFirst("div.year, span.release-date")?.text()?.toIntOrNull()
 
-        val title = document.selectFirst("h2.title")?.text()?.trim() ?: return null
-        val poster = fixUrlNull(document.selectFirst("div.thumb img")?.attr("src"))
-        val year = document.select("dl.meta dd")
-            .firstOrNull { it.text().contains("20") || it.text().contains("19") }?.text()?.trim()
-            ?.takeLast(4)?.toIntOrNull()
-        val tags = document.select("dl.meta dd a[href*=/genre/]").map { it.text() }
-        val rating = document.selectFirst("span#average-vote")?.text()?.trim()?.toDoubleOrNull()
-        val duration =
-            document.select("dl.meta dd").firstOrNull { it.text().contains("min/ep") }?.text()
-                ?.trim()?.split(" ")?.firstOrNull()?.toIntOrNull()
-        val plot = document.selectFirst("div.desc")?.text()?.trim()
-        val status = when (document.select("dl.meta dd a[href*=/status/]").text().trim()) {
-            "Finito" -> ShowStatus.Completed
-            "In corso" -> ShowStatus.Ongoing
-            else -> null
-        }
-
-        val episodes = document.select("ul.episodes li.episode a").mapNotNull {
-            val epId = it.attr("data-id") ?: return@mapNotNull null
-            val epNum = it.attr("data-episode-num").toIntOrNull() ?: return@mapNotNull null
-            newEpisode(epId) {
-                this.episode = epNum
+        // Bölüm/Server Listesi
+        val episodes = mutableListOf<Episode>()
+        
+        val epElements = document.select("ul.episodes-list li a, div.episodes a")
+        if (epElements.isNotEmpty()) {
+            epElements.forEachIndexed { index, element ->
+                val epHref = fixUrl(element.attr("href"))
+                val epName = element.text().trim()
+                episodes.add(
+                    newEpisode(epHref) {
+                        this.name = if (epName.isNotEmpty()) epName else "Bölüm ${index + 1}"
+                        this.episode = index + 1
+                    }
+                )
             }
-        }
-
-        if (episodes.isEmpty()) return null
-
-        return newTvSeriesLoadResponse(title, realUrl, TvType.Anime, episodes) {
-            this.posterUrl = poster
-            this.year = year
-            this.tags = tags
-            this.plot = plot
-            this.duration = duration
-            this.showStatus = status
-            this.recommendations = recommendations(document)
-            rating?.let { this.score = Score.from10(it) }
-        }
-    }
-
-    private fun recommendations(document: Document): List<SearchResponse> {
-        return document.select("div.interesting div.item").mapNotNull {
-            val onerititle = it.selectFirst("a.name")?.text() ?: return@mapNotNull null
-            val onerihref = fixUrlNull(it.selectFirst("a")?.attr("href")) ?: return@mapNotNull null
-            val oneriposter = fixUrlNull(it.selectFirst("img")?.attr("src"))
-            newAnimeSearchResponse(onerititle, onerihref, TvType.Anime) { this.posterUrl = oneriposter }
-        }
-    }
-
-    override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        Log.d("Ayzen_$name", "data = $data")
-
-        val realData =
-            app.get(data, allowRedirects = false).headers["Location"]?.substringAfterLast("/")
-                ?: return false
-        val response =
-            app.get("${mainUrl}/api/episode/info?id=$realData&alt=0").parsedSafe<EpisodeInfo>()
-                ?: return false
-
-        callback(
-            newExtractorLink(
-                source = name,
-                name = name,
-                url = response.grabber,
-                type = ExtractorLinkType.VIDEO
+        } else {
+            // Eğer doğrudan tek bir film veya video sayfasıysa
+            episodes.add(
+                newEpisode(url) {
+                    this.name = title
+                    this.episode = 1
+                }
             )
-        )
+        }
 
-        return true
+        return newAnimeLoadResponse(title, url, TvType.Anime) {
+            this.posterUrl = poster
+            this.plot = description
+            this.tags = genre
+            this.year = year
+            addEpisodes(DubStatus.Subbed, episodes)
+        }
     }
 
-    data class EpisodeInfo(
-        @JsonProperty("grabber") val grabber: String
-    )
+    override async fun loadLinks(
+        data: String,
+        isCdn: Boolean,
+        handler: PlaylistUtils,
+        videoTemplate: (ExtractorLink) -> Unit
+    ): Boolean {
+        val response = app.get(data, allowRedirects = false)
+        
+        // Redirect (Yönlendirme) kontrolü ve Null-Safety koruması
+        val locationHeader = response.headers["Location"] ?: response.headers["location"]
+        val targetUrl = if (!locationHeader.isNullOrEmpty()) {
+            fixUrl(locationHeader)
+        } else {
+            data
+        }
+
+        val document = if (targetUrl != data) app.get(targetUrl).document else response.document
+
+        // Sayfa içindeki oynatıcı (iframe / embed / video) bağlantılarını çekme
+        val iframeSrc = document.select("iframe[src], div.player iframe").attr("data-src")
+            .ifEmpty { document.select("iframe[src]").attr("src") }
+
+        if (iframeSrc.isNotEmpty()) {
+            val fixedIframe = fixUrl(iframeSrc)
+            loadExtractor(fixedIframe, data, videoTemplate)
+            return true
+        }
+
+        return false
+    }
+
+    // Görsel URL'sini alma yardımcı fonksiyonu
+    private fun Element.getImageUrl(): String? {
+        return this.attr("data-src").ifEmpty {
+            this.attr("data-lazy-src").ifEmpty {
+                this.attr("src")
+            }
+        }.takeIf { it.isNotEmpty() }
+    }
 }
