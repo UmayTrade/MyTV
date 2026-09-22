@@ -18,7 +18,7 @@ class AnimeJara : MainAPI() {
     )
 
     // ========================
-    // HOME (NO TOCADO)
+    // HOME
     // ========================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val doc = app.get(mainUrl, headers = headers).document
@@ -45,7 +45,7 @@ class AnimeJara : MainAPI() {
     }
 
     // ========================
-    // SEARCH (NO TOCADO)
+    // SEARCH
     // ========================
     override suspend fun search(query: String): List<SearchResponse> {
         val doc = app.get("$mainUrl/?s=$query", headers = headers).document
@@ -68,7 +68,7 @@ class AnimeJara : MainAPI() {
     }
 
     // ========================
-    // LOAD (EPISODIOS FIX)
+    // LOAD
     // ========================
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url, headers = headers).document
@@ -84,7 +84,7 @@ class AnimeJara : MainAPI() {
 
         val episodes = mutableListOf<Episode>()
 
-// 🔥 MÉTODO UNIVERSAL (EL QUE SÍ FUNCIONA)
+        // MÉTODO UNIVERSAL
         doc.select("a[href*=/episode/]").forEach { ep ->
 
             val epUrl = ep.attr("href")
@@ -105,12 +105,12 @@ class AnimeJara : MainAPI() {
             )
         }
 
-// ❗ eliminar duplicados
+        // Eliminar duplicados
         val cleanEpisodes = episodes
             .distinctBy { it.data }
             .toMutableList()
 
-// fallback
+        // Fallback
         if (cleanEpisodes.isEmpty()) {
             val slug = url.substringAfterLast("/").removeSuffix("/")
             val episodeUrl = "$mainUrl/episode/$slug-1x1/"
@@ -123,7 +123,7 @@ class AnimeJara : MainAPI() {
             )
         }
 
-        // 🔥 2. JS (TEMPORADAS_DATA)
+        // JS (TEMPORADAS_DATA)
         if (episodes.isEmpty()) {
             val script = doc.selectFirst("script:contains(TEMPORADAS_DATA)")?.data()
 
@@ -152,7 +152,7 @@ class AnimeJara : MainAPI() {
             }
         }
 
-        // 🔥 fallback final
+        // Fallback final
         if (episodes.isEmpty()) {
             val slug = url.substringAfterLast("/").removeSuffix("/")
             val episodeUrl = "$mainUrl/episode/$slug-1x1/"
@@ -173,7 +173,7 @@ class AnimeJara : MainAPI() {
     }
 
     // ========================
-    // LOAD LINKS (REPRODUCTOR FIX)
+    // LOAD LINKS
     // ========================
     override suspend fun loadLinks(
         data: String,
@@ -184,7 +184,6 @@ class AnimeJara : MainAPI() {
 
         val doc = app.get(data, headers = headers).document
 
-// 🔥 buscar cualquier iframe
         val iframe = doc.select("iframe").firstOrNull()?.attr("src") ?: return false
 
         val iframeDoc = app.get(
