@@ -1,13 +1,21 @@
+// ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
+
 package com.UmayTrade
 
+import com.fasterxml.jackson.annotation.JsonProperty
+
+
 data class DizipalSearchData(
-    var results: List<DizipalSearchItem>? = null
+    @JsonProperty("success") val success: Boolean?,
+    @JsonProperty("results") val results: List<DizipalSearchResult>?
 )
 
-data class DizipalSearchItem(
-    var title: String? = null,
-    var url: String? = null,
-    var poster: String? = null,
-    var year: Int? = null,
-    var type: String? = null
+data class DizipalSearchResult(
+    @JsonProperty("id") val id: Int?,
+    @JsonProperty("title") val title: String?,
+    @JsonProperty("year") val year: Int?,
+    @JsonProperty("type") val type: String?,
+    @JsonProperty("poster") val poster: String?,
+    @JsonProperty("url") val url: String?,
+    @JsonProperty("rating") val rating: String?
 )
