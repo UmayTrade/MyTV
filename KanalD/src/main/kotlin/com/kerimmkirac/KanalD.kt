@@ -6,7 +6,6 @@ import android.util.Log
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import org.json.JSONArray
 import org.json.JSONObject
 import java.util.*
 
@@ -24,14 +23,21 @@ class KanalD : MainAPI() {
 
     override val mainPage = mainPageOf(
         "${mainUrl}/diziler"    to "Diziler",
-        "${mainUrl}/programlar" to "Programlar"
+        "${mainUrl}/programlar" to "Programlar",
+        "${mainUrl}/retro-d"    to "Retro D"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
 
-        // Kanal D liste sayfalarında içerikler ".story-card" veya ".item" içindeki <a> linklerinde
-        val items = document.select("section.listing-holder .item, section.listing-holder .story-card, div.listing-holder > div")
+        // Kanal D liste sayfalarındaki içerik seçicileri
+        // Retro D sayfasında içerikler h2 başlıklar altındaki <a class="story-card"> linklerinde
+        val items = document.select(
+            "section.listing-holder .item, " +
+            "section.listing-holder .story-card, " +
+            "div.listing-holder > div, " +
+            "a.story-card[href*='/retro-d/']"
+        )
         val results = items.mapNotNull { it.toMainPageResult() }.distinctBy { it.url }
 
         return newHomePageResponse(
@@ -44,11 +50,15 @@ class KanalD : MainAPI() {
         val link = if (this.tagName() == "a") this else this.selectFirst("a") ?: return null
         val href = fixUrlNull(link.attr("href")) ?: return null
 
-        // Sadece dizi/program sayfalarını al (bolumler/fragmanlar vb. değil)
-        if (!href.matches(Regex(".*kanald\\.com\\.tr/[^/]+$"))) return null
+        // Sadece dizi/program/retro-d sayfalarını al
+        val isRetroD = href.contains("/retro-d/")
+        if (!isRetroD && !href.matches(Regex(".*kanald\\.com\\.tr/[^/]+$"))) return null
         if (href.contains("/bolumler") || href.contains("/fragmanlar") ||
             href.contains("/ozetler") || href.contains("/foto-galeri") ||
             href.contains("/haber") || href.contains("/oyuncular")) return null
+
+        // Retro D ana sayfasına link veren öğeleri atla
+        if (href.trimEnd('/') == "${mainUrl}/retro-d") return null
 
         // Başlık: önce figcaption > p, sonra h3.title, sonra img alt, sonra link title
         val title = this.selectFirst("figcaption p, figcaption .title, h3.title, .caption .title")?.text()?.trim()
@@ -75,12 +85,25 @@ class KanalD : MainAPI() {
 
         val allContent = mutableListOf<SearchResponse>()
         try {
-            val pagesToScan = listOf("${mainUrl}/diziler", "${mainUrl}/programlar")
+            val pagesToScan = listOf(
+                "${mainUrl}/diziler",
+                "${mainUrl}/programlar",
+                "${mainUrl}/retro-d"
+            )
             for (pageUrl in pagesToScan) {
-                val document = app.get(pageUrl).document
-                val items = document.select("section.listing-holder .item, section.listing-holder .story-card, div.listing-holder > div")
-                items.forEach { element ->
-                    element.toMainPageResult()?.let { allContent.add(it) }
+                try {
+                    val document = app.get(pageUrl).document
+                    val items = document.select(
+                        "section.listing-holder .item, " +
+                        "section.listing-holder .story-card, " +
+                        "div.listing-holder > div, " +
+                        "a.story-card[href*='/retro-d/']"
+                    )
+                    items.forEach { element ->
+                        element.toMainPageResult()?.let { allContent.add(it) }
+                    }
+                } catch (e: Exception) {
+                    Log.e("KanalD", "$pageUrl taranırken hata: ${e.message}")
                 }
             }
 
@@ -123,10 +146,17 @@ class KanalD : MainAPI() {
     private suspend fun getEpisodes(document: org.jsoup.nodes.Document, baseUrl: String): List<Episode> {
         val allEpisodes = mutableListOf<Episode>()
         try {
-            // Bölümler sayfasında ".story-card" içindeki linkler
-            val episodeLinks = document.select("section.listing-holder a.story-card, section.listing-holder a[href*='/bolumler/']")
+            // Bölümler: /bolumler linkleri, Retro D ise /retro-d/ linkleri
+            val isRetroD = baseUrl.contains("/retro-d")
+            val selector = if (isRetroD) {
+                "section.listing-holder a.story-card[href*='/retro-d/'], a.story-card[href*='/retro-d/']"
+            } else {
+                "section.listing-holder a.story-card, section.listing-holder a[href*='/bolumler/']"
+            }
 
-            val items = if (episodeLinks.isEmpty()) {
+            val episodeLinks = document.select(selector)
+
+            val items = if (episodeLinks.isEmpty() && !isRetroD) {
                 // Bölümler alt sayfasına git
                 val episodePageUrl = if (baseUrl.contains("/bolumler")) baseUrl else "$baseUrl/bolumler"
                 try {
@@ -139,10 +169,11 @@ class KanalD : MainAPI() {
 
             items.distinctBy { it.attr("href") }.forEachIndexed { index, element ->
                 val href = fixUrlNull(element.attr("href")) ?: return@forEachIndexed
-                // Aynı sayfaya link veriyorsa atla
-                if (href == baseUrl) return@forEachIndexed
+                // Ana liste sayfasına link veriyorsa atla
+                if (href.trimEnd('/') == baseUrl.trimEnd('/')) return@forEachIndexed
+                if (href.trimEnd('/') == "${mainUrl}/retro-d") return@forEachIndexed
 
-                val epName = element.selectFirst("figcaption .title, figcaption p, h3.title")?.text()?.trim()
+                val epName = element.selectFirst("figcaption .title, figcaption p, h3.title, .caption .title")?.text()?.trim()
                     ?.takeIf { it.isNotEmpty() }
                     ?: "Bölüm ${index + 1}"
 
@@ -171,7 +202,7 @@ class KanalD : MainAPI() {
             val document = app.get(data).document
             var found = false
 
-            // ★ Öncelik 1: JSON-LD içindeki VideoObject > contentUrl (Kanal D'nin asıl yöntemi)
+            // ★ Öncelik 1: JSON-LD içindeki VideoObject > contentUrl
             val ldJsonScripts = document.select("script[type=application/ld+json]")
             for (script in ldJsonScripts) {
                 val content = script.data()
