@@ -13,7 +13,7 @@ import org.json.JSONObject
 import org.jsoup.Jsoup
 
 class FilmHane : MainAPI() {
-    override var mainUrl              = "http://filmhane.shop/"
+    override var mainUrl              = "http://filmhane.tv/"
     override var name                 = "FilmHane"
     override val hasMainPage          = true
     override var lang                 = "tr"
