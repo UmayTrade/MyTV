@@ -1,6 +1,6 @@
 // ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
 
-package com.UmayTrade
+package com.keyiflerolsun
 
 import android.util.Base64
 import android.util.Log
@@ -211,7 +211,7 @@ class DiziBox : MainAPI() {
     ): Boolean {
         @Suppress("NAME_SHADOWING") var iframe = iframe
 
-        // OK.RU embed → doğrudan iframe src
+        // OK.RU embed → doğrudan iframe src (m3u8 değil, ama en azından link ver)
         if (iframe.contains("ok.ru/videoembed")) {
             callback.invoke(
                 newExtractorLink(
