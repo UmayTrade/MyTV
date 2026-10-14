@@ -23,16 +23,13 @@ class DiziBox : MainAPI() {
     override val hasQuickSearch       = false
     override val supportedTypes       = setOf(TvType.TvSeries)
 
-    // ! CloudFlare bypass
     override var sequentialMainPage = true
     override var sequentialMainPageDelay       = 50L
     override var sequentialMainPageScrollDelay = 50L
 
-    // ! CloudFlare v2
     private val cloudflareKiller by lazy { CloudflareKiller() }
     private val interceptor      by lazy { CloudflareInterceptor(cloudflareKiller) }
 
-    // Ortak çerezler
     private val baseCookies = mapOf(
         "LockUser"      to "true",
         "isTrustedUser" to "true",
@@ -142,35 +139,58 @@ class DiziBox : MainAPI() {
             interceptor = interceptor
         ).document
 
-        val title       = document.selectFirst("div.tv-overview h1 a")?.text()?.trim() ?: return null
-        val poster      = fixUrlNull(document.selectFirst("div.tv-overview figure img")?.attr("src"))
-        val description = document.selectFirst("div.tv-story p")?.text()?.trim()
-        val year        = document.selectFirst("a[href*='/yil/']")?.text()?.trim()?.toIntOrNull()
-        val tags        = document.select("a[href*='/tur/']").map { it.text() }
-        val actors      = document.select("a[href*='/oyuncu/']").map { Actor(it.text()) }
-        val trailer     = document.selectFirst("div.tv-overview iframe")?.attr("src")
+        // Başlık: h1.title-border metninden "Dizisi izle | DiziBOX" kısmını temizle
+        val rawTitle = document.selectFirst("h1.title-border")?.text()?.trim()
+            ?: document.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
+            ?: return null
+        val title = rawTitle
+            .replace(Regex("""\s*Dizisi izle.*$"""), "")
+            .replace(Regex("""\s*\|.*$"""), "")
+            .trim()
 
+        // Poster: div.category_image img
+        val poster = fixUrlNull(
+            document.selectFirst("div.category_image img")?.attr("src")
+                ?: document.selectFirst("meta[property='og:image']")?.attr("content")
+        )
+
+        // Açıklama: div.category_desc
+        val description = document.selectFirst("div.category_desc")?.text()?.trim()
+            ?: document.selectFirst("meta[name='description']")?.attr("content")?.trim()
+
+        // Yıl: div#icerikcat2 içinde "Yapım Yılı" span'ından sonraki text
+        val year = document.select("div#icerikcat2 div").firstOrNull {
+            it.text().contains("Yapım Yılı")
+        }?.text()?.replace(Regex(""".*Yapım Yılı\s*:\s*"""), "")?.trim()?.toIntOrNull()
+
+        // Oyuncular: div#icerikcat2 içinde "Oyuncular" span'ından sonraki text
+        val actorsText = document.select("div#icerikcat2 div").firstOrNull {
+            it.text().contains("Oyuncular")
+        }?.text()?.replace(Regex(""".*Oyuncular\s*:\s*"""), "")?.trim()
+        val actors = actorsText?.split(",")?.mapNotNull {
+            val name = it.trim()
+            if (name.isNotBlank()) Actor(name) else null
+        } ?: emptyList()
+
+        // Türler: div.genres a
+        val tags = document.select("div.genres a").map { it.text().trim() }
+
+        // Fragman: iframe.trailer-video
+        val trailer = document.selectFirst("iframe.trailer-video")?.attr("src")
+
+        // Bölümler: div#scrollbar-container div.container div.bolumust a
         val episodeList = mutableListOf<Episode>()
-        document.select("div#seasons-list a").forEach {
-            val epUrl = fixUrlNull(it.attr("href")) ?: return@forEach
-            val epDoc = app.get(
-                epUrl,
-                cookies     = baseCookies,
-                interceptor = interceptor
-            ).document
+        document.select("div#scrollbar-container div.container div.bolumust a").forEach { epElem ->
+            val epHref = fixUrlNull(epElem.attr("href")) ?: return@forEach
+            val epTitle = epElem.selectFirst("div.baslik")?.text()?.trim() ?: return@forEach
+            val epSeason = Regex("""(\d+)\. ?Sezon""").find(epTitle)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+            val epEpisode = Regex("""(\d+)\. ?Bölüm""").find(epTitle)?.groupValues?.get(1)?.toIntOrNull()
 
-            epDoc.select("article.grid-box").forEach ep@ { epElem ->
-                val epTitle   = epElem.selectFirst("div.post-title a")?.text()?.trim() ?: return@ep
-                val epHref    = fixUrlNull(epElem.selectFirst("div.post-title a")?.attr("href")) ?: return@ep
-                val epSeason  = Regex("""(\d+)\. ?Sezon""").find(epTitle)?.groupValues?.get(1)?.toIntOrNull() ?: 1
-                val epEpisode = Regex("""(\d+)\. ?Bölüm""").find(epTitle)?.groupValues?.get(1)?.toIntOrNull()
-
-                episodeList.add(newEpisode(epHref) {
-                    this.name = epTitle
-                    this.season = epSeason
-                    this.episode = epEpisode
-                })
-            }
+            episodeList.add(newEpisode(epHref) {
+                this.name = epTitle
+                this.season = epSeason
+                this.episode = epEpisode
+            })
         }
 
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeList) {
@@ -191,36 +211,24 @@ class DiziBox : MainAPI() {
     ): Boolean {
         @Suppress("NAME_SHADOWING") var iframe = iframe
 
-        if (iframe.contains("/player/king/king.php")) {
-            iframe = iframe.replace("king.php?v=", "king.php?wmode=opaque&v=")
-            val subDoc = app.get(
-                iframe,
-                referer     = data,
-                cookies     = baseCookies,
-                interceptor = interceptor
-            ).document
-            val subFrame = subDoc.selectFirst("div#Player iframe")?.attr("src") ?: return false
-
-            val iDoc          = app.get(subFrame, referer = "${mainUrl}/").text
-            val cryptData     = Regex("""CryptoJS\.AES\.decrypt\("(.*)","""").find(iDoc)?.groupValues?.get(1) ?: return false
-            val cryptPass     = Regex("""","(.*)"\);""").find(iDoc)?.groupValues?.get(1) ?: return false
-            val decryptedData = CryptoJS.decrypt(cryptPass, cryptData)
-            val decryptedDoc  = Jsoup.parse(decryptedData)
-            val vidUrl        = Regex("""file: '(.*)',""").find(decryptedDoc.html())?.groupValues?.get(1) ?: return false
-
+        // OK.RU embed → doğrudan iframe src
+        if (iframe.contains("ok.ru/videoembed")) {
             callback.invoke(
                 newExtractorLink(
                     source = this.name,
-                    name = this.name,
-                    url = vidUrl,
-                    type = ExtractorLinkType.M3U8
+                    name = "OkRu",
+                    url = iframe,
+                    type = ExtractorLinkType.VIDEO
                 ) {
-                    headers = mapOf("Referer" to vidUrl)
-                    quality = getQualityFromName("4k")
+                    headers = mapOf("Referer" to "$mainUrl/")
+                    quality = getQualityFromName("1080p")
                 }
             )
+            return true
+        }
 
-        } else if (iframe.contains("/player/moly/moly.php")) {
+        // Moly player
+        if (iframe.contains("/player/moly/moly.php")) {
             iframe = iframe.replace("moly.php?h=", "moly.php?wmode=opaque&h=")
             var subDoc = app.get(
                 iframe,
@@ -237,10 +245,44 @@ class DiziBox : MainAPI() {
             }
 
             val subFrame = subDoc.selectFirst("div#Player iframe")?.attr("src") ?: return false
+            loadExtractor(subFrame, "$mainUrl/", subtitleCallback, callback)
+            return true
+        }
 
-            loadExtractor(subFrame, "${mainUrl}/", subtitleCallback, callback)
+        // King player
+        if (iframe.contains("/player/king/king.php")) {
+            iframe = iframe.replace("king.php?v=", "king.php?wmode=opaque&v=")
+            val subDoc = app.get(
+                iframe,
+                referer     = data,
+                cookies     = baseCookies,
+                interceptor = interceptor
+            ).document
+            val subFrame = subDoc.selectFirst("div#Player iframe")?.attr("src") ?: return false
 
-        } else if (iframe.contains("/player/haydi.php")) {
+            val iDoc          = app.get(subFrame, referer = "$mainUrl/").text
+            val cryptData     = Regex("""CryptoJS\.AES\.decrypt\("(.*)","""").find(iDoc)?.groupValues?.get(1) ?: return false
+            val cryptPass     = Regex("""","(.*)"\);""").find(iDoc)?.groupValues?.get(1) ?: return false
+            val decryptedData = CryptoJS.decrypt(cryptPass, cryptData)
+            val decryptedDoc  = Jsoup.parse(decryptedData)
+            val vidUrl        = Regex("""file: '(.*)',""").find(decryptedDoc.html())?.groupValues?.get(1) ?: return false
+
+            callback.invoke(
+                newExtractorLink(
+                    source = this.name,
+                    name = "King",
+                    url = vidUrl,
+                    type = ExtractorLinkType.M3U8
+                ) {
+                    headers = mapOf("Referer" to vidUrl)
+                    quality = getQualityFromName("1080p")
+                }
+            )
+            return true
+        }
+
+        // Haydi player
+        if (iframe.contains("/player/haydi.php")) {
             iframe = iframe.replace("haydi.php?v=", "haydi.php?wmode=opaque&v=")
             var subDoc = app.get(
                 iframe,
@@ -257,10 +299,12 @@ class DiziBox : MainAPI() {
             }
 
             val subFrame = subDoc.selectFirst("div#Player iframe")?.attr("src") ?: return false
-
-            loadExtractor(subFrame, "${mainUrl}/", subtitleCallback, callback)
+            loadExtractor(subFrame, "$mainUrl/", subtitleCallback, callback)
+            return true
         }
 
+        // Diğer durumlarda doğrudan iframe'i extractor olarak dene
+        loadExtractor(iframe, "$mainUrl/", subtitleCallback, callback)
         return true
     }
 
@@ -276,22 +320,28 @@ class DiziBox : MainAPI() {
             cookies     = baseCookies,
             interceptor = interceptor
         ).document
-        var iframe = document.selectFirst("div#video-area iframe")?.attr("src") ?: return false
+
+        // Video iframe: div.video-container iframe veya div.dizialani iframe
+        var iframe = document.selectFirst("div.video-container iframe")?.attr("src")
+            ?: document.selectFirst("div.dizialani iframe")?.attr("src")
+            ?: return false
         Log.d("DZBX", "iframe » $iframe")
 
         processIframe(data, iframe, subtitleCallback, callback)
 
-        document.select("div.video-toolbar option[value]").forEach {
-            val altLink = it.attr("value")
-            val subDoc  = app.get(
+        // Alternatif kaynak sayfaları: a.post-page-numbers
+        document.select("a.post-page-numbers").forEach {
+            val altLink = fixUrlNull(it.attr("href")) ?: return@forEach
+            val subDoc = app.get(
                 altLink,
                 cookies     = baseCookies,
                 interceptor = interceptor
             ).document
-            iframe = subDoc.selectFirst("div#video-area iframe")?.attr("src") ?: return@forEach
-            Log.d("DZBX", "iframe » $iframe")
-
-            processIframe(data, iframe, subtitleCallback, callback)
+            val subIframe = subDoc.selectFirst("div.video-container iframe")?.attr("src")
+                ?: subDoc.selectFirst("div.dizialani iframe")?.attr("src")
+                ?: return@forEach
+            Log.d("DZBX", "alt iframe » $subIframe")
+            processIframe(data, subIframe, subtitleCallback, callback)
         }
 
         return true
