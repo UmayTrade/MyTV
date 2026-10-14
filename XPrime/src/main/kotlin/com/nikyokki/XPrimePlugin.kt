@@ -1,10 +1,11 @@
+// BerkStream tarafindan Nikyokki Turkish Providers deposundan derlendi (XPrime).
+// Kaynak paket: com.nikyokki -> com.berkstream.vendor.nikyokki.xprime.nikyokki
+// Bu dosyayi elle duzenleme: 'npm run vendor' her calistiginda yeniden uretilir.
 package com.nikyokki
 
-import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import android.content.Context
 
-@CloudstreamPlugin
 class XPrimePlugin: Plugin() {
     override fun load(context: Context) {
         registerMainAPI(XPrime())
