@@ -1,4 +1,4 @@
-version = 46  // ! ARTTIRILDI: Versiyon güncellendi
+version = 47  // ! ARTTIRILDI: Versiyon güncellendi
 
 cloudstream {
     authors     = listOf("keyiflerolsun", "muratcesmecioglu")
