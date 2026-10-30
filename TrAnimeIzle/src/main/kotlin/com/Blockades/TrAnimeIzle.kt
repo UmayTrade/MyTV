@@ -28,7 +28,7 @@ import android.util.Base64
  */
 class TrAnimeIzle : MainAPI() {
 
-    override var mainUrl = "https://www.tranimeizle.io"
+    override var mainUrl = "https://tranimeizle.live"
     override var name = "TrAnimeİzle"
     override val hasMainPage = true
     override var lang = "tr"
